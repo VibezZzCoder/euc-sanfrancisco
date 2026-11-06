@@ -239,6 +239,14 @@ function buildSFDetailMeshes(group, details) {
     items.forEach((it, k) => {
       mesh.setMatrixAt(k, m.compose(pos.set(it.x, it.y, it.z), q.setFromAxisAngle(up, it.ry), scl.set(it.w, it.h, it.d)));
       mesh.setColorAt(k, col.setHex(it.color));
+      const R = window.NYC.RideGeometry;
+      if (name === 'SFGarageDoors' || name === 'SFStoops') {
+        R?.addBox({ x: it.x, y: it.y, z: it.z }, { x: it.w / 2, y: it.h / 2, z: it.d / 2 }, it.ry || 0,
+          { top: true, layered: true });
+      } else if (R) {
+        // Gables/spires keep exact upward faces and bounded convex sections, not a tall AABB.
+        R.addMesh({ geometry: geo, matrixWorld: m }, 'pavement', { layered: true, sides: { maxSlices: 12 } });
+      }
     });
     mesh.name = name;
     mesh.castShadow = true;
@@ -311,6 +319,8 @@ function sfCrown(details, blk, box, o) {
   const f = tall ? 0.65 : 0.5;
   const h = tall ? Math.max(o.storey, o.crown - 3) : Math.min(o.crown / 3, 20);
   o.bucket.push({ ...box, y: top + h * 0.5, w: box.w * f, h, d: box.d * f, faces: [WALL_ENTRY, WALL_ENTRY, WALL_ENTRY, WALL_ENTRY] });
+  window.NYC.RideGeometry?.addBox({ x: box.x, y: top + h / 2, z: box.z },
+    { x: box.w * f / 2, y: h / 2, z: box.d * f / 2 }, box.ry || 0, { top: true, layered: true });
   if (tall) { pent(box.w * f * 0.6, box.d * f * 0.6, top + h, Math.min(3, o.crown - h)); return; }
   const r = Math.max(0.6, Math.min(box.w, box.d) * 0.04);
   details.spires.push({ x: box.x, y: top + h, z: box.z, w: r * 2, h: o.crown - h, d: r * 2, ry: box.ry || 0, color: 0xb8bcc0 });

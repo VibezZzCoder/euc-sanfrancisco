@@ -1,6 +1,6 @@
 (function () {
 // js/terrain.js
-// The ground's height API over the baked height field (data/terrain-<box>.bin, docs/formats.md; loaded by
+// The ground's height API over the baked height field (data/terrain-<box>.bin, provenance/formats.md; loaded by
 // data-loader.js). Pure JS, no THREE: every system that needs the ground (terrain mesh, curbs, buildings, controllers,
 // cameras, road network, traffic, pedestrians, street details) asks here. Heights are metres NAVD88 = world y.
 //

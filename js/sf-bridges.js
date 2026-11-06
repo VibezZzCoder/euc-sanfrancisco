@@ -1,7 +1,7 @@
 (function () {
 // js/sf-bridges.js
 // The Golden Gate Bridge and the Bay Bridge (P5.2), from the structure OpenStreetMap draws (GEO.bridges,
-// tools/geo-landmarks.mjs) and the published dimensions in docs/landmarks/golden-gate-bridge.md and bay-bridge.md:
+// tools/geo-landmarks.mjs) and the published dimensions in provenance/landmarks/golden-gate-bridge.md and bay-bridge.md:
 // - Golden Gate: both towers extruded from OSM's building parts as drawn (legs in tapering stages, portal struts, the
 //   concrete base), anchorages and pylons from their OSM outlines, the deck along the line through the towers from the
 //   deck ways' ends, two main cables over the leg tops, suspenders, deck lamps.
@@ -18,16 +18,18 @@ const { THREE } = window.NYC;
 const FAR_DETAIL = 3000;
 const SUSPENDER_STEP = 15.24; // m (50 ft) between suspender pairs: ESTIMATE (250 pairs over 1966 m of suspended spans is 15.7 m)
 
-// Golden Gate (docs/landmarks/golden-gate-bridge.md): the roadway 75 m over the water at the towers (227 m towers, 152 m
+// Golden Gate (provenance/landmarks/golden-gate-bridge.md): the roadway 75 m over the water at the towers (227 m towers, 152 m
 // above the roadway), 27 m wide, 67 m clearance at mid span: an 8 m deep deck if the roadway is level (ESTIMATE: the
 // camber is not in the sources); cables 0.92 m
 const GG = { road: 75, width: 27, depth: 8, cable: 0.92, saddleBelowTop: 4 /* ESTIMATE */, cableLowAboveRoad: 3 /* ESTIMATE */ };
-// Bay Bridge west span (docs/landmarks/bay-bridge.md): 67 m navigation clearance, upper deck 18 m between curbs; the
+// Bay Bridge west span (provenance/landmarks/bay-bridge.md): 67 m navigation clearance, upper deck 18 m between curbs; the
 // truss 20 m wide, the lower roadway 2 m over the truss bottom, the upper 9.5 m over the lower, 4 m of camber down to the
 // towers, the cables 0.73 m (28.75 in): ESTIMATES except the clearance and the cable
 const BB = { clear: 67, width: 20, lowerOverBottom: 2, upperOverLower: 9.5, camber: 4, cable: 0.73, shoreUpper: 58, portalUpper: 70, saddleBelowTop: 4, cableLowAboveRoad: 4, eastDeckWidth: 31, sasRoad: 48, oaklandRoad: 8 };
 
 function buildSFBridges(scene) {
+  const ride = window.NYC.RideGeometry;
+  const routes = {};
   const group = new THREE.Group();
   group.name = 'SFBridges';
   const colliders = [];
@@ -36,7 +38,57 @@ function buildSFBridges(scene) {
   const T = window.NYC.Terrain;
   const W = T.waterLevel;
   const B = GEO.bridges || {};
-  const createParts = window.NYC.createLandmarkParts;
+  // Register primitives before the landmark batcher discards individual transforms. Legacy colliders below remain
+  // navigation data only; EUC consumes NYC.ride, never those old whole-tower/deck envelopes.
+  const createParts = () => {
+    const P = window.NYC.createLandmarkParts();
+    const add = P.add;
+    P.add = (mat, geo, matrix = null, paint = null) => add(mat, geo, matrix, paint, false);
+    const box = P.box, prism = P.prism, beam = P.beam, cyl = P.cyl;
+    P.box = (mat, x, y, z, w, h, d, ry = 0, ...rest) => {
+      if (h > 0) ride?.addBox({ x, y: y + h / 2, z }, { x: w / 2, y: h / 2, z: d / 2 }, ry,
+        { support: false, layered: true, source: 'bridge:box' });
+      return box(mat, x, y, z, w, h, d, ry, ...rest);
+    };
+    P.prism = (mat, pts, y0, y1, ...rest) => {
+      if (y1 > y0) ride?.addPrism(pts.map(([x, z]) => ({ x, z })), y0, y1,
+        { support: false, layered: true, source: 'bridge:prism' });
+      return prism(mat, pts, y0, y1, ...rest);
+    };
+    P.beam = (mat, a, b, thick, wide = thick) => {
+      // Wires/suspenders and fine decorative diagonal bars are not giant collision envelopes.
+      if (thick >= 0.5 && wide >= 0.5) {
+        const dx = b[0] - a[0], dz = b[2] - a[2], dy = b[1] - a[1];
+        const run = Math.hypot(dx, dz), len = Math.hypot(run, dy);
+        if (len > 1e-6) {
+          const n = Math.max(1, Math.ceil(run / 24), Math.ceil(Math.min(run, Math.abs(dy)) / 0.1));
+          for (let k = 0; k < n; k++) {
+            const u = (k + 0.5) / n;
+            ride?.addBox({ x: a[0] + dx * u, y: a[1] + dy * u, z: a[2] + dz * u },
+              { x: (run < 1e-6 ? thick : wide) / 2, y: (Math.abs(dy) / n + thick * run / len) / 2,
+                z: (run / n + thick * Math.abs(dy) / len) / 2 }, Math.atan2(dx, dz),
+              { support: false, layered: true, source: 'bridge:member' });
+          }
+        }
+      }
+      return beam(mat, a, b, thick, wide);
+    };
+    P.cyl = (mat, x, y, z, rb, rt, h, sides = 24, ry = 0, ...rest) => {
+      // Inscribed horizontal slices of the drawn tapered pier (<= 10 cm radius change).
+      const n = Math.max(1, Math.ceil(Math.abs(rt - rb) / 0.1));
+      for (let k = 0; k < n; k++) {
+        const r = Math.min(rb + (rt - rb) * k / n, rb + (rt - rb) * (k + 1) / n);
+        const poly = Array.from({ length: sides }, (_, i) => {
+          const a = i * Math.PI * 2 / sides + ry;
+          return { x: x + Math.sin(a) * r, z: z + Math.cos(a) * r };
+        });
+        ride?.addPrism(poly, y + h * k / n, y + h * (k + 1) / n,
+          { support: false, layered: true, source: 'bridge:pier' });
+      }
+      return cyl(mat, x, y, z, rb, rt, h, sides, ry, ...rest);
+    };
+    return P;
+  };
   const std = (color, roughness, metalness) => new THREE.MeshStandardNodeMaterial({ color, roughness, metalness });
   const mats = {
     orange: std(0xbf4e3b, 0.6, 0.3), // OSM building:colour of the Golden Gate's towers
@@ -49,14 +101,42 @@ function buildSFBridges(scene) {
   mats.lamp.userData.noShadow = true;
   const flatPts = (f) => { const o = []; for (let i = 0; i + 1 < f.length; i += 2) o.push([f[i], f[i + 1]]); return o; };
   const centroid = (f) => { let x = 0, z = 0; const n = f.length / 2; for (let i = 0; i < f.length; i += 2) { x += f[i]; z += f[i + 1]; } return [x / n, z / n]; };
-  const ground = (x, z) => T.groundAt(x, z);
+  const ground = (x, z) => {
+    const y = window.NYC.sfDestinationFloorAt?.(x, z);
+    return Number.isFinite(y) ? Math.max(W, y) : T.groundAt(x, z);
+  };
   function obb(cx, cz, dx, dz, along, across, y0, y1) {
     const ex = (Math.abs(dx) * along + Math.abs(dz) * across) / 2, ez = (Math.abs(dz) * along + Math.abs(dx) * across) / 2;
     const a = Math.atan2(dz, dx);
-    colliders.push({ minX: cx - ex, maxX: cx + ex, minZ: cz - ez, maxZ: cz + ez, minY: y0, maxY: y1, obb: { cx, cz, hx: along / 2, hz: across / 2, cs: Math.cos(-a), sn: Math.sin(-a) } });
+    colliders.push({ rideIgnore: true, minX: cx - ex, maxX: cx + ex, minZ: cz - ez, maxZ: cz + ez, minY: y0, maxY: y1, obb: { cx, cz, hx: along / 2, hz: across / 2, cs: Math.cos(-a), sn: Math.sin(-a) } });
   }
   // A bridge frame: origin o, unit axis (ux, uz), side (sx, sz) = to the axis' right; at(t, s, y) -> [x, y, z]
   const frame = (o, ux, uz) => ({ o, ux, uz, sx: -uz, sz: ux, at: (t, s, y) => [o[0] + ux * t - uz * s, y, o[1] + uz * t + ux * s], t: (p) => (p[0] - o[0]) * ux + (p[1] - o[1]) * uz, s: (p) => -(p[0] - o[0]) * uz + (p[1] - o[1]) * ux });
+  function deck(P, F, a, b, road, width, thickness, source) {
+    const corners = [F.at(a, -width / 2, road(a)), F.at(a, width / 2, road(a)),
+      F.at(b, width / 2, road(b)), F.at(b, -width / 2, road(b))];
+    const [p, q, r, s] = corners;
+    const top = [...p, ...q, ...r, ...p, ...r, ...s];
+    ride?.addTriangles(top, null, 'pavement', { layered: true, shore: true, source });
+    const pos = top.slice();
+    for (let i = 0; i < 4; i++) {
+      const u = corners[i], v = corners[(i + 1) % 4], ub = [u[0], u[1] - thickness, u[2]], vb = [v[0], v[1] - thickness, v[2]];
+      pos.push(...u, ...ub, ...vb, ...u, ...vb, ...v);
+    }
+    for (const v of [p, r, q, p, s, r]) pos.push(v[0], v[1] - thickness, v[2]);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.computeVertexNormals();
+    P.add(mats.road, geo);
+    const n = Math.max(1, Math.ceil(Math.abs(road(b) - road(a)) / 0.04));
+    const mix = (a, b, u) => ({ x: a[0] + (b[0] - a[0]) * u, z: a[2] + (b[2] - a[2]) * u });
+    for (let k = 0; k < n; k++) {
+      const u = k / n, v = (k + 1) / n, ya = road(a) + (road(b) - road(a)) * u, yb = road(a) + (road(b) - road(a)) * v;
+      // Preserve the actual skewed outline on curved source approaches; a yawed bounding rectangle protrudes at bends.
+      ride?.addPrism([mix(p,s,u),mix(q,r,u),mix(q,r,v),mix(p,s,v)],
+        Math.min(ya,yb)-thickness-.002,Math.min(ya,yb)-.002,{support:false,layered:true,source:source+':slab'});
+    }
+  }
   // Cable from point to point in segments; tube of radius r
   function cable(P, mat, pts, r) {
     const path = new THREE.CurvePath();
@@ -65,15 +145,15 @@ function buildSFBridges(scene) {
   }
   // A truss deck between stations t0 < t1 of frame F with roadway height road(t): chords, deck plate, side verticals and
   // diagonals every `panel` m (detail), lamps every 50 m (detail)
-  function trussDeck(P, D, F, t0, t1, road, width, depth, mat, { panel = 7.6, lamps = true, roadInset = 2 } = {}) {
-    const n = Math.max(2, Math.ceil((t1 - t0) / 30));
+  function trussDeck(P, D, F, t0, t1, road, width, depth, mat, { panel = 7.6, lamps = true } = {}) {
+    const n = Math.max(2, Math.ceil((t1 - t0) / 4));
     for (let i = 0; i < n; i++) {
       const a = t0 + ((t1 - t0) * i) / n, b = t0 + ((t1 - t0) * (i + 1)) / n;
       for (const s of [-width / 2, width / 2]) {
         P.beam(mat, F.at(a, s, road(a) + 0.6), F.at(b, s, road(b) + 0.6), 1.2, 0.9); // top chord
         P.beam(mat, F.at(a, s, road(a) - depth), F.at(b, s, road(b) - depth), 1.2, 0.9); // bottom chord
       }
-      P.beam(mats.road, F.at(a, 0, road(a) - 0.38), F.at(b, 0, road(b) - 0.38), 0.6, width - roadInset); // 8 cm under a freeway deck laid on it
+      deck(P, F, a, b, road, width, 0.6, width === GG.width ? 'bridge:golden-gate' : 'bridge:bay-upper');
       P.beam(mat, F.at(a, 0, road(a) - depth + 0.5), F.at(b, 0, road(b) - depth + 0.5), 0.5, width); // lower lateral plate
     }
     for (let t = t0; t < t1; t += panel) {
@@ -135,20 +215,48 @@ function buildSFBridges(scene) {
       }
     }
     if (legS.length !== 2) legS = [-GG.width / 2, GG.width / 2];
-    // deck from the deck ways' ends, roadway level between the towers at GG.road; past them it runs level to where
-    // the ground comes up to it (the south approach) or to the end of the data (Marin: no DEM there yet)
+    // Deck between the source ways' ends. The main span retains the published roadway datum; both land approaches
+    // now connect to committed regional DEM coverage (the original level, truncated flight-scene ends did not).
     const ts = g.decks.flatMap((d) => flatPts(d.pts)).map((p) => F.t(p));
-    const t0 = Math.min(...ts), t1 = Math.max(...ts);
-    const road = () => W + GG.road;
-    const tEndS = (() => {
-      for (let t = 0; t > t0; t -= 4) { const [x, , z] = F.at(t, 0, 0); if (ground(x, z) > W + GG.road - GG.depth - 1) return t; }
-      return t0;
-    })();
+    const t0 = Math.min(...ts), t1 = Math.max(...ts), tEndS = t0;
+    // Follow the committed deck ways' curved approaches rather than stopping eight metres below the road.
+    // Where the two carriageways overlap, their lateral midpoint is the bridge centre. Unsurveyed heights are an
+    // authored, visible estimate from the 75 m tower roadway to the measured land at each source endpoint.
+    const baseAt = F.at;
+    const offsetsAt = t => {
+      const hits = [];
+      for (const d of g.decks) {
+        const pts = flatPts(d.pts);
+        for (let i = 1; i < pts.length; i++) {
+          const a = F.t(pts[i - 1]), b = F.t(pts[i]);
+          if (t < Math.min(a, b) - 1e-5 || t > Math.max(a, b) + 1e-5 || Math.abs(b - a) < 1e-6) continue;
+          hits.push(F.s(pts[i - 1]) + (F.s(pts[i]) - F.s(pts[i - 1])) * (t - a) / (b - a));
+        }
+      }
+      return hits.length ? (Math.min(...hits) + Math.max(...hits)) / 2 : 0;
+    };
+    const bendKnots = [...new Set([...ts, 0, L])].sort((a, b) => a - b)
+      .map(t => [t, t >= 0 && t <= L ? 0 : offsetsAt(t)]);
+    const bend = t => {
+      for (let i = 1; i < bendKnots.length; i++) {
+        const [a, ya] = bendKnots[i - 1], [b, yb] = bendKnots[i];
+        if (t <= b) return ya + (yb - ya) * (t - a) / (b - a);
+      }
+      return bendKnots.at(-1)[1];
+    };
+    F.at = (t, s, y) => baseAt(t, s + bend(t), y);
+    const landY = t => { const p = F.at(t, 0, 0); return ground(p[0], p[2]) + 0.05; };
+    const southY = landY(t0), northY = landY(t1);
+    const road = t => t < 0 ? Math.max(landY(t), southY + (W + GG.road - southY) * (t - t0) / -t0)
+      : t > L ? Math.max(landY(t), W + GG.road + (northY - W - GG.road) * (t - L) / (t1 - L)) : W + GG.road;
     trussDeck(P, D, F, tEndS, t1, road, GG.width, GG.depth, mats.orange);
     // anchorages and pylons from their OSM outlines, from the ground (or the water) to the deck
     for (const s of g.supports) {
       const c = s.c;
-      const top = W + GG.road + (/Pylon/.test(s.name) ? 12 : 2); // ESTIMATE: the pylons stand ~12 m above the deck
+      const station = F.t(c);
+      const top = Math.abs(F.s(c) - bend(station)) < GG.width / 2
+        ? Math.min(...flatPts(s.ring).map(p => road(F.t(p)))) - 0.62
+        : W + GG.road + (/Pylon/.test(s.name) ? 12 : 2);
       const base = Math.max(W - 2, ground(c[0], c[1]) - 1);
       if (top - base < 2) continue;
       P.prism(mats.concrete, flatPts(s.ring), base, top);
@@ -172,11 +280,11 @@ function buildSFBridges(scene) {
       cable(P, mats.orange, pts, GG.cable / 2);
     }
     suspenders(D, F, tA, tB, cableY, road, legS, mats.orange);
-    // deck colliders every 60 m
-    for (let t = tEndS; t < t1; t += 60) {
-      const [x, , z] = F.at(Math.min(t + 30, t1), 0, 0);
-      obb(x, z, F.ux, F.uz, 60, GG.width, W + GG.road - GG.depth, W + GG.road + 1.5);
-    }
+    routes.goldengate = { source: 'GEO.bridges.goldenGate.decks', status: 'geometry-registered-route-pending',
+      south: F.at(t0, 0, road(t0)), north: F.at(t1, 0, road(t1)),
+      stations: Array.from({ length: Math.ceil((t1 - t0) / 4) + 1 }, (_, i) => {
+        const t = t0 + (t1 - t0) * i / Math.ceil((t1 - t0) / 4); return F.at(t, 0, road(t));
+      }) };
     const mid = F.at((tEndS + t1) / 2, 0, 0);
     stats.push({ name: 'golden-gate-bridge', ...finish(P, D, 'bridge:golden-gate', { x: mid[0], z: mid[2], r: (t1 - tEndS) / 2 }) });
   }
@@ -230,7 +338,9 @@ function buildSFBridges(scene) {
     // the lower deck's roadway inside the truss
     for (let t = tShore; t < tPortal; t += 30) {
       const t2 = Math.min(tPortal, t + 30);
-      P.beam(mats.road, F.at(t, 0, lower(t) - 0.38), F.at(t2, 0, lower(t2) - 0.38), 0.6, BB.width - 2);
+      deck(P, F, t, t2, lower, BB.width - 2, 0.6, 'bridge:bay-lower');
+      for (const s of [-BB.width / 2 + 0.3, BB.width / 2 - 0.3])
+        P.beam(mats.grey, F.at(t, s, lower(t) + 0.5), F.at(t2, s, lower(t2) + 0.5), 1, 0.6);
     }
     // towers: two legs tapering to the top with cross bracing (ESTIMATE: legs 6 m square at the water, 4 m at the top;
     // four X panels), a cap, concrete piers
@@ -241,9 +351,10 @@ function buildSFBridges(scene) {
         P.beam(mats.grey, F.at(t, s, W + 8), F.at(t, s * 0.92, top), 6, 5);
         P.box(mats.concrete, ...F.at(t, s, W - 2), 9, 10, 9, -Math.atan2(F.uz, F.ux));
       }
-      const levels = [W + 10, lower(t) - depth - 1, lower(t) + 14, (lower(t) + 14 + top) / 2, top - 6];
-      for (let k = 0; k + 1 < levels.length; k++) {
-        const y0 = levels[k], y1 = levels[k + 1];
+      const above = upper(t) + 6;
+      const panels = [[W + 10, lower(t) - 3], [lower(t) + 5.8, upper(t) - 1.4],
+        [above, (above + top) / 2], [(above + top) / 2, top - 6]];
+      for (const [y0, y1] of panels) {
         const s0 = legs[0] + (legs[0] * -0.08) * ((y0 - W) / 160), s1 = legs[1] - legs[1] * 0.08 * ((y0 - W) / 160);
         const r0 = legs[0] + (legs[0] * -0.08) * ((y1 - W) / 160), r1 = legs[1] - legs[1] * 0.08 * ((y1 - W) / 160);
         P.beam(mats.grey, F.at(t, s0, y0), F.at(t, r1, y1), 1.2, 1.2);
@@ -251,15 +362,14 @@ function buildSFBridges(scene) {
         P.beam(mats.grey, F.at(t, r0, y1), F.at(t, r1, y1), 2.2, 2.4);
       }
       P.beam(mats.grey, F.at(t, legs[0] * 0.92, top - 1.5), F.at(t, legs[1] * 0.92, top - 1.5), 3, 4);
-      const [x, , z] = F.at(t, 0, 0);
-      obb(x, z, F.ux, F.uz, 10, BB.width + 10, W - 2, top);
     });
     // the centre anchorage: OSM outline, 67 m (OSM height), a cable housing on top up to the deck (ESTIMATE)
     if (ca) {
-      P.prism(mats.concrete, flatPts(ca.ring), W - 2, W + ca.h);
+      P.prism(mats.concrete, flatPts(ca.ring), W - 2, Math.min(W + ca.h, lower(tCA) - 0.62));
       const [x, , z] = F.at(tCA, 0, 0);
-      P.box(mats.concrete, x, W + ca.h, z, 20, upper(tCA) + 6 - (W + ca.h), 30, -Math.atan2(F.uz, F.ux));
-      obb(x, z, F.ux, F.uz, 30, 40, W - 2, upper(tCA) + 6);
+      for (const s of [-13, 13]) P.box(mats.concrete, ...F.at(tCA, s, lower(tCA) - 0.62),
+        20, upper(tCA) + 6 - lower(tCA), 4, -Math.atan2(F.uz, F.ux));
+      P.box(mats.concrete, x, upper(tCA) + 5.4, z, 20, 0.6, 30, -Math.atan2(F.uz, F.ux));
     }
     // cables: shore anchorage -> W1 -> W2 -> centre anchorage -> W3 -> W4 -> island anchorage
     const saddle = W + 160 - BB.saddleBelowTop;
@@ -281,19 +391,19 @@ function buildSFBridges(scene) {
       cable(P, mats.grey, pts, BB.cable / 2);
     }
     suspenders(D, F, tShore, tPortal, cableY, upper, [legs[0] * 0.92, legs[1] * 0.92], mats.grey);
-    for (let t = tShore; t < tPortal; t += 60) {
-      const [x, , z] = F.at(Math.min(t + 30, tPortal), 0, 0);
-      obb(x, z, F.ux, F.uz, 60, BB.width, lower(t) - BB.lowerOverBottom - 1, upper(t) + 1);
-    }
     // Yerba Buena Island tunnel portals (the deck runs into the island here; 23 m wide x 18 m high bore)
     const portal = (t, dir) => {
       const y = lower(t) - BB.lowerOverBottom;
       const [x, , z] = F.at(t + dir * 2, 0, 0);
       const ry = -Math.atan2(F.uz, F.ux);
-      P.box(mats.concrete, x, y, z, 4, 22, 30, ry);
+      for (const s of [-13.5, 13.5]) P.box(mats.concrete, ...F.at(t + dir * 2, s, y), 4, 22, 3, ry);
+      P.box(mats.concrete, x, y + 20, z, 4, 2, 30, ry);
     };
     portal(tPortal, 1);
     bayDeck = { F, t0: tShore, t1: tPortal, upper, lower, half: BB.width / 2 + 2 };
+    routes.baybridge = { source: 'GEO.bridges.bayBridge + roadGraph', status: 'geometry-registered-route-pending',
+      westUpper: F.at(tShore, 0, upper(tShore)), westLower: F.at(tShore, 0, lower(tShore)),
+      islandUpper: F.at(tPortal, 0, upper(tPortal)), islandLower: F.at(tPortal, 0, lower(tPortal)) };
 
     // east span: the single tower (OSM, 160 m) as four columns (ESTIMATE spacing), decks along the OSM deck ways east of
     // the island descending from the self-anchored span to Oakland (ESTIMATE heights), the cable loop over the tower
@@ -312,7 +422,11 @@ function buildSFBridges(scene) {
           if (Math.max(ax, bx) < tower[0] - 450) continue;
           const ya = eastY(ax), yb = eastY(bx);
           P.beam(mats.white, [ax, ya - 2.5, az], [bx, yb - 2.5, bz], 5, BB.eastDeckWidth);
-          P.beam(mats.road, [ax, ya, az], [bx, yb, bz], 0.4, BB.eastDeckWidth - 2);
+          const E = frame([ax, az], (bx - ax) / Math.hypot(bx - ax, bz - az), (bz - az) / Math.hypot(bx - ax, bz - az));
+          deck(P, E, 0, Math.hypot(bx - ax, bz - az), t => ya + (yb - ya) * t / Math.hypot(bx - ax, bz - az),
+            BB.eastDeckWidth - 2, 0.4, 'bridge:bay-east');
+          for (const s of [-(BB.eastDeckWidth - 2) / 2 + 0.3, (BB.eastDeckWidth - 2) / 2 - 0.3])
+            P.beam(mats.white, E.at(0, s, ya + 0.5), E.at(Math.hypot(bx - ax, bz - az), s, yb + 0.5), 1, 0.6);
           const L2 = Math.hypot(bx - ax, bz - az);
           for (let s = 0; s < L2; s += 160) {
             const x = ax + ((bx - ax) * s) / L2, z = az + ((bz - az) * s) / L2;
@@ -323,7 +437,6 @@ function buildSFBridges(scene) {
       }
       for (const [dx, dz] of [[-6, -6], [6, -6], [-6, 6], [6, 6]]) P.beam(mats.white, [tower[0] + dx, W, tower[1] + dz], [tower[0] + dx * 0.6, W + 160, tower[1] + dz * 0.6], 5, 5);
       for (let y = W + 30; y < W + 150; y += 30) P.box(mats.white, tower[0], y, tower[1], 14, 2, 14);
-      obb(tower[0], tower[1], 1, 0, 20, 20, W - 2, W + 160);
       // the cable loop: from the island side over the tower top to the far end of the self-anchored span (ESTIMATE:
       // 300 m either side, anchored in the deck ends)
       const loop = [];
@@ -359,10 +472,11 @@ function buildSFBridges(scene) {
 
   scene.add(group);
   window.NYC.bridgeStats = stats;
+  window.NYC.SF_BRIDGE_ROUTES = routes;
   console.info(`[bridges] ${stats.map((s) => `${s.name} ${Math.round(s.tris / 1000)}k triangles / ${s.draws} draws`).join(', ')}`);
   const _c = new THREE.Vector3();
   return {
-    group, colliders, bridgeDeckAt,
+    group, colliders, bridgeDeckAt, routes,
     update(camera) {
       const glow = window.NYC.cityUniforms?.uInteriorGlow?.value || 0;
       mats.lamp.color.setHex(0xffd9a0).multiplyScalar(0.25 + Math.max(0, glow - 0.5) * 2.5);

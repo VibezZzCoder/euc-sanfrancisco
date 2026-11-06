@@ -28,7 +28,16 @@ test('geodata names its frame, box and data files, and the files exist', () => {
   assert.equal(GEO.version, 2);
   assert.ok(Number.isFinite(GEO.frame.lat0) && Number.isFinite(GEO.frame.lon0));
   assert.ok(GEO.box.x1 > GEO.box.x0 && GEO.box.z1 > GEO.box.z0);
-  for (const d of Object.values(GEO.data)) assert.ok(fs.existsSync(new URL(d.url, root)), `${d.url} exists`);
+  // data-loader.js uses the tiled region manifest; GEO.data.region is retired P5 metadata.
+  for (const [name, d] of Object.entries(GEO.data)) {
+    if (name === 'region' && d.url === 'data/terrain-region.bin' && !fs.existsSync(new URL(d.url, root))) {
+      const manifest = JSON.parse(fs.readFileSync(new URL('data/region/manifest.json', root), 'utf8'));
+      assert.equal(manifest.version, 1);
+      assert.ok(manifest.city.files.length > 0 && manifest.horizon.files.length > 0);
+      for (const f of [...manifest.city.files, ...manifest.horizon.files, ...manifest.buildings.files,
+        manifest.mask, manifest.trees, manifest.roads]) assert.ok(fs.existsSync(new URL(f.url, root)), `${f.url} exists`);
+    } else assert.ok(fs.existsSync(new URL(d.url, root)), `${d.url} exists`);
+  }
 });
 
 test('curb islands are valid, NYC-oriented polygons that do not overlap', () => {

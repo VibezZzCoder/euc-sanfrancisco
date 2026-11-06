@@ -183,6 +183,10 @@ const canyonSkyAONode = Fn(() => {
   const streetCrevice = smoothstep(0.0, 7.5, aboveGround).mul(0.22).add(0.78);
   return mix(float(0.44), float(1.0), heightOpenness).mul(streetCrevice);
 });
+// The same sky-visibility curve for a height (m) above the local ground given directly (regional trees; region.js's
+// far trees repeat it)
+const treeLocalSkyAO = (aboveGround) => mix(float(0.44), float(1.0), smoothstep(0.0, 68.0, aboveGround))
+  .mul(smoothstep(0.0, 7.5, aboveGround).mul(0.22).add(0.78));
 
 // Material caches to prevent duplicate WebGPU WGSL shader compilation across blocks & landmarks
 const _curtainWallCache = new Map();
@@ -198,22 +202,14 @@ const facadeAlongZ = varying(
 ).setInterpolation(THREE.InterpolationSamplingType.FLAT, THREE.InterpolationSamplingMode.EITHER);
 
 /**
- * Lightweight, Fast-Compiling 3D Parallax Apartment Interior Mapping (Upper Floors Only)
- * Modelled directly after `interior()` in `three/addons/generators/city/SkyscraperGenerator.js`:
- * - Evaluates `origin`, `dir`, `boxMin`, and `boxMax` in true world meters (isotropic 1:1:1 scale)
- *   so 3D room perspective is accurate from all viewing angles.
- * - Each apartment room spans 2.5 window bays wide (~6.8m) × 1 story tall (~3.5m) × ~5.2m deep,
- *   set back behind the facade so neighbouring windows look into the same full-sized room.
- * - Includes left & right fabric drapes hung just inside the window frame (`winUV`) from a 6-swatch
- *   domestic palette that block interior glow (`emit = 0.20`) so drapes silhouette against lit rooms.
- * - Once windows shrink to a pixel or two (`fwNode`: pixel footprint in cells) rooms glow at the mean lit level (with
- *   a lit room's tint), drapes at their mean coverage & lamps fade out, so distant towers don't twinkle in motion.
- * - Returns `vec4(roomColor, litEmit)`.
+ * The room & window identity hashes of evaluateApartmentInterior (room module, lit / bulb / drape seeds). Their sin()
+ * hashes take arguments in the thousands, where any change in floating-point contraction re-rolls them, so they are
+ * evaluated with the facade's other unbranched code, in the original expressions & order, and the interior branch
+ * (apartmentInteriorBehind) only reads them: branching must not re-light rooms or re-hang drapes. Call inside a Fn.
  */
-const evaluateApartmentInterior = Fn(([uCoord, vCoord, winUV, cellId, winWNode, floorHNode, seedNode, warmthNode, litProbNode, fwNode]) => {
+function apartmentInteriorCell(uCoord, vCoord, cellId, winWNode, floorHNode, seedNode) {
   const u = float(uCoord).toVar();
   const v = float(vCoord).toVar();
-  const wUV = vec2(winUV).toVar();
   const cid = vec2(cellId).toVar();
   const wW = float(winWNode).toVar();
   const fH = float(floorHNode).toVar();
@@ -231,6 +227,32 @@ const evaluateApartmentInterior = Fn(([uCoord, vCoord, winUV, cellId, winWNode, 
   const roomU = gridU.add(roomPhase).div(roomBays).toVar();
   const roomIdx = floor(roomU).toVar();
   const roomId = vec2(roomIdx, floorIdx).toVar();
+
+  // Per-room hashes (SkyscraperGenerator.js lines 1162-1171) & the window's drape seeds
+  const seed1 = hash2D(roomId.add(vec2(seedNode, 19.4))).toVar();
+  const seed2 = hash2D(roomId.add(vec2(seedNode.mul(1.9), 83.1))).toVar();
+  const seed3 = hash2D(roomId.add(vec2(63.2, seedNode.mul(0.7)))).toVar();
+  const wSeed1 = hash2D(cid.add(vec2(seedNode.mul(0.8), 41.2))).toVar();
+  const wSeed2 = hash2D(cid.add(vec2(17.9, seedNode.mul(1.3)))).toVar();
+  return { wW, fH, roomBays, roomU, seed1, seed2, seed3, wSeed1, wSeed2 };
+}
+
+/**
+ * Lightweight, Fast-Compiling 3D Parallax Apartment Interior Mapping (Upper Floors Only)
+ * Modelled directly after `interior()` in `three/addons/generators/city/SkyscraperGenerator.js`:
+ * - Evaluates `origin`, `dir`, `boxMin`, and `boxMax` in true world meters (isotropic 1:1:1 scale)
+ *   so 3D room perspective is accurate from all viewing angles.
+ * - Each apartment room spans 2.5 window bays wide (~6.8m) × 1 story tall (~3.5m) × ~5.2m deep,
+ *   set back behind the facade so neighbouring windows look into the same full-sized room.
+ * - Includes left & right fabric drapes hung just inside the window frame (`winUV`) from a 6-swatch
+ *   domestic palette that block interior glow (`emit = 0.20`) so drapes silhouette against lit rooms.
+ * - Once windows shrink to a pixel or two (`fwNode`: pixel footprint in cells) rooms glow at the mean lit level (with
+ *   a lit room's tint), drapes at their mean coverage & lamps fade out, so distant towers don't twinkle in motion.
+ * - Returns `vec4(roomColor, litEmit)`.
+ */
+const evaluateApartmentInterior = (cell, winUV, warmthNode, litProbNode, fwNode, drapeFwNode) => {
+  const { wW, fH, roomBays, roomU, seed1, seed2, seed3, wSeed1, wSeed2 } = cell;
+  const wUV = vec2(winUV).toVar();
 
   const roomW = wW.mul(roomBays).toVar();
   const roomH = fH.mul(0.92).toVar();
@@ -276,10 +298,7 @@ const evaluateApartmentInterior = Fn(([uCoord, vCoord, winUV, cellId, winWNode, 
   const onCeil = isYPlane.mul(step(0.0, dirY)).toVar();
   const onFloor = isYPlane.mul(float(1.0).sub(step(0.0, dirY))).toVar();
 
-  // Per-room hashes & bulb temperature (SkyscraperGenerator.js lines 1162-1171)
-  const seed1 = hash2D(roomId.add(vec2(seedNode, 19.4))).toVar();
-  const seed2 = hash2D(roomId.add(vec2(seedNode.mul(1.9), 83.1))).toVar();
-  const seed3 = hash2D(roomId.add(vec2(63.2, seedNode.mul(0.7)))).toVar();
+  // Lit rooms & bulb temperature from the per-room hashes (apartmentInteriorCell)
   const lod = smoothstep(0.3, 0.8, max(fwNode.x, fwNode.y)).toVar();
   const litRoom = step(float(1.0).sub(litProbNode), seed3).toVar();
   const lit = mix(litRoom, 1.0, lod).toVar();
@@ -327,15 +346,14 @@ const evaluateApartmentInterior = Fn(([uCoord, vCoord, winUV, cellId, winWNode, 
   // Curtains hung just inside the glass of each window opening (SkyscraperGenerator.js lines 1274-1302)
   // Parallax shift onto the curtain plane behind the glass
   const cUVx = clamp(wUV.x.add(dirX.div(dirZ).mul(0.06)), 0.0, 1.0).toVar();
-  const wSeed1 = hash2D(cid.add(vec2(seedNode.mul(0.8), 41.2))).toVar();
-  const wSeed2 = hash2D(cid.add(vec2(17.9, seedNode.mul(1.3)))).toVar();
 
   const sL = smoothstep(0.18, 1.0, wSeed1);
   const sR = smoothstep(0.18, 1.0, wSeed2);
   const lw = sL.mul(sL).mul(0.48); // Left drape width (0..48% of window width)
   const rw = sR.mul(sR).mul(0.48); // Right drape width (0..48% of window width)
   // Drape edges widen to the pixel footprint & pleats fade to their mean shade once they'd shrink below a few pixels
-  const cFw = fwidth(cUVx).toVar();
+  // Taken before the glazing branch (interiorDrapeFootprint): derivatives need uniform control flow
+  const cFw = float(drapeFwNode).toVar();
   const drapeAA = cFw.add(0.015).toVar();
   const inLeftDrape = smoothstep(lw.add(drapeAA), lw.sub(drapeAA), cUVx).mul(step(0.03, lw));
   const inRightDrape = smoothstep(float(1.0).sub(rw).sub(drapeAA), float(1.0).sub(rw).add(drapeAA), cUVx).mul(step(0.03, rw));
@@ -364,7 +382,37 @@ const evaluateApartmentInterior = Fn(([uCoord, vCoord, winUV, cellId, winWNode, 
   const finalRoomCol = bestCol.mul(roomWarmth).mul(mix(float(0.85), float(1.35), lit));
 
   return vec4(finalRoomCol, mix(litRoom, litProbNode, lod).mul(bestEmit));
+};
+
+// slop-newyork f3635e7: pixel footprint of the drapes' parallax-shifted coordinate (`cUVx` above), taken before the
+// branch in apartmentInteriorBehind() so the derivative stays in uniform control flow.
+const interiorDrapeFootprint = Fn(([winUV]) => {
+  const rayWorld = normalize(positionWorld.sub(cameraPosition));
+  const tSign = mix(sign(facadeWorldNormal.z).negate(), sign(facadeWorldNormal.x), facadeAlongZ);
+  const dirX = dot(rayWorld, vec3(facadeWorldNormal.z.negate(), 0.0, facadeWorldNormal.x).mul(tSign));
+  const dirZ = max(abs(dot(rayWorld, facadeWorldNormal)), 0.05);
+  return fwidth(clamp(vec2(winUV).x.add(dirX.div(dirZ).mul(0.06)), 0.0, 1.0));
 });
+
+/**
+ * The apartment interior, raycast only where `coverage` (the share of the pixel that is glazing) is non-zero. Walls,
+ * frames, spandrels and roofs skip it: every output weights the interior by that coverage or a narrower mask inside it,
+ * so the skipped value is always multiplied by zero (slop-newyork f3635e7).
+ */
+function apartmentInteriorBehind(coverage, uCoord, vCoord, winUV, cellId, winW, floorH, seed, warmth, litProb, fw) {
+  const drapeFootprint = interiorDrapeFootprint(winUV);
+  return Fn(() => {
+    // Both derivative-based inputs and the contraction-sensitive identity hashes are evaluated here, outside the branch
+    const cell = apartmentInteriorCell(uCoord, vCoord, cellId, winW, floorH, seed);
+    const fwv = vec2(fw).toVar();
+    const drapeFw = float(drapeFootprint).toVar();
+    const room = vec4(0.0).toVar();
+    If(coverage.greaterThan(0.0), () => {
+      room.assign(evaluateApartmentInterior(cell, winUV, warmth, litProb, fwv, drapeFw));
+    });
+    return room;
+  })();
+}
 
 /**
  * Treatment of each wall of a box-local facade box (createFacadeBoxes `faces`, read by facadeCell). shop: street front
@@ -412,8 +460,11 @@ function facadeCell(windowWidth, floorHeight, boxLocal, cornerPier = 0, groundBa
   let boxSeed = float(0.0);
 
   if (boxLocal) {
-    const box = attribute('box', 'vec4'); // width, height, depth, seed (+ the building's tone in its fraction)
-    const faces = attribute('faces', 'vec4'); // WALL_KINDS of the -x, +x, -z & +z walls
+    // NYC @4f1b16d921a0f095660624c4e80d6a840fc845ee: preserve per-instance seed/tone
+    // and wall kinds exactly; fragment hashes amplify smooth interpolation error into speckle.
+    // Positions / UVs and SF's ground-relative floor coordinates still interpolate normally.
+    const box = varying(attribute('box', 'vec4'), 'vFacadeBox').setInterpolation('flat');
+    const faces = varying(attribute('faces', 'vec4'), 'vFacadeFaces').setInterpolation('flat');
     const wallWidth = mix(box.x, box.z, alongZ);
     // The box-local normal's sign tells which wall this is
     kind = mix(
@@ -421,7 +472,7 @@ function facadeCell(windowWidth, floorHeight, boxLocal, cornerPier = 0, groundBa
       mix(faces.x, faces.y, step(0.0, nWall.x)),
       alongZ
     );
-    // The seed's fraction (0.1..0.9, never near an integer so floor() is stable on inexact varyings) is the tone
+    // The seed's fraction (0.1..0.9) is the tone; the integer part chooses a building's window pattern.
     tone = fract(box.w).sub(0.1).div(0.8);
     boxSeed = floor(box.w);
     // Whole-bay offset per wall so walls don't repeat each other's windows
@@ -554,17 +605,17 @@ function createCurtainWallMaterial(opts = {}) {
     vec2(0.0),
     vec2(1.0)
   );
-  const aptRoom = evaluateApartmentInterior(uCoord, vCoord, winUV, cellId, bayWidth, facade.floorH, uSeed, uWarmth, uLitProbability.mul(0.65), fw);
+  // No glass in a storey the box cuts short (solid spandrel instead) nor behind the coping. The emissive pane mask
+  // below lies inside this one, so the interior is only raycast where it is non-zero.
+  const isGlassPane = filteredPulse(cellUV.x, mullionThickness * 0.5, 1.0 - mullionThickness * 0.5, fw.x)
+    .mul(filteredPulse(cellUV.y, spandrelRatio + 0.015, 1.0 - mullionThickness * 0.5, fw.y))
+    .mul(float(1.0).sub(isRoof)).mul(float(1.0).sub(partial)).mul(float(1.0).sub(coping));
+  const aptRoom = apartmentInteriorBehind(isGlassPane, uCoord, vCoord, winUV, cellId, bayWidth, facade.floorH, uSeed, uWarmth, uLitProbability.mul(0.65), fw);
   const shopLit = step(0.24, hash2D(cellId.add(vec2(uSeed, 19.4))));
   const floorIdx = floor(gridV);
   const isMechFloor = float(1.0).sub(step(1.0, mod(floorIdx.add(uSeed), 16.0))).mul(step(4.0, floorIdx));
 
   mat.colorNode = Fn(() => {
-    // No glass in a storey the box cuts short (solid spandrel instead) nor behind the coping
-    const isGlassPane = filteredPulse(cellUV.x, mullionThickness * 0.5, 1.0 - mullionThickness * 0.5, fw.x)
-      .mul(filteredPulse(cellUV.y, spandrelRatio + 0.015, 1.0 - mullionThickness * 0.5, fw.y))
-      .mul(float(1.0).sub(isRoof)).mul(float(1.0).sub(partial)).mul(float(1.0).sub(coping));
-
     const louverStripes = sin(vCoord.mul(22.0)).mul(0.5).add(0.5);
 
     // Per-Pane Thermal/Wind Glass Warble & Pillow Distortion
@@ -778,7 +829,10 @@ function createPreWarBuildingMaterial(opts = {}) {
     vec2(0.0),
     vec2(1.0)
   );
-  const aptRoom = evaluateApartmentInterior(uCoord, vCoord, winUV, cellId, bayWidth, facade.floorH, uSeed, uWarmth, paint ? paintTrim.w.mul(0.62) : uLitProbability.mul(0.62), fw);
+  // The window opening: the glass (colour) and the glow (emissive) masks below both lie inside it
+  const windowOpening = filteredPulse(cellUV.x, effHalfX, float(1.0).sub(effHalfX), fw.x).mul(open)
+    .mul(filteredPulse(cellUV.y, effHalfY, float(1.0).sub(effHalfY), fw.y)).mul(float(1.0).sub(isRoof));
+  const aptRoom = apartmentInteriorBehind(windowOpening, uCoord, vCoord, winUV, cellId, bayWidth, facade.floorH, uSeed, uWarmth, paint ? paintTrim.w.mul(0.62) : uLitProbability.mul(0.62), fw);
   const shopLit = step(0.24, hash2D(cellId.add(vec2(uSeed, 19.4))));
   const bulbCol = mix(cCoolWindow, cWarmWindow, step(float(1.0).sub(uWarmth), hash2D(cellId.add(vec2(uSeed.mul(1.9), 83.1)))));
   // Window AC units (~12% of upper-floor windows), none in the floor the band course covers
@@ -1427,7 +1481,7 @@ const TREE_WIND = vec2(0.86, 0.51);
  * pass (alpha-tested in the shadow maps: dappled shadows). Wind: gusts rolling across the city sway the crowns
  * (shadows follow), branches bob and leaves flutter.
  */
-function createTreeMaterial(leafAtlas) {
+function createTreeMaterial(leafAtlas, { localSkyAO = false } = {}) {
   // The alpha test is given as nodes (alphaTestNode on the scene pass, maskShadowNode in the shadow maps) rather than
   // `alphaTest`: the shadow passes copy each caster's `alphaTest` onto one shared shadow material, and every switch
   // between 0 and > 0 bumps its version, which made three.js re-hash the node graphs of all the casters' shadow render
@@ -1503,8 +1557,9 @@ function createTreeMaterial(leafAtlas) {
   // Card normals are crown-shell normals on both faces: no back-face flip
   mat.normalNode = normalViewGeometry;
 
-  // Sky light: street-canyon occlusion, deep inside the crown far less
-  mat.aoNode = canyonSkyAONode().mul(crownAO.mul(0.75).add(0.25));
+  // Sky light: street-canyon occlusion, deep inside the crown far less. Regional trees (localSkyAO) stand outside the
+  // core terrain texture, so the same curve takes the height above the tree's own base (its geometry frame).
+  mat.aoNode = (localSkyAO ? treeLocalSkyAO(positionGeometry.y) : canyonSkyAONode()).mul(crownAO.mul(0.75).add(0.25));
 
   // Light through the leaves: yellow-green, strongest out on the thin shell
   mat.translucencyNode = aData.xyz.mul(vec3(1.0, 1.2, 0.45)).mul(leaf.r.mul(1.5)).mul(crownAO.mul(0.8).add(0.2)).mul(isLeaf);
@@ -1819,6 +1874,20 @@ function roadWetMasks(field, drainage = 0.0) {
 }
 
 /**
+ * `detail()` where `active` holds, else `flat`, the value the detail's own fade settles to: texture that the pixel
+ * footprint or the distance has faded out is skipped instead of computed and multiplied by zero (slop-newyork
+ * 91dc313/95e455c). Call inside a Fn, with every input that is shared with other code or takes derivatives already in
+ * a variable; never take a derivative inside `detail`.
+ */
+function fadedDetail(active, flat, detail) {
+  const out = float(flat).toVar();
+  If(active, () => {
+    out.assign(detail());
+  });
+  return out;
+}
+
+/**
  * Unified Manhattan Roadway Asphalt, Footprint-Filtered Aggregate `bumpNormal`, Scattered Manholes
  * & Post-Rain Wetness (upgraded with techniques from CityGenerator.js `createRoadMaterial`).
  * cityUniforms.uRoadWetness drives damp stains, a glossy wet film & standing puddles (roadWetMasks): bone dry at
@@ -1826,7 +1895,7 @@ function roadWetMasks(field, drainage = 0.0) {
  * (as for the rivers), so puddles reflect the street through SSR at grazing angles yet only darken seen from above.
  * Lane markings are separate geometry built from the road network (js/road-paint.js).
  */
-function createRoadSurfaceMaterial() {
+function createRoadSurfaceMaterial(shared = null) {
   const mat = new THREE.MeshStandardNodeMaterial({
     metalness: 0.24,
     roughness: 0.48
@@ -1846,20 +1915,27 @@ function createRoadSurfaceMaterial() {
   const pixelSize = length(fwidth(positionWorld.xz));
   const viewDir = normalize(cameraPosition.sub(positionWorld));
   const waterFresnel = pow(float(1.0).sub(clamp(viewDir.y, 0.0, 1.0)), 5.0).mul(0.98).add(0.02);
+  // createTerrainMaterial branches around these channels: it evaluates their derivative input (fwidth) first
+  if (shared) shared.pixelSize = pixelSize;
 
   mat.aoNode = canyonSkyAONode();
 
+  // Faded-out detail layers branch on their fade instead of being computed and multiplied by zero (fadedDetail)
   mat.colorNode = Fn(() => {
     const wx = positionWorld.x;
     const wz = positionWorld.z;
-    const camDist = length(positionWorld.sub(cameraPosition));
-    const detail = smoothstep(240.0, 22.0, camDist);
+    const px = float(pixelSize).toVar();
+    const camDist = length(positionWorld.sub(cameraPosition)).toVar();
+    const detail = smoothstep(240.0, 22.0, camDist).toVar();
 
     // Two-scale aggregate grit, patchwork pours, oily wear stains & tar crack seams
-    const microAggregate = mix(float(0.5), noise2D(vec2(wx.mul(16.0), wz.mul(16.0))), smoothstep(0.06, 0.02, pixelSize));
-    const fineGrain = mix(float(0.5), noise2D(vec2(wx.mul(3.2), wz.mul(3.2))), smoothstep(0.4, 0.12, pixelSize));
+    const microAggregate = fadedDetail(px.lessThan(0.06), 0.5, () =>
+      mix(float(0.5), noise2D(vec2(wx.mul(16.0), wz.mul(16.0))), smoothstep(0.06, 0.02, px)));
+    const fineGrain = fadedDetail(px.lessThan(0.4), 0.5, () =>
+      mix(float(0.5), noise2D(vec2(wx.mul(3.2), wz.mul(3.2))), smoothstep(0.4, 0.12, px)));
     const patchNoise = noise2D(vec2(wx.mul(0.18), wz.mul(0.18)));
-    const oilyStain = smoothstep(0.52, 0.84, noise2D(vec2(wx.mul(0.42), wz.mul(0.42)))).mul(detail);
+    const oilyStain = fadedDetail(camDist.lessThan(240.0), 0.0, () =>
+      smoothstep(0.52, 0.84, noise2D(vec2(wx.mul(0.42), wz.mul(0.42)))).mul(detail));
     const tarSeam = float(1.0).sub(smoothstep(0.0, 0.04, abs(patchNoise.sub(0.52)))).mul(0.42).mul(detail);
 
     const baseAsphalt = mix(
@@ -1883,7 +1959,9 @@ function createRoadSurfaceMaterial() {
   })();
 
   mat.roughnessNode = Fn(() => {
-    const microRough = mix(float(0.04), noise2D(positionWorld.xz.mul(12.0)).mul(0.08), smoothstep(0.08, 0.03, pixelSize));
+    const px = float(pixelSize).toVar();
+    const microRough = fadedDetail(px.lessThan(0.08), 0.04, () =>
+      mix(float(0.04), noise2D(positionWorld.xz.mul(12.0)).mul(0.08), smoothstep(0.08, 0.03, px)));
     const wetRough = mix(float(0.90).add(microRough), float(0.38), max(film.mul(0.9), damp.mul(0.8)));
     return mix(wetRough, float(0.1), puddle);
   })();
@@ -1896,11 +1974,15 @@ function createRoadSurfaceMaterial() {
   mat.normalNode = Fn(() => {
     const wx = positionWorld.x;
     const wz = positionWorld.z;
-    const coarseFade = smoothstep(0.08, 0.025, pixelSize);
-    const fineFade = smoothstep(0.02, 0.006, pixelSize).mul(float(1.0).sub(film.mul(0.6)));
+    const px = float(pixelSize).toVar();
+    const coarseFade = smoothstep(0.08, 0.025, px).toVar();
+    const fineFade = smoothstep(0.02, 0.006, px).mul(float(1.0).sub(film.mul(0.6))).toVar();
 
-    const coarseGrit = noise2D(vec2(wx.mul(8.5), wz.mul(8.5))).sub(0.5).mul(0.0032).mul(coarseFade);
-    const fineGrit = noise2D(vec2(wx.mul(36.0), wz.mul(36.0))).sub(0.5).mul(0.0016).mul(fineFade);
+    // The relief's derivatives are taken by bumpNormal, after both branches
+    const coarseGrit = fadedDetail(px.lessThan(0.08), 0.0, () =>
+      noise2D(vec2(wx.mul(8.5), wz.mul(8.5))).sub(0.5).mul(0.0032).mul(coarseFade));
+    const fineGrit = fadedDetail(px.lessThan(0.02), 0.0, () =>
+      noise2D(vec2(wx.mul(36.0), wz.mul(36.0))).sub(0.5).mul(0.0016).mul(fineFade));
     return bumpNormal(coarseGrit.add(fineGrit).mul(float(1.0).sub(puddle)));
   })();
 
@@ -1910,12 +1992,16 @@ function createRoadSurfaceMaterial() {
 
     const roadFresnel = pow(clamp(float(1.0).sub(abs(viewDir.y)), 0.0, 1.0), 2.3);
 
-    const skyMirror = mix(cityUniforms.uSkyHorizonColor, cityUniforms.uSkyTopColor, 0.40).mul(0.10);
+    const skyMirror = mix(cityUniforms.uSkyHorizonColor, cityUniforms.uSkyTopColor, 0.40).mul(0.10).toVar();
 
-    const tsDist = clamp(float(1.0).sub(length(vec2(wx.add(212.0), wz.add(45.0))).div(145.0)), 0.0, 1.0);
-    const neonPatch = noise2D(vec2(wx.mul(0.15), wz.mul(0.15)));
-    const neonCol = mix(color(0xff2a85), color(0x2ad4ff), neonPatch).mul(0.32);
-    const reflectCol = mix(skyMirror, neonCol, tsDist.mul(0.65));
+    // Inherited neon tint, only within its 145 m reach
+    const tsDist = clamp(float(1.0).sub(length(vec2(wx.add(212.0), wz.add(45.0))).div(145.0)), 0.0, 1.0).toVar();
+    const reflectCol = vec3(skyMirror).toVar();
+    If(tsDist.greaterThan(0.0), () => {
+      const neonPatch = noise2D(vec2(wx.mul(0.15), wz.mul(0.15)));
+      const neonCol = mix(color(0xff2a85), color(0x2ad4ff), neonPatch).mul(0.32);
+      reflectCol.assign(mix(skyMirror, neonCol, tsDist.mul(0.65)));
+    });
 
     return reflectCol.mul(max(puddle, film.mul(0.35))).mul(roadFresnel).mul(cityUniforms.uInteriorGlow).mul(0.07);
   })();
@@ -1931,7 +2017,14 @@ function createRoadSurfaceMaterial() {
  * `maskTexture`: R8 DataTexture; `mask`: { originX, originZ, cell, w, h }.
  */
 function createTerrainMaterial(maskTexture, mask) {
-  const mat = createRoadSurfaceMaterial();
+  const road = {};
+  const mat = createRoadSurfaceMaterial(road);
+  // A height-above-terrain canyon heuristic is constant at ground level: it
+  // darkened every core ground class to ~0.343 ambient visibility, even in the
+  // open. Actual terrain normals and sun shadows supply the ground's form.
+  // Frozen Market/California A/B/A views verify readable shaded road detail;
+  // facade and separate grade-road occlusion keep their own material policy.
+  mat.aoNode = float(1);
   const asphaltColor = mat.colorNode;
   const asphaltRoughness = mat.roughnessNode;
   const asphaltMetalness = mat.metalnessNode;
@@ -1975,10 +2068,45 @@ function createTerrainMaterial(maskTexture, mask) {
     .div(max(ow00.add(ow10).add(ow01).add(ow11), 0.0001));
   const tone = noise2D(positionWorld.xz.mul(0.35)).mul(0.2).add(noise2D(positionWorld.xz.mul(2.1)).mul(0.08)).add(0.86);
 
-  mat.colorNode = mix(otherColor.mul(tone), asphaltColor, asphalt);
-  mat.roughnessNode = mix(float(0.92), asphaltRoughness, asphalt);
+  // Each side of the asphalt blend is only evaluated where its weight is non-zero (the 91dc313 pattern): lawns, hills,
+  // sand and rock skip the asphalt layers, the roadway skips the ground tone. The blend weight (fwidth), the mask
+  // samples and the road's pixel footprint (fwidth) are evaluated first, outside the branches: the footprint takes part
+  // in the (always true) branch condition so it is generated there, and the road's channels inside reuse it. The road's
+  // normalNode stays unconditional.
+  const asphaltActive = () => {
+    const a = float(asphalt).toVar();
+    const px = float(road.pixelSize).toVar();
+    return { a, paved: a.greaterThan(0.0).and(px.greaterThanEqual(0.0)) };
+  };
+  mat.colorNode = Fn(() => {
+    const { a, paved: active } = asphaltActive();
+    const ground = vec3(0.0).toVar();
+    If(a.lessThan(1.0), () => {
+      ground.assign(otherColor.mul(tone));
+    });
+    const paved = vec3(0.0).toVar();
+    If(active, () => {
+      paved.assign(asphaltColor);
+    });
+    return mix(ground, paved, a);
+  })();
+  mat.roughnessNode = Fn(() => {
+    const { a, paved: active } = asphaltActive();
+    const paved = float(0.0).toVar();
+    If(active, () => {
+      paved.assign(asphaltRoughness);
+    });
+    return mix(float(0.92), paved, a);
+  })();
   mat.metalnessNode = asphaltMetalness.mul(asphalt);
-  mat.emissiveNode = asphaltEmissive.mul(asphalt);
+  mat.emissiveNode = Fn(() => {
+    const { a, paved: active } = asphaltActive();
+    const paved = vec3(0.0).toVar();
+    If(active, () => {
+      paved.assign(asphaltEmissive);
+    });
+    return paved.mul(a);
+  })();
   return mat;
 }
 
@@ -2060,13 +2188,16 @@ function createSidewalkMaterial() {
   mat.colorNode = Fn(() => {
     const wx = positionWorld.x;
     const wz = positionWorld.z;
-    const camDist = length(positionWorld.sub(cameraPosition));
-    const detail = smoothstep(190.0, 16.0, camDist);
+    const px = float(pixelSize).toVar();
+    const camDist = length(positionWorld.sub(cameraPosition)).toVar();
+    const detail = smoothstep(190.0, 16.0, camDist).toVar();
 
     const panel = 1.5; // 5 ft NYC concrete sidewalk flags
     const panelHash = hash2D(floor(vec2(wx.div(panel), wz.div(panel))));
     const tone = noise2D(vec2(wx.mul(0.48), wz.mul(0.48)));
-    const grit = noise2D(vec2(wx.mul(14.0), wz.mul(14.0))).sub(0.5).mul(0.08).mul(detail).mul(smoothstep(0.07, 0.02, pixelSize));
+    // Skipped once faded out (fadedDetail); the joints' gridLine takes derivatives, so it stays unconditional
+    const grit = fadedDetail(px.lessThan(0.07).and(camDist.lessThan(190.0)), 0.0, () =>
+      noise2D(vec2(wx.mul(14.0), wz.mul(14.0))).sub(0.5).mul(0.08).mul(detail).mul(smoothstep(0.07, 0.02, px)));
 
     // Filter-width anti-aliased 1.5m scored joints
     const joints = max(gridLine(wx, panel, 0.042), gridLine(wz, panel, 0.042)).mul(detail);
@@ -2094,11 +2225,12 @@ function createSidewalkMaterial() {
   mat.normalNode = Fn(() => {
     const wx = positionWorld.x;
     const wz = positionWorld.z;
-    const camDist = length(positionWorld.sub(cameraPosition));
+    const camDist = length(positionWorld.sub(cameraPosition)).toVar();
     const detail = smoothstep(140.0, 14.0, camDist);
 
     const joints = max(gridLine(wx, 1.5, 0.042), gridLine(wz, 1.5, 0.042));
-    const grain = noise2D(vec2(wx.mul(4.5), wz.mul(4.5))).sub(0.5).mul(0.003);
+    // The whole relief fades out with distance, so its grain is skipped beyond that
+    const grain = fadedDetail(camDist.lessThan(140.0), 0.0, () => noise2D(vec2(wx.mul(4.5), wz.mul(4.5))).sub(0.5).mul(0.003));
     const height = grain.sub(joints.mul(0.012)).mul(detail).mul(float(1.0).sub(swPuddle));
     return bumpNormal(height);
   })();
@@ -2122,11 +2254,12 @@ function createCurbMaterial() {
   mat.colorNode = Fn(() => {
     const wx = positionWorld.x;
     const wz = positionWorld.z;
-    const camDist = length(positionWorld.sub(cameraPosition));
-    const detail = smoothstep(180.0, 16.0, camDist);
+    const camDist = length(positionWorld.sub(cameraPosition)).toVar();
+    const detail = smoothstep(180.0, 16.0, camDist).toVar();
 
     const tone = noise2D(vec2(wx.mul(0.6), wz.mul(0.6)));
-    const speckle = noise2D(vec2(wx.mul(18.0), wz.mul(18.0))).sub(0.5).mul(0.06).mul(detail);
+    const speckle = fadedDetail(camDist.lessThan(180.0), 0.0, () =>
+      noise2D(vec2(wx.mul(18.0), wz.mul(18.0))).sub(0.5).mul(0.06).mul(detail));
     const stone = mix(color(0x4c4c45), color(0x63635a), tone).add(speckle);
 
     const joints = max(gridLine(wx, 1.5, 0.038), gridLine(wz, 1.5, 0.038)).mul(detail);
@@ -2140,10 +2273,10 @@ function createCurbMaterial() {
   mat.normalNode = Fn(() => {
     const wx = positionWorld.x;
     const wz = positionWorld.z;
-    const camDist = length(positionWorld.sub(cameraPosition));
-    const detail = smoothstep(120.0, 12.0, camDist);
-    const grain = noise2D(vec2(wx.mul(5.5), wz.mul(5.5))).sub(0.5).mul(0.0022);
-    return bumpNormal(grain.mul(detail));
+    const camDist = length(positionWorld.sub(cameraPosition)).toVar();
+    const grain = fadedDetail(camDist.lessThan(120.0), 0.0, () =>
+      noise2D(vec2(wx.mul(5.5), wz.mul(5.5))).sub(0.5).mul(0.0022).mul(smoothstep(120.0, 12.0, camDist)));
+    return bumpNormal(grain);
   })();
 
   return mat;
@@ -2817,8 +2950,8 @@ function createWaterMaterial() {
   const zSt = (n) => N.streetZ(n);
   // smoothstep over a band of numbered streets; none in San Francisco (streetZ is flat 0), where WGSL rejects low == high
   const band = (a, b, v) => (a === b ? float(0.0) : smoothstep(a, b, v));
-  mat.emissiveNode = Fn(() => {
-    const night = smoothstep(0.55, 1.35, cityUniforms.uInteriorGlow);
+  const night = smoothstep(0.55, 1.35, cityUniforms.uInteriorGlow);
+  const skyline = Fn(() => {
     const P = positionWorld.xz;
     const R = reflect(viewDir.negate(), waterNormal);
     const horiz = max(length(R.xz), 0.001);
@@ -2900,6 +3033,18 @@ function createWaterMaterial() {
     // and down the Upper Bay, where its shorelines no longer match the boroughs
     const region = smoothstep(IB.minZ - 400.0, IB.minZ - 100.0, P.y).mul(float(1.0).sub(smoothstep(IB.maxZ + 200.0, IB.maxZ + 600.0, P.y)));
     return city.mul(brightness).mul(treeline).mul(fresnel).mul(night).mul(region);
+  });
+  mat.emissiveNode = Fn(() => {
+    const emit = vec3(0.0).toVar();
+    // NYC js/tsl-materials.js @ 99bf67f8ceaf1c05d18e0d33e8c9336dbc47dfbf, retained in donor
+    // 9c4cfc9e32a425d58bac36cf9e074a2aa77fac70 / runtime cf56976bd21f4e29c706c7fa2ec01a1474da98a5.
+    // Adapted from upstream f097197250fe3777a96af62e849229537c3f9d13: uniform daylight gate only.
+    // Skip exactly-zero emission; keep SF geography and the full night raycast, fwidth(hRefl/u) and region fade.
+    // A spatial guard would put the derivatives in non-uniform control flow.
+    If(night.greaterThan(0.0), () => {
+      emit.assign(skyline());
+    });
+    return emit;
   })();
 
   return mat;
@@ -3287,5 +3432,5 @@ function createCarFlareMaterial() {
   return mat;
 }
 
-Object.assign(window.NYC, { cityUniforms, WALL_KINDS, createCurtainWallMaterial, createPreWarBuildingMaterial, createFacadeBoxes, createChryslerCrownMaterial, createCarPaintMaterial, createFoliageMaterial, createTreeBarkMaterial, createTreeMaterial, createParkPavingMaterial, createParkWallMaterial, createIronFenceMaterial, createParkLampGlobeMaterial, createParkLampPoolMaterial, createTunnelShadeMaterial, createTktsStepMaterial, createMarbleAshlarMaterial, createTreeGrateMaterial, createRoadSurfaceMaterial, createTerrainMaterial, createRoadPaintMaterial, createSidewalkMaterial, createCurbMaterial, createBillboardMaterial, createWaterMaterial, createParkLawnMaterial, createSteamMaterial, createGodRayMaterial, createContactShadowMaterial, createHeadlightBeamMaterial, createCarFlareMaterial });
+Object.assign(window.NYC, { TreeNodeMaterial, cityUniforms, WALL_KINDS, filteredPulse, createCurtainWallMaterial, createPreWarBuildingMaterial, createFacadeBoxes, createChryslerCrownMaterial, createCarPaintMaterial, createFoliageMaterial, createTreeBarkMaterial, createTreeMaterial, createParkPavingMaterial, createParkWallMaterial, createIronFenceMaterial, createParkLampGlobeMaterial, createParkLampPoolMaterial, createTunnelShadeMaterial, createTktsStepMaterial, createMarbleAshlarMaterial, createTreeGrateMaterial, createRoadSurfaceMaterial, createTerrainMaterial, createRoadPaintMaterial, createSidewalkMaterial, createCurbMaterial, createBillboardMaterial, createWaterMaterial, createParkLawnMaterial, createSteamMaterial, createGodRayMaterial, createContactShadowMaterial, createHeadlightBeamMaterial, createCarFlareMaterial });
 })();

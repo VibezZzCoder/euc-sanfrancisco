@@ -829,6 +829,7 @@ function buildTreeGeometries(speciesIndex, variant, tileMeters) {
   const crown = makeCrown(pts);
 
   const geos = [];
+  let rideTrunk = null;
   const levels = variant === 0 ? [0, 1, 2] : [0, 1];
   for (const lod of levels) {
     const gb = new TreeGeometryBuilder();
@@ -839,6 +840,12 @@ function buildTreeGeometries(speciesIndex, variant, tileMeters) {
       if (lod === 0) {
         const radial = [9, 6, 4, 3][b.level];
         addTube(gb, b, radial, 1, aoAt, swayWeight);
+        if (b.level === 0 && window.NYC.RideGeometry) {
+          // Two compact, construction-derived lower-trunk envelopes. Cache per species /
+          // variant, not per rendered tree/LOD. Crowns and branch reservations are not bodies.
+          rideTrunk = window.NYC.RideGeometry.convexSlices(gb.pos, gb.idx, 'wood',
+            { minY: 0, maxY: 3.2, maxSlices: 2, sliceHeight: 1.6 });
+        }
       } else if (lod === 1 && b.level <= 2) {
         addTube(gb, b, [6, 5, 3][b.level], 2, aoAt, swayWeight);
       } else if (lod === 2 && b.level <= 1) {
@@ -849,14 +856,19 @@ function buildTreeGeometries(speciesIndex, variant, tileMeters) {
     for (const c of cards) addCard(gb, c.at, c.up, c.face, c.size, c.tile, rng() < 0.5, rng(), crown);
     const g = gb.build();
     g.userData = { species: sp.name, variant, lod, cards: cards.length, triangles: gb.idx.length / 3 };
+    if (lod === 0) g.userData.rideTrunk = rideTrunk;
     geos[lod] = g;
   }
   return geos;
 }
 
 // =====================================================================================================================
-// 5. TREE FIELD: per-tree level of detail, regrouped into one instanced mesh per species / variant / level
+// 5. TREE FIELD: CPU cell-hierarchical selection feeding the original global species / variant / level pools
 // =====================================================================================================================
+// CPU hierarchy adapted from euc-newyork@9c4cfc9e32a425d58bac36cf9e074a2aa77fac70, js/trees.js
+// (Mr.doob's e35c06c hierarchy, corrected global-pool hybrid). Cells select candidates; global pools retain draw order.
+// Keep SF's six species, terrain-aware movement gate, render-hook owner and startup/shadow policy unchanged.
+const TREE_CELL_SIZE = 200;
 const LOD_NEAR = 105; // full detail within (m)
 const LOD_MID = 420; // coarse cards & branches within; whole-crown cards beyond
 const LOD_HYSTERESIS = 6;
@@ -879,14 +891,31 @@ function hashPos(x, y, z) {
  * tree's level of detail up to date from the camera of every view pass (scene.onBeforeRender). Returns
  * { group, material, atlas, update(cameraPosition) }.
  */
+// One leaf atlas, material and species geometry set per page, shared by the street-tree field, the regional tree pool
+// (region.js) and landmark plantings (landmarks.js), so every tree in the city shades alike and the atlas is drawn once.
+// Whoever asks first builds it (the region is built before the street trees). `regionalMaterial` is the same material
+// with the canyon sky occlusion taken from the tree's own height instead of the core terrain texture (which only covers
+// the downtown core and clamps outside it).
+let sharedTreeAssets = null;
+function getTreeAssets() {
+  if (sharedTreeAssets) return sharedTreeAssets;
+  const atlas = createLeafAtlas();
+  const material = createTreeMaterial(atlas.texture);
+  // Geometries: [species][variant][lod]
+  const geos = SPECIES.map((_, s) => [0, 1].map((v) => buildTreeGeometries(s, v, atlas.tileMeters)));
+  let regional = null;
+  sharedTreeAssets = {
+    atlas, material, geos,
+    get regionalMaterial() { return regional || (regional = createTreeMaterial(atlas.texture, { localSkyAO: true })); }
+  };
+  return sharedTreeAssets;
+}
+window.NYC.getTreeAssets = getTreeAssets;
+
 function createTreeField(scene, sites) {
   const group = new THREE.Group();
   group.name = 'Trees';
-  const atlas = createLeafAtlas();
-  const material = createTreeMaterial(atlas.texture);
-
-  // Geometries: [species][variant][lod]
-  const geos = SPECIES.map((_, s) => [0, 1].map((v) => buildTreeGeometries(s, v, atlas.tileMeters)));
+  const { atlas, material, geos } = getTreeAssets();
 
   // Per-tree transform & data
   const N = sites.length;
@@ -914,6 +943,7 @@ function createTreeField(scene, sites) {
 
   const dummy = new THREE.Object3D();
   const tint = new THREE.Color();
+  const cells = new Map();
   sites.forEach((t, i) => {
     const sp = Math.min(SPECIES.length - 1, Math.max(0, t.species || 0));
     const r1 = hashPos(t.x, 1.3, t.z);
@@ -926,18 +956,58 @@ function createTreeField(scene, sites) {
     dummy.scale.set(s * (0.9 + r3 * 0.2) * (t.sx || 1), s * (0.88 + r1 * 0.24), s * (0.9 + r2 * 0.2) * (t.sz || 1));
     dummy.updateMatrix();
     dummy.matrix.toArray(mats, i * 16);
+    const R = window.NYC.RideGeometry, e = dummy.matrix.elements;
+    // (`body: false`: the site's owner already registered its trunk, e.g. landmarks.js's Salesforce Park plantings)
+    if (R && t.body !== false) for (const p of geos[sp][variant][0].userData.rideTrunk || []) {
+      R.addPrism(p.outer.map((v) => ({ x: e[0] * v.x + e[8] * v.z + e[12], z: e[2] * v.x + e[10] * v.z + e[14] })),
+        e[13] + p.minY * e[5], e[13] + p.maxY * e[5], { surface: 'wood' });
+    }
     tint.setHex(SPECIES[sp].tints[Math.floor(r3 * 2.999)]).multiplyScalar(0.82 + r1 * 0.36);
     data.set([tint.r, tint.g, tint.b, sp + r2 * 0.999], i * 4);
     px[i] = t.x;
     py[i] = (t.y || 0) + 6 * s;
     pz[i] = t.z;
     tier[i] = Math.min(2, t.tier || 0);
+    // Construction-only signed keys; no packed-coordinate aliasing or extra GPU batches.
+    const key = Math.floor(t.x / TREE_CELL_SIZE) + ',' + Math.floor(t.z / TREE_CELL_SIZE);
+    let cell = cells.get(key);
+    if (!cell) cells.set(key, cell = { trees: [] });
+    cell.trees.push(i);
     const mi = meshIndex[sp];
     meshOf[i * 3] = mi.l0[variant];
     meshOf[i * 3 + 1] = mi.l1[variant];
     meshOf[i * 3 + 2] = mi.l2;
     for (let l = 0; l < 3; l++) meshes[meshOf[i * 3 + l]].capacity++;
   });
+
+  // Bounds enclose the original Float32 mid-crown samples in all three dimensions. They select only LOD;
+  // they never frustum-cull geometry/shadows or change the construction-time physical trunk registrations.
+  const cellList = Array.from(cells.values(), (cell) => {
+    const trees = Int32Array.from(cell.trees);
+    const bounds = new THREE.Box3();
+    const point = new V3();
+    let minCutoff = Infinity, maxCutoff = 0;
+    for (const i of trees) {
+      bounds.expandByPoint(point.set(px[i], py[i], pz[i]));
+      minCutoff = Math.min(minCutoff, MAX_DIST[tier[i]]);
+      maxCutoff = Math.max(maxCutoff, MAX_DIST[tier[i]]);
+    }
+    const center = bounds.getCenter(new V3());
+    let radiusSq = 0;
+    for (const i of trees) radiusSq = Math.max(radiusSq, point.set(px[i], py[i], pz[i]).distanceToSquared(center));
+    cell.trees = trees;
+    cell.cx = center.x;
+    cell.cy = center.y;
+    cell.cz = center.z;
+    cell.radius = Math.sqrt(radiusSq) + 0.001;
+    cell.minCutoffAloft = minCutoff;
+    cell.maxCutoffAloft = maxCutoff;
+    cell.minCutoffLow = Math.min(minCutoff, LOW_CUTOFF);
+    cell.maxCutoffLow = Math.min(maxCutoff, LOW_CUTOFF);
+    cell.uniformLod = 255; // -1 means mixed, 255 means hidden
+    return cell;
+  });
+  cells.clear();
 
   const instanced = meshes.map((m) => {
     const geo = new THREE.BufferGeometry();
@@ -971,8 +1041,11 @@ function createTreeField(scene, sites) {
       const mi = meshOf[i * 3 + l];
       const mesh = instanced[mi];
       const c = counts[mi]++;
-      mesh.instanceMatrix.array.set(mats.subarray(i * 16, i * 16 + 16), c * 16);
-      mesh.geometry.attributes.aTreeData.array.set(data.subarray(i * 4, i * 4 + 4), c * 4);
+      // Copy the same Float32 values without two transient views per visible tree.
+      // Resolve the destination each rebuild: the host may replace it with a storage attribute.
+      const matrix = mesh.instanceMatrix.array, treeData = mesh.geometry.attributes.aTreeData.array;
+      for (let k = 0; k < 16; k++) matrix[c * 16 + k] = mats[i * 16 + k];
+      for (let k = 0; k < 4; k++) treeData[c * 4 + k] = data[i * 4 + k];
     }
     instanced.forEach((mesh, mi) => {
       const n = counts[mi];
@@ -989,6 +1062,19 @@ function createTreeField(scene, sites) {
     });
   }
 
+  function setCellUniformLod(cell, target) {
+    if (cell.uniformLod === target) return false;
+    let changed = false;
+    for (const i of cell.trees) {
+      if (lod[i] !== target) {
+        lod[i] = target;
+        changed = true;
+      }
+    }
+    cell.uniformLod = target;
+    return changed;
+  }
+
   // Levels from the camera position (3D distance to mid-crown), with hysteresis at every boundary
   const last = new V3(Infinity, Infinity, Infinity);
   const cam = new V3();
@@ -1001,24 +1087,46 @@ function createTreeField(scene, sites) {
     last.copy(cam);
     const low = cam.y < 40;
     let changed = false;
-    for (let i = 0; i < N; i++) {
-      const dx = px[i] - cam.x;
-      const dy = py[i] - cam.y;
-      const dz = pz[i] - cam.z;
-      const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
-      const maxD = low ? Math.min(MAX_DIST[tier[i]], LOW_CUTOFF) : MAX_DIST[tier[i]];
-      // levels 0-2, 3 = hidden; next to a boundary a tree keeps the level it has
-      const curL = lod[i] === 255 ? 3 : lod[i];
-      let nextL = d < LOD_NEAR ? 0 : d < LOD_MID ? 1 : d < maxD ? 2 : 3;
-      if (Math.abs(nextL - curL) === 1) {
-        const edge = [LOD_NEAR, LOD_MID, maxD][Math.min(nextL, curL)];
-        if (Math.abs(d - edge) < LOD_HYSTERESIS) nextL = curL;
+    for (const cell of cellList) {
+      const dx = cell.cx - cam.x, dy = cell.cy - cam.y, dz = cell.cz - cam.z;
+      const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      const minD = distance - cell.radius, maxD = distance + cell.radius;
+      const maxCutoff = low ? cell.maxCutoffLow : cell.maxCutoffAloft;
+      const minCutoff = low ? cell.minCutoffLow : cell.minCutoffAloft;
+      let target = -1;
+      // Only a whole cell safely clear of every applicable hysteresis band can skip per-tree arithmetic.
+      if (minD >= maxCutoff + LOD_HYSTERESIS) target = 255;
+      else if (maxD < LOD_NEAR - LOD_HYSTERESIS) target = 0;
+      else if (minD >= LOD_NEAR + LOD_HYSTERESIS && maxD < LOD_MID - LOD_HYSTERESIS) target = 1;
+      else if (minD >= LOD_MID + LOD_HYSTERESIS && maxD < minCutoff - LOD_HYSTERESIS) target = 2;
+      if (target !== -1) {
+        if (setCellUniformLod(cell, target)) changed = true;
+        continue;
       }
-      const next = nextL === 3 ? 255 : nextL;
-      if (next !== lod[i]) {
-        lod[i] = next;
-        changed = true;
+
+      let firstLod = -1, allSame = true;
+      for (const i of cell.trees) {
+        const dx = px[i] - cam.x;
+        const dy = py[i] - cam.y;
+        const dz = pz[i] - cam.z;
+        // Preserve baseline sqrt/order at edges: squared thresholds can disagree by an ULP.
+        const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        const maxD = low ? Math.min(MAX_DIST[tier[i]], LOW_CUTOFF) : MAX_DIST[tier[i]];
+        const curL = lod[i] === 255 ? 3 : lod[i];
+        let nextL = d < LOD_NEAR ? 0 : d < LOD_MID ? 1 : d < maxD ? 2 : 3;
+        if (Math.abs(nextL - curL) === 1) {
+          const edge = [LOD_NEAR, LOD_MID, maxD][Math.min(nextL, curL)];
+          if (Math.abs(d - edge) < LOD_HYSTERESIS) nextL = curL;
+        }
+        const next = nextL === 3 ? 255 : nextL;
+        if (next !== lod[i]) {
+          lod[i] = next;
+          changed = true;
+        }
+        if (firstLod === -1) firstLod = next;
+        else if (next !== firstLod) allSame = false;
       }
+      cell.uniformLod = allSame ? firstLod : -1;
     }
     if (changed) rebuild();
     return changed;

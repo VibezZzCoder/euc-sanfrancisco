@@ -3,7 +3,10 @@
 // building masses are left out only under a modelled outline, and the Bay Bridge hands its decks to the freeway.
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { buildLandmarksHeadless, available } = require('./helpers/landmarks-build.cjs');
+const { readFileSync } = require('node:fs');
+const { join } = require('node:path');
+const vm = require('node:vm');
+const { buildLandmarksHeadless, available, stub } = require('./helpers/landmarks-build.cjs');
 
 const skip = !available && 'no data';
 const TIER1 = ['transamerica', 'salesforce-tower', 'ferry-building', 'coit-tower', 'city-hall', 'sutro-tower', 'palace-of-fine-arts', 'oracle-park'];
@@ -19,7 +22,11 @@ test('every Tier 1 landmark and both bridges are built', { skip }, () => {
 test('landmark and bridge colliders are finite OBBs within their landmark\'s heights', { skip }, () => {
   const { landmarks, bridges, NYC } = buildLandmarksHeadless();
   const all = [...landmarks.colliders, ...bridges.colliders];
-  assert.ok(landmarks.colliders.length > 40 && bridges.colliders.length > 60, `${landmarks.colliders.length} + ${bridges.colliders.length} colliders`);
+  assert.ok(landmarks.colliders.length > 40, `${landmarks.colliders.length} landmark colliders`);
+  // 09977d5 removed the old whole-deck/tower envelopes. Remaining bridge OBBs are navigation-only;
+  // physical deck coverage is checked against the real registry below, not an obsolete >60 envelope count.
+  assert.ok(bridges.colliders.length > 0, 'bridge navigation OBBs remain');
+  assert.ok(bridges.colliders.every(c => c.rideIgnore === true), 'legacy envelopes must not block EUC riding');
   const water = NYC.Terrain.waterLevel;
   for (const c of all) {
     for (const k of ['minX', 'maxX', 'minZ', 'maxZ', 'minY', 'maxY']) assert.ok(Number.isFinite(c[k]), `collider ${k} ${c[k]}`);
@@ -44,6 +51,41 @@ test('generated masses are left out under modelled outlines only', { skip }, () 
   for (const name of ['Transamerica Pyramid', 'Salesforce Tower', 'San Francisco City Hall', 'Oracle Park']) assert.ok(NYC.landmarkCovers(S[name].x, S[name].z), `${name} covered`);
   assert.ok(!NYC.landmarkCovers(0, 0), 'Market & Montgomery is not');
   assert.ok(!NYC.landmarkCovers(S['Ghirardelli Square'].x, S['Ghirardelli Square'].z), 'Ghirardelli keeps its buildings (a sign on them)');
+});
+
+test('registered bridge decks supply native layered support independently of navigation envelopes', { skip }, async () => {
+  const { SfTerrainSampler } = await import('../js/sf-terrain-sampler.js');
+  // The shared inherited fixture builds navigation records only. Build registered bridges in a separate context
+  // using its decoded runtime tiled terrain, leaving its cached NYC and other consumers untouched.
+  const NYC = { ...buildLandmarksHeadless().NYC, ride: undefined, RideGeometry: undefined };
+  const context = vm.createContext({ window: { NYC }, console: { info() {} } });
+  for (const file of ['sf-ride-geometry', 'sf-bridges']) {
+    vm.runInContext(readFileSync(join(__dirname, `../js/${file}.js`), 'utf8'), context);
+  }
+  const bridges = NYC.buildSFBridges(stub());
+  const s = new SfTerrainSampler({ city: NYC, colliders: bridges.colliders });
+  const navigationOnly = new SfTerrainSampler({ terrain: NYC.Terrain, colliders: bridges.colliders });
+  assert.ok(s.stats.tops > 0 && s.stats.boxes > 0 && s.stats.prisms > 0, 'decks and individual structural bodies registered');
+  assert.equal(navigationOnly.colliderCount, 0, 'coarse envelopes are excluded from native collision');
+  const gg = NYC.GEO.bridges.goldenGate.towers.map(t => t.c);
+  const probes = [{ name: 'Golden Gate main span', x: (gg[0][0] + gg[1][0]) / 2,
+    z: (gg[0][1] + gg[1][1]) / 2, y: NYC.Terrain.waterLevel + 75 }];
+  const west = NYC.GEO.bridges.bayBridge.towers.map(t => t.c).sort((a, b) => a[0] - b[0]);
+  for (const i of [0, 2]) {
+    const x = (west[i][0] + west[i + 1][0]) / 2, z = (west[i][1] + west[i + 1][1]) / 2;
+    for (const upper of [false, true]) {
+      const deck = bridges.bridgeDeckAt(x, z, upper);
+      assert.ok(deck?.onBridge);
+      probes.push({ name: `Bay span ${i / 2 + 1} ${upper ? 'upper' : 'lower'}`, x, z, y: deck.y });
+    }
+  }
+  for (const { name, x, z, y } of probes) {
+    const ground = s.sampleGround(x, z, { normal: {} }, y);
+    assert.ok(Math.abs(ground.height - y) < 0.05, `${name}: ${ground.height} vs ${y}`);
+    assert.ok(ground.registered && ground.support.layered && ground.support.shore && !ground.water, `${name}: dry layered deck`);
+    const bare = navigationOnly.sampleGround(x, z, { normal: {} }, y);
+    assert.ok(Math.abs(bare.height - y) > 10, `${name}: navigation-only control must miss the deck`);
+  }
 });
 
 test('the Bay Bridge carries the I-80 decks: upper westbound over the lower, high over the water, none off the bridge', { skip }, () => {

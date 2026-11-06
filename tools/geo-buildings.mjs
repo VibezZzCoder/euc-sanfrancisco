@@ -6,7 +6,7 @@
 // Land Use, ludb) has retail floor space (shop fronts), and its class (P4.1, rules in tools/building-rules.json): type,
 // palette set, bay windows, garage, era, front width, row size, and for towers the Tall Building Inventory's storey
 // height, storeys, facade material and tower/base plan ratio.
-// Output: data/buildings-<box>.bin (format: docs/formats.md, "sf-buildings"), docs/reports/building-types-<box>.md and
+// Output: data/buildings-<box>.bin (format: provenance/formats.md, "sf-buildings"), docs/reports/building-types-<box>.md and
 // docs/review/p4/types.svg (footprints coloured by type).
 import fs from 'node:fs';
 import path from 'node:path';

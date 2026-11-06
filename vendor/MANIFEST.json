@@ -1,0 +1,31 @@
+{
+  "threeCommit": "e27dfa95ae7f453b5d7a9a36ffdb563f7c9b529b",
+  "fonts": "https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..800&family=Overpass:wght@600;700&display=swap",
+  "files": {
+    "css/fonts.css": "fca49efe0edea08e5efd885cbed2b1cbe659e61bdb567c04e3b1af4c661fd555",
+    "fonts/inter-latin-ext.woff2": "5e6d4fe9d9f4bff8b2a2469d25ab19576bb85331e22c6ed51398e16f95d56a9c",
+    "fonts/inter-latin.woff2": "2c295d99e26dcf357d4d01bcf270fd6924b600c9a13dd8c363ef114f4c6976fa",
+    "fonts/OFL-Inter.txt": "5b9321a4298cfeb6b34354164a1c3afc3db114569984c502b9b35d988fd58c57",
+    "fonts/OFL-Overpass.txt": "86e5ff25c701ec446d20b1a85b02ee6d36de8503a7288a4c948f5459809af1f0",
+    "fonts/overpass-latin-ext.woff2": "0a1c9727f08b91252c19bd4ca36caf98162455f33c0adcac935606b5d8d11938",
+    "fonts/overpass-latin.woff2": "29217ef8adef5f6c059feb461bdb029348205fc233dc9b6ca8604b0d068ac086",
+    "vendor/three/build/three.core.js": "5fb576f559a503bdaaac4990a632984a3673f13369e947540986b0d392be3a2f",
+    "vendor/three/build/three.tsl.js": "e9d33e4c7b4917ebbd890565c58a5ae0e4db3909974d7a9156e10df6aad71634",
+    "vendor/three/build/three.webgpu.js": "a8b76de96ec32506b9b8b74ecf7a82d636e1a82f3e778d41f16547e924e34764",
+    "vendor/three/examples/jsm/lighting/ClusteredLighting.js": "28d00d4a745a8927d7e0f0d8664d94d23d98ffea120ff54183b40973be45bf17",
+    "vendor/three/examples/jsm/lights/SunLight.js": "580a50687031518ea66e4b0cb85884d657d2f7dc72d38e64e6c874d51f5aa2eb",
+    "vendor/three/examples/jsm/lights/SunLightNode.js": "d64be448da7631e35c8382b4b80906326613739f4891301820886bddaaf9c337",
+    "vendor/three/examples/jsm/lights/SunLightShadow.js": "fd3ecd1e7d426813607f2829a1f767c0473ddbf3b3507d1cc9cca888a6839e31",
+    "vendor/three/examples/jsm/lights/SunShadowNode.js": "3e5e7f347c49f59b946b6958f2b88863fc7ee38fd6b992917f4a6c2f2190654c",
+    "vendor/three/examples/jsm/objects/SkyMesh.js": "64804362f468a70d5d0283161241d85ef5c47fa1944ca916542a04217c3ebe64",
+    "vendor/three/examples/jsm/tsl/display/BloomNode.js": "e7a39bf41581b5ada6463dfd2e571c6fff27648e459cc0d7fd13d64bbcf0f6ea",
+    "vendor/three/examples/jsm/tsl/display/boxBlur.js": "fa6f4ce3c9b1205fa3cc8a9da7783e57405402b6aa62a4bd984a8b0ac5ded115",
+    "vendor/three/examples/jsm/tsl/display/ImportanceSampledEnvironment.js": "a938b9efb1432628871515c030a069d91694e708c1b6ad2ebaa691aecdbd16ef",
+    "vendor/three/examples/jsm/tsl/display/SSRNode.js": "38a173b21e9825fe3cdfaf319ba29c4bfb6693536aae9ae517c037fb5bb15967",
+    "vendor/three/examples/jsm/tsl/lighting/ClusteredLightsNode.js": "19eb45bf3b6f3f9f14c02ba43dd8ee004fc69a6db6bdd2899bd06b3d5b4d7b0e",
+    "vendor/three/examples/jsm/tsl/utils/RNoise.js": "a235650eba39528ff10f987c497552c65a3affc4633591f34aae24b4ae98a20b",
+    "vendor/three/examples/jsm/tsl/utils/SpecularHelpers.js": "34b6de70b079a1418eb8fe7fc3588f32860f3f591cbac965c062fff8e73ffb19",
+    "vendor/three/examples/jsm/utils/BufferGeometryUtils.js": "48916101a392fd03e0d93dd8ff4b292e14262b64df82b23b5068a6c7578bade3",
+    "vendor/three/LICENSE": "8b378ebe60e2fe500158cb0ac71cb5e8b7d92953c2abcc63a0eb90499653b5bc"
+  }
+}

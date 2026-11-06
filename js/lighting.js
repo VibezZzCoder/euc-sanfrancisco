@@ -199,6 +199,26 @@ class LightingSystem {
     // Suppress shadow acne along the surface normal in world units
     // so short casters like cars, curbs, tree trunks, and pedestrians keep crisp contact shadows
     this.sunLight.shadow.normalBias = 0.05;
+    // slop-newyork e17cde4: SunLightShadow raises its caster ceiling only camera.far (300-720 m along the sun ray) above
+    // the view frustum, which slices tall casters upstream of the view: Salesforce Tower (~326 m), Sutro Tower (top
+    // ~550 m above datum on its hill) and the hills themselves. Shift each cascade camera a further
+    // SHADOW_CEILING_M / sunDir.y towards the sun and extend its far plane to match, so every SF caster stays in front of
+    // the cascade near plane at any yaw and time-of-day preset. Cascade fitting, texel snapping and splits are unchanged.
+    const SHADOW_CEILING_M = 600;
+    const fitCascades = this.sunLight.shadow.updateMatrices;
+    this.sunLight.shadow.updateMatrices = function (light, viewCamera) {
+      if (viewCamera === undefined) return;
+      fitCascades.call(this, light, viewCamera);
+      const extra = Math.ceil(SHADOW_CEILING_M / Math.max(0.25, this.getCamera(0).matrixWorld.elements[9]));
+      for (let i = 0; i < this.getViewportCount(); i++) {
+        const cam = this.getCamera(i);
+        cam.translateZ(extra);
+        cam.far += extra;
+        cam.updateProjectionMatrix();
+        cam.updateMatrixWorld();
+        this._updateMatrix(cam, this._matrices[i], this._frustums[i], this._viewports[i]);
+      }
+    };
     this.scene.add(this.sunLight);
 
     // Subtle Hemisphere Sky + Warm Terracotta/Limestone Ground Bounce Fill

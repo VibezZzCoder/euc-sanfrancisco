@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
-import { readBin } from '../tools/geo-terrain.mjs';
+import { readBin } from './helpers/runtime-region.cjs';
 import { toWorld, RAW } from '../tools/geo-base.mjs';
 
 import geoBox from './helpers/geo-box.cjs';

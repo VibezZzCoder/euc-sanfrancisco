@@ -126,7 +126,7 @@ export function buildRoadGraph(box = BOX, curbs = buildCurbIslands(box)) {
     if (/\bTUNL\b|TUNNEL/.test(name)) flags |= FLAGS.tunnel;
     if (/\bRAMP\b/.test(name)) flags |= FLAGS.ramp;
     if (p.layer === 'STREETS_PEDESTRI') flags |= FLAGS.pedestrian;
-    if (/^PRIVATE/.test(p.layer)) flags |= FLAGS.private;
+    if (p.layer.startsWith('PRIVATE')) flags |= FLAGS.private;
     const a = nodeOf(String(Number(p.f_node_cnn)), pts[0]);
     const b = nodeOf(String(Number(p.t_node_cnn)), pts[pts.length - 1]);
     if (a === b) { stats.skipped++; continue; }

@@ -344,6 +344,8 @@ function buildSFStreetDetails(scene, network, buildingColliders = []) {
     const r = Math.abs(Math.sin(x * 12.9898 + z * 78.233) * 43758.5453) % 1;
     sites.push({ x, y: groundAt(x, z) + CURB_H, z, scale: s, species: SPECIES_OF[cls] ?? 2, yaw: r * Math.PI * 2, tier: 1 });
   }
+  // Landmark plantings (landmarks.js: Salesforce Park's roof garden) join the same field, after the street trees
+  for (const t of window.NYC.landmarkTreeSites || []) sites.push(t);
   const treeField = sites.length && window.NYC.createTreeField ? window.NYC.createTreeField(scene, sites) : null;
   if (treeField) group.add(treeField.group);
 
@@ -381,7 +383,29 @@ function buildSFStreetDetails(scene, network, buildingColliders = []) {
     if (!list.length) return null;
     if (attr) geo.setAttribute(attr.name, new THREE.InstancedBufferAttribute(new Float32Array(attr.data), attr.size));
     const mesh = new THREE.InstancedMesh(geo, mat, list.length);
-    list.forEach((m, i) => mesh.setMatrixAt(i, m));
+    list.forEach((m, i) => {
+      mesh.setMatrixAt(i, m);
+      const R = window.NYC.RideGeometry;
+      if (!R || name === 'SignalLenses' || name === 'MuniStopBands') return;
+      const e = m.elements;
+      if (geo === unitBox) {
+        R.addBox({ x: e[12], y: e[13], z: e[14] },
+          { x: Math.hypot(e[0], e[2]) / 2, y: e[5] / 2, z: Math.hypot(e[8], e[10]) / 2 }, Math.atan2(-e[2], e[0]),
+          { top: true, layered: true });
+      } else if (geo === unitCyl) {
+        // Actual eight-sided pole, including its real radius (unit cylinder radius = 1).
+        const poly = Array.from({ length: 8 }, (_, k) => {
+          const a = k * Math.PI / 4, x = Math.sin(a), z = Math.cos(a);
+          return { x: e[12] + e[0] * x + e[8] * z, z: e[14] + e[2] * x + e[10] * z };
+        });
+        R.addPrism(poly, e[13] - e[5] / 2, e[13] + e[5] / 2);
+        R.addTop(poly, e[13] + e[5] / 2, 'pavement', { layered: true });
+      } else {
+        // Each individual head/hydrant/sign; never the furniture placement footprint.
+        R.addMesh({ geometry: geo, matrixWorld: m }, 'pavement', { layered: true,
+          sides: { sliceHeight: 0.16, maxSlices: 8 } });
+      }
+    });
     mesh.name = name;
     mesh.castShadow = cast;
     mesh.receiveShadow = true;

@@ -4,7 +4,8 @@
 // displacement shader, so culling and shadows see the real shape; PLAN.md D4).
 // - 64 m chunks, each at its own level of detail by camera distance: 2, 4, 8 or 16 m between vertices, with skirts
 //   hanging below their edges to hide the cracks between neighbours at different levels.
-// - Chunks are drawn per TILE x TILE m tile: one mesh (one draw) per tile, rebuilt when a chunk in it changes level.
+// - Chunks are drawn per TILE x TILE m tile: one mesh (one draw) per tile. LOD changes reuse unchanged chunks from
+//   the current tile buffers; only changed chunks are generated before ordered typed assembly.
 // - The bay: vertices on water drop below the water plane, so the land's edge becomes a steep seawall face.
 // - Hills cast shadows through a static 8 m stand-in on the shadow proxy layer (scene-culling.js), drawn back faces
 //   only so sunlit slopes don't shadow themselves while the slopes facing away still shade what lies behind them.
@@ -23,6 +24,41 @@ const UPDATE_MOVE = 20;
 const WATER_DROP = 4; // metres below the water level for vertices on the bay
 const SHADOW_STEP = 8;
 const SHADOW_CELL = 500;
+
+// Builder-owned CPU scratch, never geometry storage. Retain only a capped high-water capacity; unusually
+// complicated clipping can exceed it temporarily without truncation, then reset drops the oversized allocation.
+class TerrainScratchArray {
+  constructor(Type, capacity, limit) {
+    this.Type = Type;
+    this.limit = limit;
+    this.array = this.retained = new Type(capacity);
+    this.length = 0;
+  }
+  reserve(count) {
+    if (count <= this.array.length) return;
+    const capacity = Math.max(count, this.array.length * 2);
+    const next = new this.Type(capacity);
+    next.set(this.array);
+    this.array = next;
+    if (capacity <= this.limit) this.retained = next;
+  }
+  push(a, b, c) {
+    const at = this.length;
+    this.reserve(at + 3);
+    this.array[at] = a; this.array[at + 1] = b; this.array[at + 2] = c;
+    this.length = at + 3;
+  }
+  append(source) {
+    const at = this.length;
+    this.reserve(at + source.length);
+    // Float64 -> Float32 conversion occurs only after all chunk clipping/skirt work has completed.
+    this.array.set(source.array.subarray(0, source.length), at);
+    this.length += source.length;
+  }
+  reset() { this.length = 0; this.array = this.retained; }
+  dispose() { this.length = 0; this.array = this.retained = null; }
+  get bytes() { return this.retained?.byteLength || 0; }
+}
 
 function buildTerrainMesh(scene) {
   const T = Terrain;
@@ -66,17 +102,23 @@ function buildTerrainMesh(scene) {
   }
 
   const material = createTerrainMaterial(makeMaskTexture(), window.NYC.DATA.groundMask.header);
-  if (window.NYC.DATA.fullRegion) {
-    // A 50 m dither transition reveals the regional ground underneath without alpha blending or double interiors.
-    const { positionWorld, min, clamp, floor, sin, fract, step } = window.NYC.TSL;
-    const distance = min(min(positionWorld.x.sub(T.originX), positionWorld.x.negate().add(T.originX + extentX)),
-      min(positionWorld.z.sub(T.originZ), positionWorld.z.negate().add(T.originZ + extentZ)));
-    const noise = fract(sin(floor(positionWorld.x.mul(2)).mul(12.9898).add(floor(positionWorld.z.mul(2)).mul(78.233))).mul(43758.5453));
-    material.opacityNode = step(noise, clamp(distance.div(50), 0, 1));
-    material.alphaTest = 0.5;
-  }
+  // Core and region use different measured grids. Do not dither the 8 m regional profile through the physical 2 m
+  // core. region.js clips its triangles to this core boundary instead; skirts are presentation-only.
   const group = new THREE.Group();
   group.name = 'SFTerrain';
+
+  // One maximum-LOD halo scratch, shared by sequential chunk builds, not an all-world height/variant cache.
+  // Float64 is essential: skirts and tunnel intersections must use the original unrounded heights/normals.
+  let heights = new Float64Array((CHUNK / LOD_STEPS[0] + 3) ** 2);
+  const chunkPos = new TerrainScratchArray(Float64Array, 4096, 16384);
+  const chunkNrm = new TerrainScratchArray(Float64Array, 4096, 16384);
+  const chunkIdx = new TerrainScratchArray(Uint32Array, 8192, 32768);
+  const stagePos = new TerrainScratchArray(Float32Array, 4096, 262144);
+  const stageNrm = new TerrainScratchArray(Float32Array, 4096, 262144);
+  const stageIdx = new TerrainScratchArray(Uint32Array, 8192, 524288);
+  let changed = new Uint32Array(perTile * perTile * 2);
+  let disposed = false;
+  let generatedChunks = 0, reusedChunks = 0;
 
   // Writes one chunk at its level into the arrays: (n + 1)^2 grid vertices, then a skirt along each edge
   function writeChunk(c, pos, nrm, idx) {
@@ -85,23 +127,70 @@ function buildTerrainMesh(scene) {
     const x0 = c.cx * CHUNK, z0 = c.cz * CHUNK;
     const base = pos.length / 3;
     const skirt = Math.max(2, step / 2);
-    const yAt = (a, b) => surfaceY(x0 + a * step, z0 + b * step);
+    const cuts = (window.NYC.GradeSeparation?.terrainCuts || []).filter(p =>
+      p.maxX >= T.originX + x0 && p.minX <= T.originX + x0 + CHUNK &&
+      p.maxZ >= T.originZ + z0 && p.minZ <= T.originZ + z0 + CHUNK);
+    const regular = ((n + 1) ** 2 + 4 * (n + 1)) * 3;
+    pos.reserve(pos.length + regular); nrm.reserve(nrm.length + regular);
+    idx.reserve(idx.length + n * n * 6 + n * 24);
+    // Chunk-local candidate scratch, including skirts. Preserve source cut order and the Float64 kernel. An AABB
+    // miss alone is NOT enough: the old subtractor sometimes subdivides a disjoint triangle. Skip only a proven
+    // separating plane, with a rounding margin; otherwise retain those exact legacy vertices/indices/normals.
+    const localCuts = [];
+    const emit = (a, b, c) => {
+      const at = idx.length;
+      if (cuts.length) idx.reserve(at + 3); // earlier clipped faces may have consumed the regular-grid reservation
+      idx.array[at] = a; idx.array[at + 1] = b; idx.array[at + 2] = c; idx.length = at + 3;
+    };
+    const face = cuts.length ? (a, b, c) => {
+      const p = pos.array;
+      const minX = Math.min(p[a * 3], p[b * 3], p[c * 3]), maxX = Math.max(p[a * 3], p[b * 3], p[c * 3]);
+      const minZ = Math.min(p[a * 3 + 2], p[b * 3 + 2], p[c * 3 + 2]), maxZ = Math.max(p[a * 3 + 2], p[b * 3 + 2], p[c * 3 + 2]);
+      localCuts.length = 0;
+      for (const cut of cuts) {
+        const overlap = cut.maxX >= minX && cut.minX <= maxX && cut.maxZ >= minZ && cut.minZ <= maxZ;
+        let separated = false;
+        // The last plane is the ceiling: reject intact upper ground before allocating any polygon vertices.
+        for (let i = cut.planes.length - 1; i >= 0; i--) {
+          if (overlap && i < cut.planes.length - 1) break;
+          const q = cut.planes[i];
+          if (q[0] * p[a * 3] + q[1] * p[a * 3 + 1] + q[2] * p[a * 3 + 2] + q[3] < -1e-9 &&
+              q[0] * p[b * 3] + q[1] * p[b * 3 + 1] + q[2] * p[b * 3 + 2] + q[3] < -1e-9 &&
+              q[0] * p[c * 3] + q[1] * p[c * 3 + 1] + q[2] * p[c * 3 + 2] + q[3] < -1e-9) { separated = true; break; }
+        }
+        if (!separated) localCuts.push(cut);
+      }
+      if (localCuts.length) clipTerrainFace(a, b, c, localCuts, pos, nrm, idx);
+      else emit(a, b, c);
+    } : emit;
+    const stride = n + 3;
+    for (let b = -1; b <= n + 1; b++) {
+      for (let a = -1; a <= n + 1; a++) {
+        heights[(b + 1) * stride + a + 1] = surfaceY(Math.max(0, x0 + a * step), Math.max(0, z0 + b * step));
+      }
+    }
+    const yAt = (a, b) => heights[(b + 1) * stride + a + 1];
+    const positions = pos.array, normals = nrm.array;
+    let at = pos.length;
     for (let b = 0; b <= n; b++) {
       for (let a = 0; a <= n; a++) {
         const y = yAt(a, b);
-        pos.push(T.originX + x0 + a * step, y, T.originZ + z0 + b * step);
+        positions[at] = T.originX + Math.min(extentX, x0 + a * step);
+        positions[at + 1] = y; positions[at + 2] = T.originZ + Math.min(extentZ, z0 + b * step);
         // central differences at this level's spacing (one-sided at the data's edges)
-        const gx = (surfaceY(x0 + (a + 1) * step, z0 + b * step) - surfaceY(Math.max(0, x0 + (a - 1) * step), z0 + b * step)) / (2 * step);
-        const gz = (surfaceY(x0 + a * step, z0 + (b + 1) * step) - surfaceY(x0 + a * step, Math.max(0, z0 + (b - 1) * step))) / (2 * step);
+        const gx = (yAt(a + 1, b) - yAt(a - 1, b)) / (2 * step);
+        const gz = (yAt(a, b + 1) - yAt(a, b - 1)) / (2 * step);
         const len = Math.hypot(gx, 1, gz);
-        nrm.push(-gx / len, 1 / len, -gz / len);
+        normals[at] = -gx / len; normals[at + 1] = 1 / len; normals[at + 2] = -gz / len;
+        at += 3;
       }
     }
+    pos.length = nrm.length = at;
     const row = n + 1;
     for (let b = 0; b < n; b++) {
       for (let a = 0; a < n; a++) {
         const k = base + b * row + a;
-        idx.push(k, k + row, k + 1, k + 1, k + row, k + row + 1);
+        face(k, k + row, k + 1); face(k + 1, k + row, k + row + 1);
       }
     }
     // skirts: a copy of each edge hanging `skirt` m lower, joined to the edge facing outwards
@@ -115,13 +204,13 @@ function buildTerrainMesh(scene) {
       const s0 = pos.length / 3;
       for (let t = 0; t <= n; t++) {
         const k = base + e.at(t);
-        pos.push(pos[3 * k], pos[3 * k + 1] - skirt, pos[3 * k + 2]);
-        nrm.push(nrm[3 * k], nrm[3 * k + 1], nrm[3 * k + 2]);
+        pos.push(pos.array[3 * k], pos.array[3 * k + 1] - skirt, pos.array[3 * k + 2]);
+        nrm.push(nrm.array[3 * k], nrm.array[3 * k + 1], nrm.array[3 * k + 2]);
       }
       for (let t = 0; t < n; t++) {
         const top0 = base + e.at(t), top1 = base + e.at(t + 1), bot0 = s0 + t, bot1 = s0 + t + 1;
-        if (e.flip) idx.push(top0, bot0, top1, top1, bot0, bot1);
-        else idx.push(top0, top1, bot0, top1, bot1, bot0);
+        if (e.flip) { face(top0, bot0, top1); face(top1, bot0, bot1); }
+        else { face(top0, top1, bot0); face(top1, bot1, bot0); }
       }
     }
   }
@@ -138,31 +227,75 @@ function buildTerrainMesh(scene) {
       mesh.matrixAutoUpdate = false;
       if (tiles.length) mesh.userData.sharesPipelineWith = tiles[0].mesh;
       group.add(mesh);
-      tiles.push({ mesh, members, key: '' });
+      tiles.push({ mesh, members, key: '', ranges: null });
     }
   }
 
-  function rebuildTile(tile) {
+  function rebuildTile(tile, invalidate = false) {
     const key = tile.members.map((c) => c.lod).join('');
-    if (key === tile.key) return false;
-    tile.key = key;
-    const pos = [];
-    const nrm = [];
-    const idx = [];
-    for (const c of tile.members) writeChunk(c, pos, nrm, idx);
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-    g.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
-    g.setIndex(pos.length / 3 > 65535 ? new THREE.Uint32BufferAttribute(idx, 1) : new THREE.Uint16BufferAttribute(idx, 1));
-    g.computeBoundingSphere();
-    g.computeBoundingBox();
-    tile.mesh.geometry.dispose();
-    tile.mesh.geometry = g;
-    return true;
+    if (!invalidate && key === tile.key) return false;
+    const previous = tile.mesh.geometry;
+    // Five integers per member: LOD, vertex offset/count, index offset/count. The source of reuse is the current
+    // drawing itself, so travelling cannot retain obsolete LOD variants or duplicate persistent vertex buffers.
+    const ranges = new Uint32Array(tile.members.length * 5);
+    changed.fill(0xffffffff);
+    try {
+      let vertices = 0, indices = 0;
+      for (let i = 0; i < tile.members.length; i++) {
+        const c = tile.members[i], r = i * 5;
+        let vertexCount, indexCount;
+        if (!invalidate && tile.ranges && tile.ranges[r] === c.lod) {
+          vertexCount = tile.ranges[r + 2]; indexCount = tile.ranges[r + 4];
+          reusedChunks++;
+        } else {
+          // Keep all shared clipping arithmetic in doubles until the complete chunk (including skirts) is finished.
+          // Chunk-local indices are rebased below; triangle, vertex and cut iteration order is unchanged.
+          chunkPos.reset(); chunkNrm.reset(); chunkIdx.reset();
+          writeChunk(c, chunkPos, chunkNrm, chunkIdx);
+          changed[i * 2] = stagePos.length / 3; changed[i * 2 + 1] = stageIdx.length;
+          stagePos.append(chunkPos); stageNrm.append(chunkNrm); stageIdx.append(chunkIdx);
+          vertexCount = chunkPos.length / 3; indexCount = chunkIdx.length;
+          generatedChunks++;
+        }
+        ranges[r] = c.lod; ranges[r + 1] = vertices; ranges[r + 2] = vertexCount;
+        ranges[r + 3] = indices; ranges[r + 4] = indexCount;
+        vertices += vertexCount; indices += indexCount;
+      }
+      const pos = new Float32Array(vertices * 3), nrm = new Float32Array(vertices * 3);
+      const idx = vertices > 65535 ? new Uint32Array(indices) : new Uint16Array(indices);
+      for (let i = 0; i < tile.members.length; i++) {
+        const r = i * 5, staged = changed[i * 2] !== 0xffffffff;
+        const start = staged ? changed[i * 2] : tile.ranges[r + 1];
+        const indexStart = staged ? changed[i * 2 + 1] : tile.ranges[r + 3];
+        const sourcePos = staged ? stagePos.array : previous.attributes.position.array;
+        const sourceNrm = staged ? stageNrm.array : previous.attributes.normal.array;
+        const sourceIdx = staged ? stageIdx.array : previous.index.array;
+        pos.set(sourcePos.subarray(start * 3, (start + ranges[r + 2]) * 3), ranges[r + 1] * 3);
+        nrm.set(sourceNrm.subarray(start * 3, (start + ranges[r + 2]) * 3), ranges[r + 1] * 3);
+        // Staged chunk indices remain chunk-local even though several chunks share the staging arena.
+        const shift = ranges[r + 1] - (staged ? 0 : start);
+        for (let j = 0; j < ranges[r + 4]; j++) idx[ranges[r + 3] + j] = sourceIdx[indexStart + j] + shift;
+      }
+      const g = new THREE.BufferGeometry();
+      // BufferAttribute takes ownership without the extra typed-array copy made by Float32BufferAttribute.
+      g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      g.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
+      g.setIndex(new THREE.BufferAttribute(idx, 1));
+      g.computeBoundingSphere();
+      g.computeBoundingBox();
+      previous.dispose();
+      tile.mesh.geometry = g;
+      tile.ranges = ranges;
+      tile.key = key;
+      return true;
+    } finally {
+      chunkPos.reset(); chunkNrm.reset(); chunkIdx.reset();
+      stagePos.reset(); stageNrm.reset(); stageIdx.reset();
+    }
   }
 
   // Level of each chunk from the camera's distance to it (with hysteresis)
-  function chooseLevels(px, py, pz) {
+  function chooseLevels(px, py, pz, rider) {
     for (const c of chunks) {
       if (!c.land) continue;
       const x0 = T.originX + c.cx * CHUNK, z0 = T.originZ + c.cz * CHUNK;
@@ -172,19 +305,25 @@ function buildTerrainMesh(scene) {
       const d = Math.hypot(dx, dy, dz);
       let lod = 0;
       while (lod < LOD_DIST.length && d > LOD_DIST[lod]) lod++;
+      const rd = Math.hypot(Math.max(x0 - rider.x, 0, rider.x - x0 - CHUNK),
+        Math.max(z0 - rider.z, 0, rider.z - z0 - CHUNK));
+      if (rd < 200) lod = 0; // physical profile is always the 2 m diagonal, regardless of camera distance/height
       // stay finer while within the hysteresis band of the threshold just crossed outwards
       if (lod > c.lod && d < LOD_DIST[lod - 1] * (1 + HYSTERESIS)) lod = c.lod;
       c.lod = lod;
     }
   }
 
-  const last = { x: Infinity, y: Infinity, z: Infinity, t: -Infinity, rebuilt: 0 };
-  function update(cameraPosition, elapsed) {
+  const last = { x: Infinity, y: Infinity, z: Infinity, rx: Infinity, rz: Infinity, t: -Infinity, rebuilt: 0 };
+  function update(cameraPosition, elapsed, playerPosition = cameraPosition) {
+    if (disposed) return;
     const { x, y, z } = cameraPosition;
-    if (elapsed - last.t < UPDATE_SECONDS) return;
-    if (Math.hypot(x - last.x, y - last.y, z - last.z) < UPDATE_MOVE) return;
-    last.x = x; last.y = y; last.z = z; last.t = elapsed;
-    chooseLevels(x, y, z);
+    const rider = playerPosition.position || playerPosition;
+    const riderMoved = Math.hypot(rider.x - last.rx, rider.z - last.rz) >= UPDATE_MOVE;
+    if (elapsed - last.t < UPDATE_SECONDS && !riderMoved) return;
+    if (!riderMoved && Math.hypot(x - last.x, y - last.y, z - last.z) < UPDATE_MOVE) return;
+    last.x = x; last.y = y; last.z = z; last.rx = rider.x; last.rz = rider.z; last.t = elapsed;
+    chooseLevels(x, y, z, rider);
     for (const tile of tiles) if (rebuildTile(tile)) last.rebuilt++;
   }
 
@@ -196,24 +335,100 @@ function buildTerrainMesh(scene) {
   console.info(`[terrain] ${chunks.filter((c) => c.land).length} land chunks of ${CHUNK} m in ${tiles.length} tiles`);
   // Every tile built again at its current levels (after grade-separation.js has carved the portals)
   function rebuild() {
-    for (const tile of tiles) {
-      tile.key = '';
-      rebuildTile(tile);
-    }
+    if (disposed) return;
+    for (const tile of tiles) rebuildTile(tile, true);
+  }
+
+  // Terminal CPU ownership only. The host's drained scene teardown owns geometry/material/texture disposal.
+  // Call before that scene walk; repeated calls are safe and cannot resurrect terrain buffers.
+  function dispose() {
+    disposed = true;
+    heights = null;
+    chunkPos.dispose(); chunkNrm.dispose(); chunkIdx.dispose();
+    stagePos.dispose(); stageNrm.dispose(); stageIdx.dispose();
+    changed = null;
+    for (const tile of tiles) tile.ranges = null;
   }
 
   return {
     group,
     update,
     rebuild,
+    dispose,
     stats: () => ({
       tiles: tiles.length,
       visibleTiles: tiles.filter((t) => t.mesh.visible).length,
       triangles: tiles.reduce((s, t) => s + t.mesh.geometry.index.count / 3, 0),
       lods: LOD_STEPS.map((_, l) => chunks.filter((c) => c.land && c.lod === l).length),
-      rebuilt: last.rebuilt
+      rebuilt: last.rebuilt,
+      generatedChunks,
+      reusedChunks,
+      constructionBytes: chunkPos.bytes + chunkNrm.bytes + chunkIdx.bytes + stagePos.bytes + stageNrm.bytes + stageIdx.bytes + (changed?.byteLength || 0),
+      reuseBytes: (heights?.byteLength || 0) + tiles.reduce((s, t) => s + (t.ranges?.byteLength || 0), 0)
     })
   };
+}
+
+// Polygon minus a convex tunnel volume. Construction-only and restricted to overlapping chunks. Preserve the
+// original triangle/vertex normals outside the cavity; clip skirts too, or a chunk boundary can seal the opening.
+function clipTerrainFace(a, b, c, cuts, pos, nrm, idx, preserveOutside = false) {
+  const distance = (p, v) => p[0] * v.x + p[1] * v.y + p[2] * v.z + p[3];
+  const vertex = k => ({ x: pos.array[k * 3], y: pos.array[k * 3 + 1], z: pos.array[k * 3 + 2],
+    nx: nrm.array[k * 3], ny: nrm.array[k * 3 + 1], nz: nrm.array[k * 3 + 2], index: k });
+  const clip = (poly, plane, sign) => {
+    const out = [];
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const p = poly[j], q = poly[i], dp = distance(plane, p) * sign, dq = distance(plane, q) * sign;
+      if ((dp < 0) !== (dq < 0)) {
+        const u = dp / (dp - dq), v = {};
+        for (const key of ['x', 'y', 'z', 'nx', 'ny', 'nz']) v[key] = p[key] + (q[key] - p[key]) * u;
+        out.push(v);
+      }
+      if (dq >= 0) out.push(q);
+    }
+    return out;
+  };
+  let pieces = [[vertex(a), vertex(b), vertex(c)]];
+  for (const cut of cuts) {
+    const next = [];
+    for (let inside of pieces) {
+      if (cut.planes.some(p => inside.every(v => distance(p, v) < 0))) { next.push(inside); continue; }
+      // Static Drape surfaces also own ride tops: disjoint/tangent faces must keep their original indices/normals.
+      // Leave the terrain/skirt path unchanged. Drape's caller rejects triangle AABBs before entering this kernel.
+      if (preserveOutside) {
+        if (cut.planes.some(p => inside.every(v => distance(p, v) <= 0))) { next.push(inside); continue; }
+        let overlap = inside;
+        for (const plane of cut.planes) {
+          overlap = clip(overlap, plane, 1);
+          if (overlap.length < 3) break;
+        }
+        let area = 0;
+        for (let i = 1; i + 1 < overlap.length; i++) {
+          const p = overlap[0], q = overlap[i], r = overlap[i + 1];
+          const ux = q.x - p.x, uy = q.y - p.y, uz = q.z - p.z;
+          const vx = r.x - p.x, vy = r.y - p.y, vz = r.z - p.z;
+          area += Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx);
+        }
+        if (area <= 1e-10) { next.push(inside); continue; }
+      }
+      for (const plane of cut.planes) {
+        if (inside.length < 3) break;
+        const outside = clip(inside, plane, -1);
+        if (outside.length >= 3) next.push(outside);
+        inside = clip(inside, plane, 1);
+      }
+    }
+    pieces = next;
+  }
+  for (const poly of pieces) {
+    const ids = poly.map(v => {
+      if (v.index !== undefined) return v.index;
+      const k = pos.length / 3, length = Math.hypot(v.nx, v.ny, v.nz) || 1;
+      pos.push(v.x, v.y, v.z); nrm.push(v.nx / length, v.ny / length, v.nz / length);
+      return k;
+    });
+    for (let i = 1; i + 1 < ids.length; i++) idx.push(ids[0], ids[i], ids[i + 1]);
+  }
 }
 
 // The ground mask as a single-channel texture, read texel by texel
@@ -270,5 +485,5 @@ function buildShadowCaster(surfaceY, extentX, extentZ) {
   return meshes;
 }
 
-Object.assign(window.NYC, { buildTerrainMesh });
+Object.assign(window.NYC, { buildTerrainMesh, clipTerrainFace });
 })();

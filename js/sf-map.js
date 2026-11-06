@@ -19,7 +19,7 @@ const {
 const FONT = 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
 const MIN_ZOOM = 0.015; // full map, pixels per metre: the wider San Francisco bay
 const MAX_ZOOM = 3.0; // single lots
-const RADAR_SCALE = 0.32; // radar pixels per metre on the ground (zooms out with altitude)
+const RADAR_SCALE = 0.32; // CSS pixels per metre, independent of absolute hill/deck elevation
 const GRID_BEARING = GEO.frame?.bearingDeg ?? 0; // SF world north is true north
 
 // Map palette, shared by the radar & the atlas (in step with css/style.css): graphite ground with the streets a shade
@@ -184,7 +184,12 @@ function mapRelief() {
     const dz = (g.heights[k+g.w] - g.heights[k-g.w]) / (2*g.step);
     const light = Math.max(0, (-dx*0.5 + 0.7 - dz*0.5) / Math.hypot(dx, 1, dz));
     const shade = 20 + light * 35;
-    image.data.set([shade*0.85, shade, shade*1.07, 255], k*4);
+    // Keep Uint8Clamped conversion/rounding, without a temporary array per land pixel.
+    const p = k * 4;
+    image.data[p] = shade * 0.85;
+    image.data[p + 1] = shade;
+    image.data[p + 2] = shade * 1.07;
+    image.data[p + 3] = 255;
   }
   ctx.putImageData(image, 0, 0);
   return RELIEF = { canvas, x:g.x0, z:g.z0, width:(g.w-1)*g.step, height:(g.h-1)*g.step };
@@ -374,14 +379,6 @@ function drawRoute(ctx, x0, y0, x1, y1, width) {
   ctx.stroke();
 }
 
-// Active rides draw measured lanes and legal junction curves, not a direct bearing.
-function drawRideRoute(ctx, points, view, width) {
-  ctx.beginPath();
-  points.forEach((p,i) => { if(i)ctx.lineTo(view.toX(p.x),view.toY(p.z));else ctx.moveTo(view.toX(p.x),view.toY(p.z)); });
-  ctx.lineJoin='round';ctx.lineCap='round';ctx.strokeStyle=MAP.halo;ctx.lineWidth=width+3;ctx.stroke();
-  ctx.strokeStyle='#ffbd79';ctx.lineWidth=width;ctx.stroke();
-}
-
 // Waypoint: a taxi-yellow target
 function drawWaypoint(ctx, x, y, r) {
   ctx.fillStyle = MAP.halo;
@@ -412,7 +409,6 @@ class NYCMapSystem {
     this.miniCtx = this.miniCanvas ? this.miniCanvas.getContext('2d') : null;
     this.elMiniStreet = document.getElementById('minimap-street-label');
     this.miniStreetText = '';
-    this.miniScale = RADAR_SCALE;
     this.miniCache = null; // { canvas, cx, cz, s, version }: the radar's ground layers, twice the radar's size
     const elCounts = document.getElementById('fullmap-counts');
     if (elCounts) elCounts.textContent = `${ROAD_NAME_COUNT} streets · ${BLOCKS.length.toLocaleString('en-US')} blocks`;
@@ -431,9 +427,16 @@ class NYCMapSystem {
     this.elHoverInfo = document.getElementById('fullmap-hover-info');
     this.elPlayerInfo = document.getElementById('fullmap-player-info');
     this.elSearchInput = document.getElementById('fullmap-search');
+    this.elSearchResults = document.getElementById('fullmap-search-results');
+    this.elSearchList = document.getElementById('fullmap-search-list');
+    this.elSearchStatus = document.getElementById('fullmap-search-status');
+    this.elSearchSummary = document.getElementById('fullmap-search-summary');
+    this.elActionStatus = document.getElementById('fullmap-action-status');
     if (this.elSearchInput) this.elSearchInput.placeholder = `Search ${ROAD_NAME_COUNT} streets & landmarks…`;
 
     this.isFullMapOpen = false;
+    this.returnFocus = null;
+    this.inertBackground = [];
     // Full map viewport state (world metres; zoom in CSS pixels per metre)
     this.viewCenterX = 0;
     this.viewCenterZ = 0;
@@ -442,10 +445,18 @@ class NYCMapSystem {
     this.panPointerId = null;
     this.panStart = { x: 0, y: 0, cx: 0, cz: 0 };
     this.dragMoved = false;
+    this.touchPointers = new Set();
+    this.multiTouch = false;
+    this.cancelTouchClick = false;
+    this.inputDevice = 'keyboard';
+    this.gamepadCursor = null;
+    this.gamepadCursorElement = null;
+    this.gamepadNeedsNeutral = true;
 
     this.hoverWorld = null;
     this.searchHighlight = '';
     this.searchPath = null;
+    this.searchResults = [];
     this.textWidths = new Map();
     // Start the map waypoint at the Ferry Building.
     const ts = NYC_LANDMARKS.find((l) => l.id === 'ferrybuilding') || { x: 0, z: 0 };
@@ -457,6 +468,7 @@ class NYCMapSystem {
         this.textWidths.clear();
         this.miniCache = null;
         this.fullStaticKey = '';
+        if (this.isFullMapOpen) this.layoutStatus();
       });
     }
 
@@ -475,7 +487,7 @@ class NYCMapSystem {
       miniCard.addEventListener('click', () => this.toggleFullMap(true));
     }
     if (closeBtn) {
-      closeBtn.addEventListener('click', () => this.toggleFullMap(false));
+      closeBtn.addEventListener('click', (e) => this.toggleFullMap(false, { pointer: e.detail > 0 }));
     }
 
     if (zoomInBtn) {
@@ -501,7 +513,7 @@ class NYCMapSystem {
     }
     if (fullIslandBtn) {
       fullIslandBtn.addEventListener('click', () => {
-        // Fit the full measured city, including regional flight destinations.
+        // Fit the full measured city. Pins are geographic, not a promise of supported EUC arrival.
         const city = window.NYC.DATA?.fullRegion?.city;
         const b = city ? { minX:city.x0,maxX:city.x1,minZ:city.z0,maxZ:city.z1 } : ISLAND_BOUNDS;
         const { w, h } = this.fullSize();
@@ -514,28 +526,68 @@ class NYCMapSystem {
 
     if (this.elSearchInput) {
       this.elSearchInput.addEventListener('input', () => this.search(this.elSearchInput.value));
+      this.elSearchInput.addEventListener('keydown', (e) => {
+        if (e.code === 'ArrowDown' && this.searchResults.length) {
+          e.preventDefault();
+          this.elSearchList?.querySelector('button')?.focus();
+        }
+      });
     }
 
     window.addEventListener('keydown', (e) => {
-      if (document.getElementById('settings-dialog')?.open) return;
-      const wasOpen = this.isFullMapOpen;
-      if (e.code === 'Escape' && wasOpen) {
+      if (e.defaultPrevented || e.repeat || document.getElementById('settings-dialog')?.open) return;
+      if (e.code === 'Escape' && this.isFullMapOpen) {
         e.preventDefault(); this.toggleFullMap(false);
-      } else if (e.code === 'KeyM' && !isTypingInField(e)) {
-        e.preventDefault(); this.toggleFullMap(!wasOpen);
-      } else if (e.code === 'Tab' && wasOpen) {
-        const focusable = [...this.modal.querySelectorAll('button, input')];
-        const first=focusable[0], last=focusable.at(-1);
-        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus(); }
-        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); }
+      } else if (e.code === 'KeyM' && !e.ctrlKey && !e.metaKey && !e.altKey && !isTypingInField(e)) {
+        e.preventDefault(); this.toggleFullMap(!this.isFullMapOpen);
       }
-      if (wasOpen || this.isFullMapOpen) e.stopImmediatePropagation();
+    });
+
+    this.modal?.addEventListener('cancel', (e) => { e.preventDefault(); this.toggleFullMap(false); });
+    this.modal?.addEventListener('close', () => { if (this.isFullMapOpen) this.toggleFullMap(false); });
+    this.modal?.addEventListener('keydown', (e) => {
+      if (e.code !== 'Tab' || !this.isFullMapOpen) return;
+      const controls = [...this.modal.querySelectorAll('button, input, select, textarea, a[href], [tabindex]')]
+        .filter(el => el.tabIndex >= 0 && this.canFocus(el));
+      const index = controls.indexOf(document.activeElement);
+      if (!controls.length || index === -1 || (e.shiftKey ? index === 0 : index === controls.length - 1)) {
+        e.preventDefault();
+        (e.shiftKey ? controls.at(-1) : controls[0])?.focus({ preventScroll: true });
+        if (!controls.length) this.modal.focus({ preventScroll: true });
+      }
+    });
+    document.addEventListener('focusin', (e) => {
+      if (!this.isFullMapOpen) return;
+      this.resetGamepadInput();
+      if (this.modal && !this.modal.contains(e.target)) this.modal.focus({ preventScroll: true });
+    });
+    // A second finger cancels the complete map gesture until every finger lifts.
+    window.addEventListener('pointerdown', (e) => {
+      if (!this.isFullMapOpen) return;
+      this.setInputDevice(e.pointerType === 'touch' ? 'touch' : 'keyboard');
+      if (!this.touchPointers.size) this.cancelTouchClick = false;
+      if (e.pointerType !== 'touch') return;
+      this.touchPointers.add(e.pointerId);
+      if (this.touchPointers.size > 1 || e.isPrimary === false) {
+        this.multiTouch = this.cancelTouchClick = true;
+        this.cancelPan();
+      }
+    }, true);
+    for (const type of ['pointerup', 'pointercancel']) window.addEventListener(type, (e) => {
+      this.touchPointers.delete(e.pointerId);
+      if (!this.touchPointers.size) this.multiTouch = false;
+    }, true);
+    // Capture before native click activation: this also covers zoom/close buttons after a cancelled touch gesture.
+    this.modal?.addEventListener('click', (e) => {
+      if (this.cancelTouchClick && (e.pointerType === 'touch' || e.detail > 0)) {
+        e.preventDefault(); e.stopImmediatePropagation();
+      }
     }, true);
 
     if (this.fullCanvas) {
       this.fullCanvas.style.touchAction = 'none';
       this.fullCanvas.addEventListener('pointerdown', (e) => {
-        if (e.button !== 0 || !this.isFullMapOpen || this.panPointerId !== null) return;
+        if (e.button !== 0 || !this.isFullMapOpen || this.panPointerId !== null || this.multiTouch) return;
         e.preventDefault();
         this.panPointerId = e.pointerId;
         this.fullCanvas.setPointerCapture(e.pointerId);
@@ -551,6 +603,7 @@ class NYCMapSystem {
       this.fullCanvas.addEventListener('pointermove', (e) => {
         if (!this.isFullMapOpen || !this.fullCanvas) return;
         if (this.isPanning ? e.pointerId !== this.panPointerId : e.pointerType !== 'mouse') return;
+        this.setInputDevice(e.pointerType === 'touch' ? 'touch' : 'keyboard');
         const rect = this.fullCanvas.getBoundingClientRect();
         const mx = e.clientX - rect.left;
         const my = e.clientY - rect.top;
@@ -570,30 +623,23 @@ class NYCMapSystem {
           const wPos = this.screenToWorld(mx, my, rect.width, rect.height);
           this.hoverWorld = wPos;
           if (this.elHoverInfo) {
-            this.elHoverInfo.textContent = `${getLocationLabel(wPos.x, wPos.z)} · Click to teleport here`;
+            this.updateHoverInfo(wPos);
           }
         }
       });
 
       this.fullCanvas.addEventListener('pointerup', (e) => {
         if (e.pointerId !== this.panPointerId) return;
-        const clicked = !this.dragMoved && Math.hypot(e.clientX - this.panStart.x, e.clientY - this.panStart.y) <= 5;
+        const clicked = !this.dragMoved && !this.cancelTouchClick && !this.multiTouch
+          && Math.hypot(e.clientX - this.panStart.x, e.clientY - this.panStart.y) <= 5;
         this.cancelPan();
         if (clicked && this.isFullMapOpen && this.fullCanvas) {
           const rect = this.fullCanvas.getBoundingClientRect();
           const mx = e.clientX - rect.left;
           const my = e.clientY - rect.top;
           if (mx >= 0 && mx <= rect.width && my >= 0 && my <= rect.height) {
-            const wPos = this.clampToRegion(this.screenToWorld(mx, my, rect.width, rect.height));
-            this.waypoint = {
-              x: wPos.x,
-              z: wPos.z,
-              name: getLocationLabel(wPos.x, wPos.z)
-            };
-            if (this.onTeleport) {
-              this.onTeleport(wPos.x, wPos.z);
-            }
-            this.renderFullMap();
+            const point = this.screenToWorld(mx, my, rect.width, rect.height);
+            this.teleportToPoint(point, this.authoredPinAt(point));
           }
         }
       });
@@ -602,13 +648,16 @@ class NYCMapSystem {
           if (e.pointerId === this.panPointerId) this.cancelPan();
         });
       }
-      window.addEventListener('blur', () => this.cancelPan());
+      window.addEventListener('blur', () => this.cancelGestures());
+      window.addEventListener('focus', () => this.resetGamepadInput());
+      window.addEventListener('resize', () => this.cancelGestures());
       document.addEventListener('visibilitychange', () => {
-        if (document.hidden) this.cancelPan();
+        if (document.hidden) this.cancelGestures();
       });
 
       // Wheel zoom about the cursor (the place under it stays put)
       this.fullCanvas.addEventListener('wheel', (e) => {
+        if (!this.isFullMapOpen) return;
         e.preventDefault();
         const rect = this.fullCanvas.getBoundingClientRect();
         const mx = e.clientX - rect.left;
@@ -623,17 +672,151 @@ class NYCMapSystem {
     }
   }
 
-  /**
-   * Street / landmark search: highlights every stretch of the matching streets and frames them (or flies to the
-   * matching landmark)
-   */
+  // NYC native map controls @9c4cfc9e32a425d58bac36cf9e074a2aa77fac70, adapted over SF's retained map layers.
+  setInputDevice(device) {
+    if (!['gamepad', 'keyboard', 'touch'].includes(device) || this.inputDevice === device) return;
+    if (device !== 'gamepad') this.resetGamepadInput();
+    this.inputDevice = device;
+    if (this.modal?.dataset) this.modal.dataset.input = device;
+    if (this.gamepadCursorElement) this.gamepadCursorElement.hidden = device !== 'gamepad' || !this.isFullMapOpen;
+    if (this.hoverWorld) this.updateHoverInfo(this.hoverWorld);
+    if (this.searchResults.length) this.updateSearchFeedback(this.landmarkSearchFeedback());
+    this.layoutStatus();
+  }
+
+  landmarkSearchFeedback() {
+    const count = this.searchResults.length;
+    const instructions = this.inputDevice === 'gamepad' ? 'Use D-pad to choose, then A to try arrival.'
+      : this.inputDevice === 'touch' ? 'Tap a result to try arrival.' : 'Tab or press Down to choose an arrival.';
+    return `${count} landmark ${count === 1 ? 'result' : 'results'}. ${instructions}`;
+  }
+
+  updateSearchFeedback(text) {
+    for (const element of [this.elSearchStatus, this.elSearchSummary]) {
+      if (element && element.textContent !== text) element.textContent = text;
+    }
+  }
+
+  resetGamepadInput() { this.gamepadNeedsNeutral = true; }
+
+  updateHoverInfo(point, target = null) {
+    if (!this.elHoverInfo) return;
+    const action = this.inputDevice === 'gamepad' ? 'A to try arrival here'
+      : this.inputDevice === 'touch' ? 'Tap to try arrival here' : 'Click to try arrival here';
+    const text = target ? `A · ${target.getAttribute?.('aria-label') || target.title || target.textContent || 'Activate control'}`
+      : `${getLocationLabel(point.x, point.z)} · ${action}`;
+    if (this.elHoverInfo.textContent !== text) this.elHoverInfo.textContent = text;
+  }
+
+  showGamepadCursor(rect) {
+    this.gamepadCursor ??= { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    const inset = Math.min(12, rect.width / 2, rect.height / 2);
+    this.gamepadCursor.x = Math.max(rect.left + inset, Math.min(rect.left + rect.width - inset, this.gamepadCursor.x));
+    this.gamepadCursor.y = Math.max(rect.top + inset, Math.min(rect.top + rect.height - inset, this.gamepadCursor.y));
+    if (!this.gamepadCursorElement && this.modal) {
+      const cursor = document.createElement('div');
+      cursor.className = 'fullmap-gamepad-cursor';
+      cursor.setAttribute('aria-hidden', 'true');
+      Object.assign(cursor.style, { position: 'fixed', zIndex: '100', pointerEvents: 'none',
+        width: '24px', height: '24px', border: '2px solid #ffc21a', borderRadius: '50%',
+        boxSizing: 'border-box', transform: 'translate(-50%, -50%)',
+        boxShadow: '0 0 0 2px #0a1118, inset 0 0 0 1px #0a1118',
+        background: 'radial-gradient(circle, #ffc21a 0 2px, transparent 3px)' });
+      this.modal.appendChild(cursor);
+      this.gamepadCursorElement = cursor;
+    }
+    if (this.gamepadCursorElement) {
+      this.gamepadCursorElement.hidden = false;
+      this.gamepadCursorElement.style.left = `${this.gamepadCursor.x}px`;
+      this.gamepadCursorElement.style.top = `${this.gamepadCursor.y}px`;
+    }
+  }
+
+  /** Map-owned polls include neutral samples; actions are fresh edges. LS cursor, RS pan, triggers zoom. */
+  applyGamepadInput({ movement = {}, look = {}, zoom = 0, actions = {}, neutral = false } = {}, dt = 0) {
+    if (!this.isFullMapOpen || document.hidden || (typeof document.hasFocus === 'function' && !document.hasFocus())) return;
+    const usingPad = [movement.x, movement.y, look.x, look.y, zoom].some(value => Number.isFinite(value) && value !== 0)
+      || Object.values(actions).some(Boolean);
+    if (usingPad) this.setInputDevice('gamepad');
+    const rect = this.fullCanvas?.getBoundingClientRect();
+    if (!rect || !(rect.width > 0 && rect.height > 0)) return;
+    if (this.inputDevice === 'gamepad') this.showGamepadCursor(rect);
+    if (this.gamepadNeedsNeutral) {
+      if (neutral) this.gamepadNeedsNeutral = false;
+      return;
+    }
+    if (this.inputDevice !== 'gamepad') return;
+    const seconds = Number.isFinite(dt) ? Math.max(0, Math.min(0.05, dt)) : 0;
+    const value = n => Number.isFinite(n) ? Math.max(-1, Math.min(1, n)) : 0;
+    const mx = value(movement.x), my = value(movement.y), lx = value(look.x), ly = value(look.y);
+    const cursor = this.gamepadCursor;
+    const inset = Math.min(12, rect.width / 2, rect.height / 2);
+    cursor.x = Math.max(rect.left + inset, Math.min(rect.left + rect.width - inset, cursor.x + mx * 480 * seconds));
+    cursor.y = Math.max(rect.top + inset, Math.min(rect.top + rect.height - inset, cursor.y + my * 480 * seconds));
+    if (actions.navigate) {
+      const controls = [...this.modal.querySelectorAll('button, a[href]')].filter(el => this.canFocus(el));
+      const index = controls.indexOf(document.activeElement);
+      const nextIndex = index < 0 ? (actions.navigate > 0 ? 0 : controls.length - 1)
+        : (index + (actions.navigate > 0 ? 1 : -1) + controls.length) % controls.length;
+      const next = controls[nextIndex];
+      next?.scrollIntoView?.({ block: 'nearest' });
+      next?.focus({ preventScroll: true });
+      const box = next?.getBoundingClientRect();
+      if (box?.width > 0 && box?.height > 0) {
+        cursor.x = box.left + box.width / 2;
+        cursor.y = box.top + box.height / 2;
+      }
+      this.showGamepadCursor(rect);
+      if (next) this.updateHoverInfo(this.screenToWorld(cursor.x - rect.left, cursor.y - rect.top, rect.width, rect.height), next);
+      return; // selection and A in one sample never activates
+    }
+    const hit = document.elementFromPoint?.(cursor.x, cursor.y);
+    const button = hit?.closest?.('button, a[href]');
+    const target = button && this.modal?.contains(button) && this.canFocus(button) ? button : null;
+    const onCanvas = hit === this.fullCanvas;
+    const edgePan = (position, start, size, direction) => {
+      if (!onCanvas) return 0;
+      const local = position - start;
+      if (direction < 0 && local < 32) return direction * (1 - local / 32);
+      if (direction > 0 && local > size - 32) return direction * (1 - (size - local) / 32);
+      return 0;
+    };
+    const panX = lx * 480 + edgePan(cursor.x, rect.left, rect.width, mx) * 360;
+    const panY = ly * 480 + edgePan(cursor.y, rect.top, rect.height, my) * 360;
+    this.viewCenterX += panX * seconds / this.viewZoom;
+    this.viewCenterZ += panY * seconds / this.viewZoom;
+    const sx = cursor.x - rect.left, sy = cursor.y - rect.top;
+    const before = this.screenToWorld(sx, sy, rect.width, rect.height), oldZoom = this.viewZoom;
+    this.viewZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, oldZoom * Math.exp(value(zoom) * 1.8 * seconds)));
+    if (onCanvas && this.viewZoom !== oldZoom) {
+      this.viewCenterX = before.x - (sx - rect.width / 2) / this.viewZoom;
+      this.viewCenterZ = before.z - (sy - rect.height / 2) / this.viewZoom;
+    }
+    this.hoverWorld = this.screenToWorld(sx, sy, rect.width, rect.height);
+    this.updateHoverInfo(this.hoverWorld, target);
+    if (this.gamepadCursorElement) this.gamepadCursorElement.style.borderColor = target ? MAP.search : MAP.route;
+    this.showGamepadCursor(rect);
+    if (actions.recenter || actions.fit) {
+      document.getElementById(actions.recenter ? 'map-center-player' : 'map-view-all')?.click();
+    } else if (actions.activate) {
+      if (target) { target.focus({ preventScroll: true }); target.click(); }
+      else if (onCanvas) this.teleportToPoint(this.hoverWorld, this.authoredPinAt(this.hoverWorld));
+    }
+    if (panX || panY || oldZoom !== this.viewZoom) this.renderFullMap();
+  }
+
+  /** Highlight native SF street geometry and frame landmark pins without preparing or moving a rider. */
   search(text) {
     const q = String(text || '').trim().toLowerCase();
     this.searchHighlight = q;
     this.searchPath = null;
+    this.searchBounds = null;
+    this.searchResults = [];
+    let roads = [];
     if (q.length > 0) {
-      const lmMatch = NYC_LANDMARKS.find((l) => (l.name || '').toLowerCase().includes(q) || (l.short || '').toLowerCase().includes(q));
-      const roads = ROAD_LABELS.filter((l) => l.lower.includes(q) || l.raw.includes(q));
+      this.searchResults = NYC_LANDMARKS.filter(l => (l.name || '').toLowerCase().includes(q) || (l.short || '').toLowerCase().includes(q));
+      const lmMatch = this.searchResults[0];
+      roads = ROAD_LABELS.filter((l) => l.lower.includes(q) || l.raw.includes(q));
       if (roads.length) {
         this.searchPath = new Path2D();
         const b = { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity };
@@ -659,7 +842,70 @@ class NYCMapSystem {
         this.viewZoom = Math.max(0.05, Math.min(1.2, fit));
       }
     }
+    if (this.elSearchList) this.elSearchList.replaceChildren(...this.searchResults.map(landmark => {
+      const item = document.createElement('li'), button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = `Teleport to ${landmark.name || landmark.short || 'landmark'}`;
+      button.addEventListener('click', (e) => {
+        if (this.cancelTouchClick && (e.pointerType === 'touch' || e.detail > 0)) return;
+        this.teleportToPoint(landmark, landmark);
+      });
+      item.appendChild(button);
+      return item;
+    }));
+    if (this.elSearchResults) this.elSearchResults.hidden = !q;
+    const streetCount = new Set(roads.map(r => r.text)).size;
+    this.updateSearchFeedback(!q ? '' : this.searchResults.length ? this.landmarkSearchFeedback()
+      : streetCount ? `${streetCount} matching ${streetCount === 1 ? 'street' : 'streets'} highlighted. No landmark results.`
+        : `No streets or landmarks match “${String(text).trim()}”.`);
+    this.layoutStatus();
     this.renderFullMap();
+  }
+
+  authoredPinAt(point) {
+    let nearest = null, distance = Infinity;
+    for (const landmark of NYC_LANDMARKS) {
+      if (!this.arrivalFor(landmark)) continue;
+      const pixels = Math.hypot(landmark.x - point.x, landmark.z - point.z) * this.viewZoom;
+      if (pixels <= 8 && pixels < distance) { nearest = landmark; distance = pixels; }
+    }
+    return nearest;
+  }
+
+  arrivalFor(landmark) {
+    if (!landmark) return null;
+    if (landmark?.arrival) return landmark.arrival;
+    // SF's existing city-config owns roadside poses separately from the researched map pins.
+    return Object.values(window.NYC.TELEPORT_LOCATIONS || {}).find(arrival => arrival.landmark === landmark?.name) ?? null;
+  }
+
+  teleportToPoint(point, landmark = null) {
+    const arrival = this.arrivalFor(landmark), target = arrival || point;
+    if (![target?.x, target?.z].every(Number.isFinite)) return false;
+    let result;
+    try { result = this.onTeleport?.(target.x, target.z, target.heading, target.referenceY ?? target.y); }
+    catch { result = null; }
+    // A scenery pin, missing host callback or unchecked/async callback never proves supported arrival.
+    const succeeded = result?.succeeded === true && [result.x, result.z].every(Number.isFinite);
+    if (succeeded) {
+      const name = landmark?.name || landmark?.short || getLocationLabel(result.x, result.z);
+      this.waypoint = { x: result.x, z: result.z, name };
+      if (this.elActionStatus) this.elActionStatus.textContent = `Teleported to ${name}.`;
+    } else if (this.elActionStatus) {
+      this.elActionStatus.textContent = 'Teleport unavailable: no safe EUC arrival here. Choose another spot or try again.';
+    }
+    if (this.elHoverInfo) this.elHoverInfo.hidden = Boolean(this.elActionStatus?.textContent);
+    this.layoutStatus();
+    this.renderFullMap();
+    return succeeded;
+  }
+
+  cancelGestures() {
+    this.resetGamepadInput();
+    if (this.touchPointers.size) this.cancelTouchClick = true;
+    this.cancelPan();
+    this.touchPointers.clear();
+    this.multiTouch = false;
   }
 
   cancelPan() {
@@ -670,41 +916,86 @@ class NYCMapSystem {
     if (id !== null && this.fullCanvas && this.fullCanvas.hasPointerCapture(id)) this.fullCanvas.releasePointerCapture(id);
   }
 
-  toggleFullMap(open) {
-    this.isFullMapOpen = Boolean(open);
-    if (!this.isFullMapOpen) this.cancelPan();
-    if (this.onToggle) this.onToggle(this.isFullMapOpen);
+  toggleFullMap(open, { pointer = false } = {}) {
+    open = Boolean(open);
+    if (open && this.enabled === false || open === this.isFullMapOpen) return;
+    this.isFullMapOpen = open;
+    this.resetGamepadInput();
+    this.gamepadCursor = null;
+    if (this.gamepadCursorElement) this.gamepadCursorElement.hidden = true;
+    if (!open) this.cancelGestures();
+    // Retain the invoker before the host's owner transition can change focus.
+    if (open) this.returnFocus = document.activeElement;
+    this.onToggle?.(open);
     if (!this.modal) return;
-    if (this.isFullMapOpen) this.previousFocus = document.activeElement;
-    this.modal.classList.toggle('hidden', !this.isFullMapOpen);
-    if (this.isFullMapOpen) this.modal.showModal?.(); else this.modal.close?.();
-    for (const hud of document.querySelectorAll('.hud')) hud.inert = this.isFullMapOpen;
-    if (this.isFullMapOpen) {
-      const focusSearch = () => { if (this.isFullMapOpen) this.elSearchInput?.focus(); };
-      if (window.requestAnimationFrame) window.requestAnimationFrame(focusSearch); else focusSearch();
-    } else this.previousFocus?.focus();
-    if (this.isFullMapOpen) {
-      // the HUD's popovers live in the top layer, above the map
+    this.modal.classList.toggle('hidden', !open);
+    this.modal.inert = !open;
+    if (open) {
       for (const pop of document.querySelectorAll('.popover[popover]')) {
         if (typeof pop.hidePopover === 'function' && pop.matches(':popover-open')) pop.hidePopover();
       }
-      const ent = this.controllerManager.getActiveEntity();
-      this.viewCenterX = ent.position.x;
-      this.viewCenterZ = ent.position.z;
+      for (let branch = this.modal; branch && branch !== document.body; branch = branch.parentElement) {
+        for (const element of branch.parentElement?.children || []) {
+          if (element === branch) continue;
+          this.inertBackground.push({ element, inert: element.inert });
+          element.inert = true;
+        }
+      }
+      this.modal.showModal?.();
+      if (!this.searchHighlight) {
+        const ent = this.controllerManager.getActiveEntity();
+        this.viewCenterX = ent.position.x;
+        this.viewCenterZ = ent.position.z;
+      }
       this.resizeFullCanvas();
       this.renderFullMap();
+      this.modal.focus({ preventScroll: true });
+    } else {
+      this.modal.close?.();
+      for (const { element, inert } of this.inertBackground) element.inert = inert;
+      this.inertBackground.length = 0;
+      const target = [...(pointer ? [document.getElementById('canvas-container')] : []), this.returnFocus,
+        document.getElementById('btn-open-map'), document.getElementById('btn-toggle-hud')].find(el => this.canFocus(el));
+      this.returnFocus = null;
+      target?.focus({ preventScroll: true });
     }
+  }
+
+  canFocus(element) {
+    return Boolean(element?.isConnected && !element.disabled && !element.closest('[inert]') && element.getClientRects().length
+      && window.getComputedStyle(element).visibility === 'visible');
+  }
+
+  /** Called by the host's coalesced CSS-size resize path; no 3D-resolution coupling. */
+  resize() {
+    this.cancelGestures();
+    this.miniCache = null;
+    this.fullStaticKey = '';
+    if (this.isFullMapOpen) { this.resizeFullCanvas(); this.renderFullMap(); }
   }
 
   resizeFullCanvas() {
     if (!this.fullCanvas) return;
+    this.layoutStatus();
     // Layout size (the opening animation's transforms don't change it), at most ~6 megapixels however large the screen
-    const w = this.fullCanvas.clientWidth || window.innerWidth;
-    const h = this.fullCanvas.clientHeight || window.innerHeight;
+    const w = this.fullCanvas.clientWidth;
+    const h = this.fullCanvas.clientHeight;
+    if (!(w > 0 && h > 0)) return;
     const dpr = Math.min(window.devicePixelRatio || 1, 2, Math.sqrt(6e6 / Math.max(1, w * h)));
+    const width = Math.max(1, Math.floor(w * dpr)), height = Math.max(1, Math.floor(h * dpr));
+    if (this.fullDpr === dpr && this.fullCanvas.width === width && this.fullCanvas.height === height) return;
+    this.resetGamepadInput();
     this.fullDpr = dpr;
-    this.fullCanvas.width = Math.max(1, Math.floor(w * dpr));
-    this.fullCanvas.height = Math.max(1, Math.floor(h * dpr));
+    this.fullCanvas.width = width;
+    this.fullCanvas.height = height;
+  }
+
+  layoutStatus() {
+    if (!this.modal?.style?.setProperty) return;
+    for (const [id, variable] of [['fullmap-credits', '--map-credits-height'], ['fullmap-footer', '--map-status-height']]) {
+      const height = document.getElementById(id)?.getBoundingClientRect?.().height;
+      if (height > 0) this.modal.style.setProperty(variable, `${Math.ceil(height)}px`);
+    }
   }
 
   // Full map size in CSS pixels
@@ -719,13 +1010,6 @@ class NYCMapSystem {
       x: this.viewCenterX + (sx - width * 0.5) / this.viewZoom,
       z: this.viewCenterZ + (sy - height * 0.5) / this.viewZoom
     };
-  }
-
-  // Outside the detailed driving core, main.js switches arrivals to flight.
-  clampToRegion(p) {
-    const g = window.NYC.DATA?.fullRegion?.city;
-    if (g) return { x: Math.max(g.x0+25, Math.min(g.x1-25,p.x)), z: Math.max(g.z0+25, Math.min(g.z1-25,p.z)) };
-    return { x: Math.max(ISLAND_BOUNDS.minX+25,Math.min(ISLAND_BOUNDS.maxX-25,p.x)), z: Math.max(ISLAND_BOUNDS.minZ+25,Math.min(ISLAND_BOUNDS.maxZ-25,p.z)) };
   }
 
   textWidth(ctx, text) {
@@ -935,12 +1219,7 @@ class NYCMapSystem {
     const ent = this.controllerManager.getActiveEntity();
     const px = ent.position.x;
     const pz = ent.position.z;
-    // Ground-level radar shows ~800 m of the city; it zooms out as the camera climbs (helicopter)
-    const T = window.NYC.Terrain;
-    const above = ent.position.y - (T && T.loaded ? T.groundAt(px, pz) : 0); // height above the ground, not sea level
-    const target = Math.max(0.05, RADAR_SCALE / (1 + Math.max(0, above - 25) / 180));
-    this.miniScale += (target - this.miniScale) * 0.08;
-    const scale = this.miniScale;
+    const scale = RADAR_SCALE;
 
     if (this.elMiniStreet) {
       const label = getLocationLabel(px, pz);
@@ -1007,8 +1286,7 @@ class NYCMapSystem {
     if (this.waypoint) {
       const wx = toX(this.waypoint.x);
       const wy = toY(this.waypoint.z);
-      if (this.rideRoute) drawRideRoute(ctx, this.rideRoute, v, 3);
-      else drawRoute(ctx, 0, 0, wx, wy, 3);
+      drawRoute(ctx, 0, 0, wx, wy, 3);
       drawWaypoint(ctx, wx, wy, 4.5);
     }
 
@@ -1098,8 +1376,7 @@ class NYCMapSystem {
     if (this.waypoint) {
       const wx = toX(this.waypoint.x);
       const wy = toY(this.waypoint.z);
-      if (this.rideRoute) drawRideRoute(ctx, this.rideRoute, v, 4);
-      else drawRoute(ctx, toX(ent.position.x), toY(ent.position.z), wx, wy, 4);
+      drawRoute(ctx, toX(ent.position.x), toY(ent.position.z), wx, wy, 4);
       drawWaypoint(ctx, wx, wy, 7);
     }
 
@@ -1248,5 +1525,5 @@ class NYCMapSystem {
   }
 }
 
-Object.assign(window.NYC, { NYCMapSystem });
+Object.assign(window.NYC, { NYCMapSystem, SfMapSystem: NYCMapSystem });
 })();

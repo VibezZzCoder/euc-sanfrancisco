@@ -27,6 +27,7 @@ test('region loader reconstructs full terrain and limits concurrent asset reques
   assert.equal(context.window.NYC.FLIGHT_BOUNDS.minX,data.horizon.x0);
   assert.equal(context.window.NYC.FLIGHT_BOUNDS.maxZ,data.horizon.z1);
   assert.equal(data.buildings.reduce((n,b)=>n+b.header.count,0),data.manifest.buildings.stats.boxes);
+  assert.equal(data.trees.length/4,Object.values(data.manifest.trees.counts).reduce((a,b)=>a+b,0));
 });
 test('region loader rejects corrupt mask lengths and unknown classes',()=>{
   const {context}=harness();

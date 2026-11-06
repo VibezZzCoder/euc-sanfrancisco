@@ -44,12 +44,16 @@ for (const [width, height, dpr] of [[500, 300, 1], [320, 180, 1.5], [1920, 1080,
 function eventTarget() {
   const listeners = new Map();
   return {
-    addEventListener(type, listener) {
+    addEventListener(type, listener, options = false) {
       if (!listeners.has(type)) listeners.set(type, []);
-      listeners.get(type).push(listener);
+      listeners.get(type).push({ listener, capture: options === true || !!options.capture });
     },
-    dispatch(type, event = {}) {
-      for (const listener of listeners.get(type) || []) listener(event);
+    dispatch(type, event = {}, capture) {
+      for (const entry of listeners.get(type) || []) {
+        if (event.stopped) break;
+        if (capture === undefined || entry.capture === capture) entry.listener(event);
+      }
+      return event;
     }
   };
 }
@@ -64,26 +68,75 @@ function classList() {
   };
 }
 
-function mapHarness() {
-  const window = { ...eventTarget(), innerWidth: 200, innerHeight: 200 };
-  const canvas = {
-    ...eventTarget(), style: {}, clientWidth: 200, clientHeight: 200,
-    getContext: () => ({}),
-    getBoundingClientRect: () => ({ left: 10, top: 20, width: 200, height: 200 })
-  };
-  const controls = eventTarget();
-  const wrapper = { classList: classList() };
-  const zoomIn = eventTarget(), zoomOut = eventTarget();
-  const elements = {
-    'fullmap-canvas': canvas, 'fullmap-canvas-wrap': wrapper,
-    'fullmap-modal': { classList: classList() },
-    'map-zoom-in': zoomIn, 'map-zoom-out': zoomOut
-  };
+function mapHarness({ onTeleport } = {}) {
+  const elements = {};
   const document = {
-    ...eventTarget(), hidden: false,
+    ...eventTarget(), hidden: false, activeElement: null,
     getElementById: (id) => elements[id] || null,
     querySelectorAll: () => []
   };
+  const window = { ...eventTarget(), innerWidth: 200, innerHeight: 200,
+    getComputedStyle: element => ({ visibility: element.visibility || 'visible' }) };
+  // Minimal connected DOM tree, with the native focus/inert/dialog methods the production map actually uses.
+  const element = (tagName = 'DIV', parent = null, properties = {}) => {
+    const node = {
+      ...eventTarget(), tagName, parentElement: parent, children: [], style: { setProperty() {} }, dataset: {},
+      isConnected: true, inert: false, disabled: false, hidden: false,
+      tabIndex: ['BUTTON', 'INPUT', 'A'].includes(tagName) ? 0 : -1, classList: classList(),
+      contains(other) {
+        for (let branch = other; branch; branch = branch.parentElement) if (branch === this) return true;
+        return false;
+      },
+      closest(selector) {
+        assert.equal(selector, '[inert]');
+        for (let branch = this; branch; branch = branch.parentElement) if (branch.inert) return branch;
+        return null;
+      },
+      getClientRects() {
+        for (let branch = this; branch; branch = branch.parentElement) if (branch.hidden) return [];
+        return [{}];
+      },
+      focus() {
+        if (!this.isConnected || this.disabled || this.closest('[inert]') || !this.getClientRects().length) return;
+        document.activeElement = this;
+        document.dispatch('focusin', { target: this });
+      },
+      querySelectorAll() {
+        const found = [];
+        const visit = root => { for (const child of root.children) {
+          if (['BUTTON', 'INPUT', 'A', 'SELECT', 'TEXTAREA'].includes(child.tagName)) found.push(child);
+          visit(child);
+        } };
+        visit(this);
+        return found;
+      },
+      ...properties
+    };
+    parent?.children.push(node);
+    return node;
+  };
+  const body = document.body = element('BODY');
+  const hud = element('DIV', body), alreadyInert = element('DIV', body, { inert: true });
+  const mapBranch = element('DIV', body), branchSibling = element('DIV', mapBranch);
+  const invoker = elements['btn-open-map'] = element('BUTTON', hud);
+  const gameCanvas = elements['canvas-container'] = element('DIV', hud);
+  const modal = elements['fullmap-modal'] = element('DIALOG', mapBranch, {
+    inert: true, open: false, shows: 0, closes: 0,
+    showModal() { assert.equal(this.inert, false); this.open = true; this.shows++; this.focus(); },
+    close() { if (!this.open) return; this.open = false; this.closes++; this.dispatch('close'); }
+  });
+  const wrapper = elements['fullmap-canvas-wrap'] = element('DIV', modal);
+  const canvas = elements['fullmap-canvas'] = element('CANVAS', wrapper, {
+    clientWidth: 200, clientHeight: 200, getContext: () => ({}),
+    getBoundingClientRect: () => ({ left: 10, top: 20, width: 200, height: 200 })
+  });
+  const controls = element('DIV', modal);
+  const zoomIn = elements['map-zoom-in'] = element('BUTTON', controls);
+  const zoomOut = elements['map-zoom-out'] = element('BUTTON', controls);
+  const close = elements['close-fullmap-btn'] = element('BUTTON', controls);
+  elements['fullmap-action-status'] = element('P', modal, { textContent: '' });
+  elements['fullmap-hover-info'] = element('P', modal, { textContent: '' });
+  invoker.focus();
   const captured = new Set();
   canvas.setPointerCapture = (id) => captured.add(id);
   canvas.hasPointerCapture = (id) => captured.has(id);
@@ -96,46 +149,66 @@ function mapHarness() {
     ISLAND_BOUNDS: { minX: -10000, maxX: 10000, minZ: -10000, maxZ: 10000 },
     getIslandBoundsAtZ: () => ({ westX: -10000, eastX: 10000 }),
     getLocationLabel: (x, z) => `${x}, ${z}`,
-    isTypingInField: () => false
+    isTypingInField: event => ['INPUT', 'SELECT', 'TEXTAREA'].includes(event.target?.tagName) || event.target?.isContentEditable
   };
   vm.runInNewContext(source, { window, document });
   const teleports = [], toggles = [];
+  const host = { inputEnabled: true };
   const map = new window.NYC.NYCMapSystem({
     controllerManager: { getActiveEntity: () => ({ position: { x: 1000, z: 2000 } }) },
-    onTeleport: (x, z) => teleports.push([x, z]),
-    onToggle: (open) => toggles.push(open)
+    onTeleport: (x, z, heading, referenceY) => {
+      teleports.push([x, z, heading, referenceY]);
+      return onTeleport ? onTeleport(x, z, heading, referenceY) : { succeeded: true, x, z };
+    },
+    onToggle: open => { toggles.push(open); host.inputEnabled = !open; }
   });
   // Exercise the real viewport/input state without drawing the map's geographic layers.
   map.renderFullMap = () => {};
   map.viewZoom = 1;
   map.toggleFullMap(true);
+  const event = properties => ({ defaultPrevented: false, stopped: false,
+    preventDefault() { this.defaultPrevented = true; }, stopImmediatePropagation() { this.stopped = true; }, ...properties });
+  const dispatch = (target, type, e) => {
+    // Window capture precedes the canvas handler; modal capture precedes native control activation.
+    window.dispatch(type, e, true);
+    if (modal.contains(target) && target !== modal) modal.dispatch(type, e, true);
+    target.dispatch(type, e);
+    if (modal.contains(target) && target !== modal) modal.dispatch(type, e, false);
+    window.dispatch(type, e, false);
+    return e;
+  };
   return {
-    map, canvas, controls, wrapper, window, document, captured, teleports, toggles, zoomIn, zoomOut,
+    map, canvas, controls, wrapper, window, document, captured, teleports, toggles, zoomIn, zoomOut, close,
+    modal, invoker, gameCanvas, host, element, background: [hud, alreadyInert, branchSibling],
     pointer(target, type, id, x = 110, y = 120, pointerType = 'touch', button = 0) {
-      const event = { pointerId: id, clientX: x, clientY: y, pointerType, button, preventDefault() {} };
-      (captured.has(id) ? canvas : target).dispatch(type, event);
-      window.dispatch(type, event);
-    }
+      target = captured.has(id) ? canvas : target;
+      return dispatch(target, type, event({ target, pointerId: id, clientX: x, clientY: y, pointerType, button }));
+    },
+    key(code, properties = {}) {
+      const target = document.activeElement;
+      return dispatch(target, 'keydown', event({ target, code, ...properties }));
+    },
+    click(target, properties = {}) { return dispatch(target, 'click', event({ target, detail: 0, ...properties })); }
   };
 }
 
-test('unrelated touches cannot move or release the map pan', () => {
+test('unrelated pointer streams cannot move or release an owned map pan', () => {
   const h = mapHarness();
   assert.equal(h.canvas.style.touchAction, 'none');
-  h.pointer(h.canvas, 'pointerdown', 1);
-  h.pointer(h.controls, 'pointerdown', 2);
-  h.pointer(h.canvas, 'pointerdown', 3);
-  h.pointer(h.controls, 'pointermove', 2, 190);
-  h.pointer(h.canvas, 'pointermove', 3, 190);
-  h.pointer(h.controls, 'pointerup', 2);
-  h.pointer(h.canvas, 'pointercancel', 3);
+  h.pointer(h.canvas, 'pointerdown', 1, 110, 120, 'mouse');
+  h.pointer(h.controls, 'pointerdown', 2, 110, 120, 'pen');
+  h.pointer(h.canvas, 'pointerdown', 3, 110, 120, 'pen');
+  h.pointer(h.controls, 'pointermove', 2, 190, 120, 'pen');
+  h.pointer(h.canvas, 'pointermove', 3, 190, 120, 'pen');
+  h.pointer(h.controls, 'pointerup', 2, 190, 120, 'pen');
+  h.pointer(h.canvas, 'pointercancel', 3, 190, 120, 'pen');
   assert.equal(h.map.viewCenterX, 1000);
   assert.equal(h.map.isPanning, true);
   assert.equal(h.teleports.length, 0);
 
-  h.pointer(h.controls, 'pointermove', 1, 130);
+  h.pointer(h.controls, 'pointermove', 1, 130, 120, 'mouse');
   assert.equal(h.map.viewCenterX, 980);
-  h.pointer(h.controls, 'pointerup', 1, 130);
+  h.pointer(h.controls, 'pointerup', 1, 130, 120, 'mouse');
   assert.equal(h.map.isPanning, false);
   assert.equal(h.wrapper.classList.contains('is-panning'), false);
   assert.equal(h.teleports.length, 0);
@@ -145,17 +218,40 @@ test('a normal map tap teleports once and releases capture', () => {
   const h = mapHarness();
   h.pointer(h.canvas, 'pointerdown', 1);
   h.pointer(h.canvas, 'pointerup', 1);
-  assert.deepEqual(h.teleports, [[1000, 2000]]);
+  assert.deepEqual(h.teleports, [[1000, 2000, undefined, undefined]]);
   assert.equal(h.map.waypoint.name, '1000, 2000');
   assert.equal(h.captured.size, 0);
   assert.equal(h.map.isPanning, false);
 });
 
-for (const interruption of ['pointercancel', 'lostpointercapture', 'blur', 'hidden', 'close']) {
+test('a second touch cancels the whole gesture until release, including a late native control click', () => {
+  const h = mapHarness();
+  h.pointer(h.canvas, 'pointerdown', 1);
+  assert.equal(h.captured.has(1), true);
+  h.pointer(h.controls, 'pointerdown', 2);
+  assert.equal(h.map.isPanning, false);
+  assert.equal(h.map.multiTouch, true);
+  assert.equal(h.captured.size, 0);
+  h.pointer(h.canvas, 'pointermove', 1, 160);
+  h.pointer(h.controls, 'pointerup', 2);
+  h.pointer(h.canvas, 'pointerup', 1);
+  assert.equal(h.map.viewCenterX, 1000);
+  assert.equal(h.teleports.length, 0);
+  assert.equal(h.map.touchPointers.size, 0);
+  assert.equal(h.map.multiTouch, false);
+  assert.equal(h.click(h.zoomIn, { detail: 1, pointerType: 'touch' }).defaultPrevented, true);
+  assert.equal(h.map.viewZoom, 1, 'cancelled touch must not activate a zoom button after pointerup');
+  h.pointer(h.canvas, 'pointerdown', 3);
+  h.pointer(h.canvas, 'pointerup', 3);
+  assert.equal(h.teleports.length, 1, 'a fresh single-finger tap works after cancellation');
+  assert.equal(h.captured.size, 0);
+});
+
+for (const interruption of ['pointercancel', 'lostpointercapture', 'blur', 'hidden', 'close', 'resize']) {
   test(`${interruption} cancels a map tap without teleporting or leaving a drag active`, () => {
     const h = mapHarness();
     h.pointer(h.canvas, 'pointerdown', 1);
-    if (interruption === 'blur') h.window.dispatch('blur');
+    if (interruption === 'blur' || interruption === 'resize') h.window.dispatch(interruption);
     else if (interruption === 'hidden') {
       h.document.hidden = true;
       h.document.dispatch('visibilitychange');
@@ -171,6 +267,8 @@ for (const interruption of ['pointercancel', 'lostpointercapture', 'blur', 'hidd
       assert.deepEqual(h.toggles, [true, false]);
       h.map.toggleFullMap(true);
     }
+    if (interruption === 'hidden') { h.document.hidden = false; h.document.dispatch('visibilitychange'); }
+    if (interruption === 'blur') h.window.dispatch('focus');
     h.pointer(h.canvas, 'pointerdown', 2);
     h.pointer(h.canvas, 'pointerup', 2);
     assert.equal(h.teleports.length, 1);
@@ -199,14 +297,53 @@ test('mouse hover and zoom buttons remain available without a pan', () => {
   assert.equal(h.map.viewZoom, 1);
 });
 
-test('regional map arrivals retain west-side coordinates and clamp to loaded terrain bounds',()=>{
-  const window={NYC:{GEO:{},ROADS:[],DATA:{fullRegion:{city:{x0:-12000,x1:5000,z0:-6000,z1:10000}}}}};
-  vm.runInNewContext(source,{window});
-  const map=Object.create(window.NYC.NYCMapSystem.prototype);
-  const p=map.clampToRegion({x:-6564,z:-2429});
-  assert.equal(p.x,-6564);assert.equal(p.z,-2429);
-  assert.equal(map.clampToRegion({x:1e6,z:-1e6}).x,4975);
-  assert.equal(map.clampToRegion({x:1e6,z:-1e6}).z,-5975);
+test('regional arrivals forward unchanged west coordinates and refuse unsupported sites without a hidden world clamp', () => {
+  const west = { x: -6564, z: -2429 };
+  const h = mapHarness({ onTeleport: (x, z) => ({ succeeded: x === west.x && z === west.z, x, z }) });
+  h.window.NYC.DATA = { fullRegion: { city: { x0: -12000, x1: 5000, z0: -6000, z1: 10000 } } };
+  assert.equal(h.map.teleportToPoint(west), true);
+  assert.deepEqual(h.teleports[0], [west.x, west.z, undefined, undefined]);
+  assert.equal(h.map.waypoint.x, west.x); assert.equal(h.map.waypoint.z, west.z);
+  const accepted = h.map.waypoint;
+  for (const unsupported of [{ x: -11950, z: 3000 }, { x: 1e6, z: -1e6 }]) {
+    assert.equal(h.map.teleportToPoint(unsupported), false);
+    assert.deepEqual(h.teleports.at(-1), [unsupported.x, unsupported.z, undefined, undefined]);
+    assert.equal(h.map.waypoint, accepted, 'no safe host arrival preserves the previous waypoint');
+    assert.match(h.map.elActionStatus.textContent, /no safe EUC arrival/);
+  }
+});
+
+test('map taps require explicit checked success and valid returned coordinates before changing the waypoint', () => {
+  const responses = [undefined, true, {}, { succeeded: false, x: 3, z: 4 },
+    { succeeded: 'true', x: 3, z: 4 }, { succeeded: true, x: NaN, z: 4 },
+    Promise.resolve({ succeeded: true, x: 3, z: 4 })];
+  for (const response of responses) {
+    const h = mapHarness({ onTeleport: () => response }), previous = h.map.waypoint;
+    h.pointer(h.canvas, 'pointerdown', 1);
+    h.pointer(h.canvas, 'pointerup', 1);
+    assert.equal(h.teleports.length, 1);
+    assert.equal(h.map.waypoint, previous);
+    assert.match(h.map.elActionStatus.textContent, /Teleport unavailable/);
+    assert.equal(h.captured.size, 0); assert.equal(h.map.isPanning, false);
+  }
+  const h = mapHarness({ onTeleport: () => ({ succeeded: true, x: 1004, z: 2008 }) });
+  h.pointer(h.canvas, 'pointerdown', 1); h.pointer(h.canvas, 'pointerup', 1);
+  assert.equal(h.map.waypoint.x, 1004); assert.equal(h.map.waypoint.z, 2008);
+  assert.match(h.map.elActionStatus.textContent, /Teleported to 1004, 2008/);
+});
+
+test('missing or throwing teleport owners refuse safely and authored arrivals forward heading/referenceY', () => {
+  const h = mapHarness(), previous = h.map.waypoint;
+  h.map.onTeleport = undefined;
+  assert.equal(h.map.teleportToPoint({ x: 12, z: 13 }), false);
+  h.map.onTeleport = () => { throw new Error('unsupported site'); };
+  assert.equal(h.map.teleportToPoint({ x: 12, z: 13 }), false);
+  assert.equal(h.map.waypoint, previous);
+  const arrival = { x: -6600, z: -2400, heading: 0.75, referenceY: 84.2 };
+  const next = mapHarness();
+  assert.equal(next.map.teleportToPoint({ x: -6564, z: -2429 }, { name: 'West viewpoint', arrival }), true);
+  assert.deepEqual(next.teleports[0], [arrival.x, arrival.z, arrival.heading, arrival.referenceY]);
+  assert.equal(next.map.waypoint.name, 'West viewpoint');
 });
 
 test('hillshade is built once, keeps water transparent and shades land',()=>{
@@ -229,21 +366,65 @@ test('missing landmark labels do not break map initialization or search',()=>{
   assert.doesNotThrow(()=>map.search('absent'));
 });
 
-test('map keyboard events cannot drive the player and Escape closes the map',()=>{
-  const h=mapHarness();let stopped=0,prevented=0;
-  const event=code=>({code,preventDefault(){prevented++;},stopImmediatePropagation(){stopped++;}});
-  h.window.dispatch('keydown',event('KeyW'));
-  assert.equal(stopped,1);assert.equal(h.map.isFullMapOpen,true);
-  h.window.dispatch('keydown',event('Escape'));
-  assert.equal(stopped,2);assert.equal(prevented,1);assert.equal(h.map.isFullMapOpen,false);
+test('native map focus/inertness and owner callback gate riding; Escape restores the keyboard invoker', () => {
+  const h = mapHarness();
+  assert.equal(h.modal.open, true); assert.equal(h.modal.inert, false);
+  assert.equal(h.document.activeElement, h.modal);
+  assert.equal(h.host.inputEnabled, false, 'host receives map ownership before keys can reach riding');
+  assert.ok(h.background.every(element => element.inert));
+  h.key('KeyW');
+  assert.equal(h.map.isFullMapOpen, true); assert.equal(h.host.inputEnabled, false);
+  assert.equal(h.document.activeElement, h.modal);
+  const escape = h.key('Escape');
+  assert.equal(escape.defaultPrevented, true);
+  assert.equal(h.map.isFullMapOpen, false); assert.equal(h.modal.open, false);
+  assert.equal(h.modal.inert, true); assert.equal(h.modal.classList.contains('hidden'), true);
+  assert.equal(h.document.activeElement, h.invoker); assert.equal(h.host.inputEnabled, true);
+  assert.deepEqual(h.background.map(element => element.inert), [false, true, false]);
+  assert.deepEqual(h.toggles, [true, false]);
 });
 
-test('map Tab wraps at each end of its controls',()=>{
-  const h=mapHarness();let focused,prevented=0;
-  const first={focus(){focused=first;}},last={focus(){focused=last;}};
-  h.map.modal.querySelectorAll=()=>[first,last];
-  const tab=shiftKey=>({code:'Tab',shiftKey,preventDefault(){prevented++;},stopImmediatePropagation(){}});
-  h.document.activeElement=last;h.window.dispatch('keydown',tab(false));assert.equal(focused,first);
-  h.document.activeElement=first;h.window.dispatch('keydown',tab(true));assert.equal(focused,last);
-  assert.equal(prevented,2);
+test('map Tab wraps visible native controls, skipping hidden, disabled, disconnected and inert entries', () => {
+  const h = mapHarness();
+  const first = h.element('INPUT', h.modal), last = h.element('A', h.modal);
+  const hidden = h.element('BUTTON', h.modal, { hidden: true });
+  const disabled = h.element('BUTTON', h.modal, { disabled: true });
+  const disconnected = h.element('BUTTON', h.modal, { isConnected: false });
+  const inert = h.element('BUTTON', h.modal, { inert: true });
+  h.modal.querySelectorAll = () => [hidden, first, disabled, disconnected, last, inert];
+  last.focus(); assert.equal(h.key('Tab').defaultPrevented, true); assert.equal(h.document.activeElement, first);
+  assert.equal(h.key('Tab', { shiftKey: true }).defaultPrevented, true); assert.equal(h.document.activeElement, last);
+  first.focus();
+  assert.equal(h.key('Tab').defaultPrevented, false, 'interior Tab retains native browser navigation');
+  h.modal.focus();
+  assert.equal(h.key('Tab').defaultPrevented, true); assert.equal(h.document.activeElement, first);
+  h.modal.querySelectorAll = () => [];
+  assert.equal(h.key('Tab').defaultPrevented, true); assert.equal(h.document.activeElement, h.modal);
+});
+
+test('native cancel/close restore inert values once and reopening captures a fresh invoker', () => {
+  for (const method of ['cancel', 'close']) {
+    const h = mapHarness();
+    h.map.toggleFullMap(true);
+    assert.equal(h.modal.shows, 1); assert.deepEqual(h.toggles, [true]);
+    if (method === 'cancel') {
+      const event = { defaultPrevented: false, preventDefault() { this.defaultPrevented = true; } };
+      h.modal.dispatch('cancel', event); assert.equal(event.defaultPrevented, true);
+    } else h.modal.close();
+    assert.equal(h.modal.closes, 1); assert.equal(h.map.isFullMapOpen, false);
+    assert.deepEqual(h.toggles, [true, false]);
+    assert.deepEqual(h.background.map(element => element.inert), [false, true, false]);
+    assert.equal(h.document.activeElement, h.invoker);
+    h.gameCanvas.focus(); h.map.toggleFullMap(true); h.map.toggleFullMap(false);
+    assert.equal(h.document.activeElement, h.gameCanvas, 'fresh opening does not retain an older keyboard invoker');
+  }
+});
+
+test('pointer closing restores gameplay focus and focus escape while open returns to the dialog', () => {
+  const h = mapHarness();
+  h.document.activeElement = h.invoker;
+  h.document.dispatch('focusin', { target: h.invoker });
+  assert.equal(h.document.activeElement, h.modal);
+  h.click(h.close, { detail: 1, pointerType: 'mouse' });
+  assert.equal(h.map.isFullMapOpen, false); assert.equal(h.document.activeElement, h.gameCanvas);
 });

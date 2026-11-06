@@ -1,6 +1,6 @@
 (function () {
 // js/data-loader.js
-// Fetches the pipeline's binary data (docs/formats.md) named in GEO.data before the city is built (main.js):
+// Fetches the pipeline's binary data (provenance/formats.md) named in GEO.data before the city is built (main.js):
 //   window.NYC.DATA.terrain   { header, q: Uint16Array }                  height field (tools/geo-terrain.mjs)
 //   window.NYC.DATA.buildings { header, table, verts, masses: Float32Array }   footprints (tools/geo-buildings.mjs)
 //   window.NYC.DATA.groundMask { header, mask: Uint8Array }                 ground classes, 1 m (tools/geo-groundmask.mjs)
@@ -8,10 +8,18 @@
 
 const { GEO } = window.NYC;
 
+// Generated URLs name the committed SFB1 bytes; delivery is their lossless `${url}.gz` copy
+// (tools/compress-data.mjs). Sniff the gzip magic: a host that adds Content-Encoding: gzip hands
+// back bytes the browser already inflated (pattern: mrdoob/slop-newyork 062c4a9 + 2813f08, MIT).
 async function fetchBin(url, onBytes) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
-  const buf = await res.arrayBuffer();
+  const res = await fetch(`${url}.gz`);
+  if (!res.ok) throw new Error(`${url}.gz: HTTP ${res.status}`);
+  let buf = await res.arrayBuffer();
+  const lead = new Uint8Array(buf, 0, Math.min(2, buf.byteLength));
+  if (lead[0] === 0x1f && lead[1] === 0x8b) {
+    if (typeof DecompressionStream !== 'function') throw new Error('This browser cannot decompress the city data (DecompressionStream is unavailable).');
+    buf = await new Response(new Response(buf).body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+  }
   if (onBytes) onBytes(buf.byteLength);
   const magic = new TextDecoder().decode(new Uint8Array(buf, 0, 4));
   if (magic !== 'SFB1') throw new Error(`${url}: not an SFB1 file`);

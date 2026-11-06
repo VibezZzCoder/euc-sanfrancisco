@@ -9,12 +9,13 @@ const context = vm.createContext({ window: { NYC: {} } });
 for (const path of ['js/sf-geodata.js', 'js/sf-places.js', 'js/city-config.js']) vm.runInContext(read(path), context);
 const { TELEPORT_LOCATIONS, LANDMARK_SITES, blockAt, nearestRoads, getIslandBoundsAtZ } = context.window.NYC;
 
-test('every teleport button has a destination on a real roadway inside the detailed land', () => {
+// Geographic seed provenance only. Checked EUC placement/route acceptance is covered separately.
+test('every teleport button has a measured geographic roadway seed', () => {
   const buttons = [...read('index.html').matchAll(/data-teleport="([^"]+)"/g)].map((match) => match[1]);
   assert.deepEqual(Object.keys(TELEPORT_LOCATIONS).sort(), buttons.sort());
   for (const [name, point] of Object.entries(TELEPORT_LOCATIONS)) {
     assert.ok(Number.isFinite(point.heading), `${name} has a heading`);
-    if (point.mode === 'helicopter') {
+    if (point.a && point.b) {
       const [ax,az]=point.a,[bx,bz]=point.b;
       assert.ok(Math.abs((point.x-ax)*(bz-az)-(point.z-az)*(bx-ax)) / Math.max(1,Math.hypot(bx-ax,bz-az)) < 0.001, `${name} is above a measured roadway`);
       assert.ok(point.x>=Math.min(ax,bx)-.01&&point.x<=Math.max(ax,bx)+.01&&point.z>=Math.min(az,bz)-.01&&point.z<=Math.max(az,bz)+.01);
@@ -58,51 +59,4 @@ test('the Ferry Building arrival is on the roadway of The Embarcadero', () => {
   const point = TELEPORT_LOCATIONS.ferry;
   assert.ok(nearestRoads(point.x, point.z, 20).some(({ road, dist }) => road.name === 'The Embarcadero' && dist < road.w / 2 + 6));
   assert.equal(blockAt(point.x, point.z), null);
-});
-
-test('preset and map teleports share arrival resets and mark the resolved landing point', () => {
-  const main = read('js/main.js');
-  const start = main.indexOf('  function teleportTo(');
-  const end = main.indexOf('  const openMapBtn', start);
-  const handlers = new Map();
-  const calls = [];
-  const landed = { x: -305.7, z: 5210 };
-  let map;
-  const environment = {
-    rideExperience: null,
-    window: { NYC: { TELEPORT_LOCATIONS } },
-    controllerManager: {
-      teleportActiveTo: (...args) => { calls.push(['teleport', ...args]); return landed; }
-    },
-    touchControls: { reset: () => calls.push(['touch']) },
-    cameraSystem: { resetForTeleport: () => calls.push(['camera']) },
-    selectMode: (...args) => calls.push(['selectMode', ...args]),
-    selectCamera: (...args) => calls.push(['selectCamera', ...args]),
-    getLocationLabel: (x, z) => `${x}, ${z}`,
-    trafficSystem: {},
-    NYCMapSystem: class {
-      constructor(options) { this.onTeleport = options.onTeleport; map = this; }
-    },
-    teleportButtons: Object.keys(TELEPORT_LOCATIONS).map((key) => ({
-      getAttribute: () => key,
-      addEventListener: (_event, handler) => handlers.set(key, handler)
-    })),
-    closePopovers: () => {}
-  };
-  vm.runInNewContext(main.slice(start, end), environment);
-  for (const [name, point] of Object.entries(TELEPORT_LOCATIONS)) {
-    calls.length = 0;
-    handlers.get(name)();
-    assert.deepEqual(calls, [
-      ...(point.mode ? [['selectMode', point.mode]] : []),
-      ['teleport', point.x, point.z, point.heading], ['touch'], ['camera'], ['selectCamera', 'chase', true]
-    ]);
-    assert.equal(map.waypoint.x, landed.x);
-    assert.equal(map.waypoint.z, landed.z);
-  }
-  map.waypoint = { x: 100, z: 200, name: 'inside a building' };
-  map.onTeleport(100, 200);
-  assert.equal(map.waypoint.x, landed.x, 'map marker follows the safe position returned by the controller');
-  assert.equal(map.waypoint.z, landed.z);
-  assert.equal(map.waypoint.name, `${landed.x}, ${landed.z}`);
 });

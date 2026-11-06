@@ -5,9 +5,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
 import vm from 'node:vm';
-import { SITES } from '../tools/geo-landmarks.mjs';
+import { offlineGeoSkip } from './helpers/optional-source.mjs';
 
 const root = new URL('../', import.meta.url);
+const offlineSkip = offlineGeoSkip(root);
+const { SITES } = offlineSkip ? {} : await import('../tools/geo-landmarks.mjs');
 const ctx = vm.createContext({ window: { NYC: {} } });
 vm.runInContext(fs.readFileSync(new URL('js/sf-geodata.js', root), 'utf8'), ctx);
 const GEO = ctx.window.NYC.GEO;
@@ -21,7 +23,7 @@ function readBin(url) {
   return { header, payload: buf.subarray(8 + n) };
 }
 
-test('every modelled landmark resolves to one site on land, with its ground and OSM height', () => {
+test('every modelled landmark resolves to one site on land, with its ground and OSM height', { skip: offlineSkip }, () => {
   const unresolved = Object.keys(SITES).filter((name) => !GEO.landmarks[name]);
   assert.deepEqual(unresolved, [], `unresolved: ${unresolved.join(', ')}`);
   for (const [name, spec] of Object.entries(SITES)) {
@@ -60,7 +62,10 @@ test('the bridges: Golden Gate towers 1280 m apart and 225 m tall, the Bay Bridg
   assert.ok(west[1][0] < ca[0] && ca[0] < west[2][0], 'the centre anchorage between the spans');
 });
 
-test('the interim region ground (P5-1) covers the sites outside the core and agrees with their ground', () => {
+test('the interim region ground (P5-1) covers the sites outside the core and agrees with their ground', {
+  skip: GEO.data.region.url === 'data/terrain-region.bin' && !fs.existsSync(new URL(GEO.data.region.url, root)) &&
+    'retired P5 terrain-region.bin is absent; runtime uses tiled region terrain'
+}, () => {
   const { header, payload } = readBin(GEO.data.region.url);
   assert.equal(header.format, 'sf-terrain');
   const q = new Uint16Array(payload.buffer, payload.byteOffset, header.w * header.h);

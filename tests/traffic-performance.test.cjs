@@ -39,8 +39,9 @@ function sparkHarness(updates = 3) {
   let uploads = 0, range = 0;
   const attr = {
     itemSize: 16,
-    clearUpdateRanges() { range = 0; },
-    addUpdateRange(offset, count) { assert.equal(offset, 0); range = count; },
+    updateRanges: [],
+    clearUpdateRanges() { this.updateRanges.length = 0; range = 0; },
+    addUpdateRange(offset, count) { assert.equal(offset, 0); this.updateRanges.push({ start: offset, count }); range = count; },
     set needsUpdate(value) { if (value) uploads++; }
   };
   const sparkInst = {

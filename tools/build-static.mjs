@@ -1,24 +1,22 @@
-// Deterministic static release package. No network or deployment in this script.
+// Local working-byte runtime package only. No Git, network, upload or deployment.
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { collectStaticFiles } from './static-files.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 const out = path.join(root, 'dist');
 
-// Only this generated directory is replaced; stale files must not enter the public artifact.
+// Validate every input before replacing this one generated directory.
+const files = await collectStaticFiles(root);
 await fs.rm(out, { recursive: true, force: true });
 await fs.mkdir(out, { recursive: true });
 await fs.writeFile(path.join(out, '.nojekyll'), '');
 
-for (const name of ['index.html', 'css', 'js', 'assets', 'LICENSE', 'NOTICE.md']) {
-  await fs.cp(path.join(root, name), path.join(out, name), { recursive: true });
+for (const name of files) {
+  const destination = path.join(out, name);
+  await fs.mkdir(path.dirname(destination), { recursive: true });
+  await fs.copyFile(path.join(root, name), destination);
 }
 
-// Raw inputs and obsolete development-box binaries are never shipped.
-await fs.mkdir(path.join(out, 'data'), { recursive: true });
-const dataAssets = ['terrain-core.bin', 'buildings-core.bin', 'groundmask-core.bin', 'terrain-region.bin', 'region'];
-for (const name of dataAssets) {
-  await fs.cp(path.join(root, 'data', name), path.join(out, 'data', name), { recursive: true });
-}
-
-console.log(`Static package: ${out}. Serve over HTTPS or localhost; Three.js still loads from the pinned CDN.`);
+console.log(`Local runtime package: ${out} (${files.length + 1} files). Run node tools/check-static.mjs.`);
+console.log('Working bytes only: not a curated source export, release acceptance, upload or publication.');

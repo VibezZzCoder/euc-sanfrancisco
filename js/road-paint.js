@@ -19,7 +19,10 @@ const SLOT = new THREE.Color(0x141414);
 const GAUGE = 1.435; // standard gauge, between the rails' centres (near enough)
 const HEIGHT = 0.012; // above the asphalt
 const STEP = 1; // metres between the vertex pairs of a strip
+// Shader-expanded bounds: NYC @9c4cfc9 (MIT, © 2026 Mr.doob).
+const MAX_WIDEN = 16; // createRoadPaintMaterial's screen-space clamp
 
+// Preserve source-order blending of overlapping SF rail/paint ribbons.
 function buildRoadPaint(scene, network) {
   const position = [];
   const normal = [];
@@ -202,21 +205,32 @@ function buildRoadPaint(scene, network) {
     for (let i = 2; i < t.pts.length; i += 2) strip(t.pts[i - 2], t.pts[i - 1], t.pts[i], t.pts[i + 1], 0.05, SLOT, 1, 1, true, 0.006);
   }
 
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(position, 3));
-  geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normal, 3));
-  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-  geometry.setAttribute('side', new THREE.Float32BufferAttribute(side, 2));
-  geometry.setAttribute('paint', new THREE.Float32BufferAttribute(paint, 3));
-  geometry.setIndex(index);
-
-  const mesh = new THREE.Mesh(geometry, createRoadPaintMaterial());
-  mesh.name = 'RoadMarkings';
-  mesh.receiveShadow = true;
-  mesh.renderOrder = -1; // under the other see-through ground effects (contact shadows, headlight beams)
-  scene.add(mesh);
+  const material = createRoadPaintMaterial();
+  const attributes = { position: [position, 3], normal: [normal, 3], color: [colors, 3], side: [side, 2], paint: [paint, 3] };
+  function makeMesh(data, indices, name) {
+    const geometry = new THREE.BufferGeometry();
+    for (const [key, [values, size]] of Object.entries(data)) geometry.setAttribute(key, new THREE.Float32BufferAttribute(values, size));
+    geometry.setIndex(indices);
+    geometry.computeBoundingBox();
+    geometry.computeBoundingSphere();
+    // Bound the uploaded Float32 positions + side vectors, not a nominal cell.
+    // SF's full-width track beds/crosswalks can expand much further than 16 m.
+    let pad = 0;
+    const sides = geometry.attributes.side.array;
+    for (let i = 0; i < sides.length; i += 2) pad = Math.max(pad, Math.hypot(sides[i], sides[i + 1]) * (MAX_WIDEN - 1));
+    pad += 0.01;
+    geometry.boundingBox.expandByScalar(pad);
+    geometry.boundingSphere.radius += pad;
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.name = name;
+    mesh.receiveShadow = true;
+    mesh.renderOrder = -1; // under contact shadows and headlight beams
+    return mesh;
+  }
+  const result = makeMesh(attributes, index, 'RoadMarkings');
+  scene.add(result);
   console.info(`[paint] ${bikeLanes} bike lanes along ${roads.size} roads`);
-  return mesh;
+  return result;
 }
 
 Object.assign(window.NYC, { buildRoadPaint });

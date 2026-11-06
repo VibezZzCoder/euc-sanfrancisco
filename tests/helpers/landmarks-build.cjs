@@ -1,10 +1,11 @@
 // Builds js/landmarks.js and js/sf-bridges.js headless in vm on the real geodata, terrain and buildings binary, with
 // THREE and the materials stubbed (as tests/buildings-runtime.test.cjs): their colliders, cover test and stats. Shared
-// by tests/landmarks-runtime.test.cjs and tests/controllers.test.cjs.
+// by retained landmark, sidewalk-scene and city geometry validation.
 const { readFileSync, existsSync } = require('node:fs');
 const { join } = require('node:path');
 const vm = require('node:vm');
 const { BOX } = require('./geo-box.cjs');
+const { loadRegionPatches } = require('./runtime-region.cjs');
 
 const root = join(__dirname, '../..');
 const binOf = (name) => join(root, `data/${name}-${BOX}.bin`);
@@ -40,11 +41,7 @@ function buildLandmarksHeadless() {
   for (const f of ['js/sf-geodata.js', 'js/city-config.js', 'js/terrain.js']) vm.runInContext(readFileSync(join(root, f), 'utf8'), context);
   const t = readBin(binOf('terrain'));
   NYC.Terrain.load(t.header, new Uint16Array(t.ab, 0, t.header.w * t.header.h));
-  const r = readBin(join(root, NYC.GEO.data.region.url));
-  const q = new Uint16Array(r.ab, 0, r.header.w * r.header.h);
-  const h = new Float32Array(q.length);
-  for (let k = 0; k < q.length; k++) h[k] = r.header.minH + q[k] * r.header.scale;
-  NYC.Terrain.addPatch({ x0: r.header.originX, z0: r.header.originZ, step: r.header.cell, nx: r.header.w, nz: r.header.h, h, rect: true });
+  loadRegionPatches(root, NYC.Terrain);
   const b = readBin(binOf('buildings'));
   const H = b.header;
   NYC.DATA = { buildings: { header: H, table: new Float32Array(b.ab, 0, H.tableFloats), verts: new Float32Array(b.ab, H.tableFloats * 4, H.vertexFloats) } };

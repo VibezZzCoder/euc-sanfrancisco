@@ -3,7 +3,7 @@
 //   0 asphalt (the default: roadway and any other land)   1 sidewalk / plaza (under the curb islands, paved squares)
 //   2 lawn (parks)   3 sand (none in the slice)   4 rock (slopes steeper than ROCK_SLOPE off the curb islands)
 //   5 water edge (the bay and the land within SHORE m of it: the seawall face the terrain mesh drops into the water)
-// Output: data/groundmask-<box>.bin (format: docs/formats.md, "sf-groundmask").
+// Output: data/groundmask-<box>.bin (format: provenance/formats.md, "sf-groundmask").
 import path from 'node:path';
 import { Raster, log, ROOT } from './geo-base.mjs';
 import { readBin, writeBin } from './geo-terrain.mjs';

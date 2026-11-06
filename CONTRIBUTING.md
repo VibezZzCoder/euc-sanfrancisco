@@ -1,52 +1,66 @@
-# Contributing
+# Contributing to SF Spin-off: EUC Thrills
 
-Thanks for helping improve Slop San Francisco. Small, focused fixes are welcome.
+The SF destination is in Early Access / Work in Progress. Begin with [README.md](README.md),
+[FORK_GUIDE.md](FORK_GUIDE.md), [NOTICE.md](NOTICE.md) and [NOTICE-EUC-THRILLS.md](NOTICE-EUC-THRILLS.md).
+Public source/provenance is indexed in [provenance/README.md](provenance/README.md).
 
-## Try it and report a bug
-
-Use the [playable demo](https://unable12.github.io/slop-sanfrancisco/), or run locally:
+## Preview and report
 
 ```bash
 node tools/serve.mjs
 ```
 
-Open http://127.0.0.1:8080 in a WebGPU-capable browser. Use Node.js 22 or newer. No runtime npm install is needed.
-For a report, include the street or landmark, movement mode, browser/GPU if known, steps to reproduce, and a
-screenshot or short clip. Mention quality, fog and time settings when they affect the issue.
+Node.js 24+; open http://127.0.0.1:8002 and stop with Ctrl+C. Runtime dependencies/data/fonts/audio are local.
+For a bug, include the street/destination, rider, browser/GPU, graphics backend, rendering scale/FPS setting, input
+device and exact steps. Distinguish Chromium emulation from a physical phone, foldable, tablet or controller.
 
-## Send a change
+## Focused implementation
 
-1. Fork the repository and create a branch for one change.
-2. Read the relevant modules in [the architecture guide](docs/ARCHITECTURE.md). Preserve the existing
-   vanilla JavaScript/IIFE structure; a new framework or physics engine is not needed for a small fix.
-3. Keep simulation and rendering behavior separate where practical. Terrain/grade APIs are authoritative
-   for height; shared collision geometry is authoritative for player body clearance.
-4. Run the checks below. Add meaningful regression coverage for behavior changes, and before/after
-   screenshots for visual changes. Explain what changed, why, and any limits in the pull request.
+- Keep native JavaScript and the explicit classic-city/ES-module seam. One Three identity, renderer and loop owner;
+  fixed 120 Hz EUC simulation. The host owns startup and teardown; the controller owns movement, while city adapters
+  supply elevation-aware support, collision and actor queries.
+- Preserve real hills, building elevations/concavities and shared city life. Mobile adaptations change rendering
+  and resource cost, not routes, physics, collision, roster or population.
+- Keep source and generated output distinct. `js/euc/` is generator-owned; record exact upstream revisions and
+  transformations. Future riders/assets are not automatically approved by the reviewed roster.
+- Trace imports, classic namespace consumers, preparation, audio, workers, preloads and packaged output before pruning.
+  Shared `actor-models`, `WorldCollision`, landmark helpers and geographic validation are not obsolete player modes.
+- Use focused tests by impact; preserve geometric/data assertions and report timing-sensitive limits honestly.
+  SF shell/sampler/geometry/destination tests complement the retained city/data tests. Deleting obsolete car-mode
+  fixtures does not establish replacement EUC browser/input acceptance.
+
+## Local package checks
 
 ```bash
-node --test --test-concurrency=1 tests/*.test.cjs tests/*.test.mjs
+node --check tools/serve.mjs
+node --check tools/build-static.mjs
+node --check tools/check-static.mjs
+node --test tests/static-preview.test.mjs
 node tools/build-static.mjs
 node tools/check-static.mjs
 ```
 
-Full tests include simulated rides and can take several minutes. Avoid running multiple performance-sensitive
-suites at once. Do not loosen test thresholds to make failures disappear; report the environment and result.
+The focused HTTP tests launch child previews with OS-assigned loopback ports (`0`), never the parent's port 8002.
+Symlink/private-file fixtures are isolated under ignored `qa-artifacts/` and removed after the test; no live runtime
+file is swapped. They cover HTTP headers and methods, restricted paths, traversal, malformed paths, recovery and symlink rejection.
+The package checker also resolves public documentation links, checks for private checkout paths/public links to
+local-only donor hashes, compares native EUC preloads to the generated eager list and reports exact payload bytes.
 
-## Data and assets
+These verify local HTTP/packaging and source references. Browser QA is separate, using isolated Playwright Chromium and
+project-local dependencies, with artifacts under ignored `qa-artifacts/`. Serialize bounded GPU phases and use the
+full device/foldable and WebGPU/WebGL2 matrix for integrated acceptance. No browser or full-suite results are implied
+by a passing package check.
 
-Runtime data is committed. Offline data regeneration is separate and requires the dependencies in `tools/`;
-see [data sources](docs/data-sources.md). Do not commit raw downloads, credentials, `node_modules`, `dist`, or
-large recording exports. Preserve provenance and all attribution when changing generated geography.
+## Data, rights and release scope
 
-The code is MIT-licensed. Geographic inputs and derived data retain their own source-specific terms in
-[NOTICE.md](NOTICE.md). Keep upstream copyright notices. Original or appropriately licensed contributions only.
+Keep DataSF/USGS/OSM provenance, ODbL database availability, discoverable in-game OSM credit, both city MIT notices,
+EUC/Three/font notices and per-file/identity/audio exceptions. Geographic tools/queries and source validation are
+retained for reproducibility; committed runtime data suffices for development. Do not fetch/regenerate geography
+for this adaptation. Never include private rider reference/permission records, credentials or personal browser state.
 
-## Scope
-
-The current focus is a reliable, approachable demo: startup, navigation, visual defects, performance and
-clear documentation. Discuss large feature additions in an issue before investing in them. Detailed tree
-collisions, pedestrian reactions and other simulation expansions are optional future work.
-
-Historical phase plans and maintainer handover notes document how the project was built. They are not
-requirements for an external contributor to complete before submitting a focused fix.
+The first public release requires **all intended regional EUC destinations**, including Golden Gate approaches/
+crossing, Twin Peaks and Painted Ladies. Dorkins/booking follows that release; authored skate venues are separate.
+The inherited automatic Pages workflow is removed. `dist/` is a local runtime package, not a curated public source
+export or permission to publish. SF-specific clean-source curation/export validation and explicit owner release/push
+approval remain required. See the public README's local package notes; publish only a reviewed source tree with its
+licences, notices, provenance and runtime data intact.

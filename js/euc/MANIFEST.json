@@ -1,0 +1,1820 @@
+{
+  "upstream": "https://github.com/VibezZzCoder/EUC-thrills",
+  "commit": "5f45fff19b258e140833841ba2473069af751a12",
+  "sources": {
+    "base": {
+      "commit": "5f45fff19b258e140833841ba2473069af751a12"
+    },
+    "donor": {
+      "commit": "d37efc07cddc0d76ff7aa585901710d357b8e5a1",
+      "files": [
+        {
+          "source": "src/app/nearSolids.ts",
+          "sourceSha256": "59350bb61e53a9bda09660f6cf8a0f6cded9557815fb34cda977ca5f97ef2480",
+          "selection": "complete helper; NYC elevation forwarding and selected visual tyre envelope; native physical axle and flat-floor answers preserved"
+        },
+        {
+          "source": "src/render/ridingRig.ts",
+          "sourceSha256": "7413e04db970dd1c791eb9fa59a06cfb62556c464b9e98502baff4a12912bad0",
+          "selection": "near-solid presentation channel; NYC cached selected-geometry visual tyre radius, flight/crash exclusions and constraint-safe release easing; no appearance/resource graph migration"
+        },
+        {
+          "source": "src/simulation/EucController.ts",
+          "sourceSha256": "5304c5f60cc443418d7b8836932482b2ef806b3bc69f6fe0d5565cadf91cdfe9",
+          "selection": {
+            "fields": [
+              "wallTurnSeconds",
+              "wallTurnDirection",
+              "wallTurns",
+              "comeBackTurn",
+              "comeBackDirection",
+              "comeBackFlight",
+              "comeBackClimb",
+              "comeBackUpX",
+              "comeBackUpZ",
+              "comeBackAirs",
+              "kickRise",
+              "kickRun",
+              "kickOnTop",
+              "flaggedSlopeRun"
+            ],
+            "methods": [
+              "transitionLaunch",
+              "onFlaggedSlope",
+              "kickArmed",
+              "transitionHop",
+              "stepKickLatch",
+              "stepWallTurn",
+              "faceBrake",
+              "comeBackAtLip",
+              "updateComeBackClimb",
+              "startComeBack",
+              "comeBackAgainstFace",
+              "alignComeBackWithSpin",
+              "comeBackTouchdown",
+              "clearTransitionMotion",
+              "wallTurnCount",
+              "comeBackAirCount",
+              "inComeBackAir"
+            ],
+            "replace": [
+              "reset",
+              "stepNative",
+              "updateSafePosition",
+              "obstacleWithinWheelRadius",
+              "stepHop",
+              "launchHop",
+              "leaveGround",
+              "separate"
+            ],
+            "excluded": [
+              "respawn",
+              "recoveryTarget",
+              "clearAheadRecoveryTarget",
+              "clearAhead"
+            ],
+            "nyc": [
+              "validated fallen-support rest policy",
+              "dynamic admission restores automatic turn sweep"
+            ]
+          }
+        },
+        {
+          "source": "src/simulation/eucStepPrimitives.ts",
+          "sourceSha256": "46c74ca9d4845b9c4b47049da0cd9f9861ff1c9d85220cdc29f3c2ad9f043d27",
+          "selection": {
+            "fields": [
+              "wallTurnSeconds",
+              "wallTurnDirection",
+              "wallTurns",
+              "comeBackTurn",
+              "comeBackDirection",
+              "comeBackFlight",
+              "comeBackClimb",
+              "comeBackUpX",
+              "comeBackUpZ",
+              "comeBackAirs",
+              "kickRise",
+              "kickRun",
+              "kickOnTop",
+              "flaggedSlopeRun"
+            ],
+            "nycFields": [
+              "dynamicComeBackApplied"
+            ]
+          }
+        },
+        {
+          "source": "src/data/tuning.ts",
+          "sourceSha256": "a084dbc4237910707d41a949bc8d395aa6d09682c84a23fbdd049843e3fce069",
+          "selection": {
+            "declarations": [
+              "NEAR_SOLID",
+              "SKATE_TRANSITION"
+            ]
+          }
+        },
+        {
+          "source": "src/simulation/world.ts",
+          "sourceSha256": "fc42f20124279aae9b037de4b4940b4ea2603c568023a7ce8554a88350d6f400",
+          "selection": "transitionAt and restartsAtRest capability contracts; NYC location/elevation arguments and checked fallen-support validation"
+        }
+      ]
+    }
+  },
+  "generatedBy": "tools/vendor-euc.mjs",
+  "entries": [
+    "app/oneFootPose.ts",
+    "app/nearSolids.ts",
+    "simulation/EucController.ts",
+    "simulation/planSampler.ts",
+    "simulation/world.ts",
+    "input/actions.ts",
+    "render/ridingRig.ts",
+    "render/riderLook.ts",
+    "render/machineLook.ts",
+    "render/appearanceLoader.ts",
+    "data/riders.ts",
+    "data/machines.ts"
+  ],
+  "workers": {
+    "entries": [
+      "render/appearanceWorker.js"
+    ],
+    "sharedThree": null,
+    "vectorSource": {
+      "source": "vendor/three/build/three.core.js",
+      "sourceSha256": "5fb576f559a503bdaaac4990a632984a3673f13369e947540986b0d392be3a2f",
+      "methods": [
+        "constructor",
+        "set",
+        "copy",
+        "distanceTo",
+        "distanceToSquared",
+        "subVectors",
+        "crossVectors",
+        "length",
+        "multiplyScalar",
+        "addScaledVector"
+      ]
+    },
+    "pixelCaches": {
+      "cool-rider": [
+        "coolRiderAtlas.ts"
+      ],
+      "trollina": [],
+      "red-rider": [],
+      "adonisb2": [],
+      "maribel-vargas": [
+        "maribelAtlas.ts"
+      ],
+      "wheel-in-motion": [
+        "wimAtlas.ts",
+        "wimMachineAtlas.ts"
+      ],
+      "drunkard": [
+        "drunkardAtlas.ts",
+        "drunkardMachineAtlas.ts"
+      ],
+      "flo-with-zo": [],
+      "seal-on-a-wheel": [
+        "sealAtlas.ts"
+      ],
+      "wyldist": [
+        "wyldistAtlas.ts"
+      ],
+      "gnarwheel": [
+        "gnarwheelAtlas.ts"
+      ]
+    },
+    "appearances": {
+      "cool-rider": [
+        "render/appearancePixelImports.js",
+        "render/appearanceRegistry.js",
+        "render/appearanceWorker.js",
+        "render/inkKit.js",
+        "render/pixels/coolRiderAtlas.js",
+        "render/pixels/paintColours.js",
+        "shared/letterPaths.js"
+      ],
+      "trollina": [
+        "render/appearancePixelImports.js",
+        "render/appearanceRegistry.js",
+        "render/appearanceWorker.js"
+      ],
+      "red-rider": [
+        "render/appearancePixelImports.js",
+        "render/appearanceRegistry.js",
+        "render/appearanceWorker.js"
+      ],
+      "adonisb2": [
+        "render/appearancePixelImports.js",
+        "render/appearanceRegistry.js",
+        "render/appearanceWorker.js"
+      ],
+      "maribel-vargas": [
+        "data/mvLogoAsset.js",
+        "render/appearancePixelImports.js",
+        "render/appearanceRegistry.js",
+        "render/appearanceWorker.js",
+        "render/inkKit.js",
+        "render/pixels/maribelAtlas.js",
+        "render/pixels/paintColours.js",
+        "render/pngDecode.js",
+        "shared/letterPaths.js"
+      ],
+      "wheel-in-motion": [
+        "data/wimLogoAsset.js",
+        "render/appearancePixelImports.js",
+        "render/appearanceRegistry.js",
+        "render/appearanceWorker.js",
+        "render/inkKit.js",
+        "render/pixels/paintColours.js",
+        "render/pixels/paintSurface.js",
+        "render/pixels/paintVector.js",
+        "render/pixels/wimAtlas.js",
+        "render/pixels/wimMachineAtlas.js",
+        "render/pngDecode.js",
+        "shared/letterPaths.js"
+      ],
+      "drunkard": [
+        "render/appearancePixelImports.js",
+        "render/appearanceRegistry.js",
+        "render/appearanceWorker.js",
+        "render/inkKit.js",
+        "render/pixels/drunkardAtlas.js",
+        "render/pixels/drunkardMachineAtlas.js",
+        "render/pixels/paintColours.js",
+        "render/pixels/paintSurface.js",
+        "render/pixels/paintVector.js",
+        "shared/letterPaths.js"
+      ],
+      "flo-with-zo": [
+        "render/appearancePixelImports.js",
+        "render/appearanceRegistry.js",
+        "render/appearanceWorker.js"
+      ],
+      "seal-on-a-wheel": [
+        "render/appearancePixelImports.js",
+        "render/appearanceRegistry.js",
+        "render/appearanceWorker.js",
+        "render/inkKit.js",
+        "render/pixels/paintColours.js",
+        "render/pixels/sealAtlas.js",
+        "shared/letterPaths.js"
+      ],
+      "wyldist": [
+        "render/appearancePixelImports.js",
+        "render/appearanceRegistry.js",
+        "render/appearanceWorker.js",
+        "render/inkKit.js",
+        "render/pixels/paintColours.js",
+        "render/pixels/paintSurface.js",
+        "render/pixels/paintVector.js",
+        "render/pixels/wyldistAtlas.js",
+        "shared/letterPaths.js"
+      ],
+      "gnarwheel": [
+        "data/gnarwheelLogoAsset.js",
+        "render/appearancePixelImports.js",
+        "render/appearanceRegistry.js",
+        "render/appearanceWorker.js",
+        "render/inkKit.js",
+        "render/pixels/gnarwheelAtlas.js",
+        "render/pixels/paintColours.js",
+        "render/pixels/paintSurface.js",
+        "render/pixels/paintVector.js",
+        "render/pngDecode.js",
+        "shared/letterPaths.js"
+      ]
+    },
+    "modules": [
+      "data/gnarwheelLogoAsset.js",
+      "data/mvLogoAsset.js",
+      "data/wimLogoAsset.js",
+      "render/appearancePixelImports.js",
+      "render/appearanceRegistry.js",
+      "render/appearanceWorker.js",
+      "render/inkKit.js",
+      "render/pixels/coolRiderAtlas.js",
+      "render/pixels/drunkardAtlas.js",
+      "render/pixels/drunkardMachineAtlas.js",
+      "render/pixels/gnarwheelAtlas.js",
+      "render/pixels/maribelAtlas.js",
+      "render/pixels/paintColours.js",
+      "render/pixels/paintSurface.js",
+      "render/pixels/paintVector.js",
+      "render/pixels/sealAtlas.js",
+      "render/pixels/wimAtlas.js",
+      "render/pixels/wimMachineAtlas.js",
+      "render/pixels/wyldistAtlas.js",
+      "render/pngDecode.js",
+      "shared/letterPaths.js"
+    ]
+  },
+  "removedColourEntries": 7,
+  "removedColourKeys": [
+    "copShirt",
+    "copHiVis",
+    "copBand",
+    "copHelmet",
+    "copSkin",
+    "copGear",
+    "paddle"
+  ],
+  "roster": [
+    {
+      "id": "cool-rider",
+      "machine": "standard",
+      "lookExport": "COOL_RIDER_LOOK",
+      "machineExport": "STANDARD_MACHINE_LOOK",
+      "crash": "crash_wipeout.wav",
+      "stumble": null,
+      "style": "SOBER_STYLE"
+    },
+    {
+      "id": "trollina",
+      "machine": "trollina",
+      "lookExport": "TROLLINA_LOOK",
+      "machineExport": "TROLLINA_MACHINE_LOOK",
+      "crash": "crash_trollina.wav",
+      "stumble": null,
+      "style": "SOBER_STYLE"
+    },
+    {
+      "id": "red-rider",
+      "machine": "red-rider",
+      "lookExport": "RED_RIDER_LOOK",
+      "machineExport": "RED_RIDER_MACHINE_LOOK",
+      "crash": "crash_red_rider.wav",
+      "stumble": null,
+      "style": "SOBER_STYLE"
+    },
+    {
+      "id": "adonisb2",
+      "machine": "adonisb2",
+      "lookExport": "ADONISB2_LOOK",
+      "machineExport": "ADONISB2_MACHINE_LOOK",
+      "crash": "crash_adonisb2.wav",
+      "stumble": null,
+      "style": "SOBER_STYLE"
+    },
+    {
+      "id": "maribel-vargas",
+      "machine": "maribel",
+      "lookExport": "MARIBEL_LOOK",
+      "machineExport": "MARIBEL_MACHINE_LOOK",
+      "crash": "crash_maribel.wav",
+      "stumble": null,
+      "style": "SOBER_STYLE"
+    },
+    {
+      "id": "wheel-in-motion",
+      "machine": "wheel-in-motion",
+      "lookExport": "WHEEL_IN_MOTION_LOOK",
+      "machineExport": "WHEEL_IN_MOTION_MACHINE_LOOK",
+      "crash": "crash_wheel_in_motion.wav",
+      "stumble": null,
+      "style": "SOBER_STYLE"
+    },
+    {
+      "id": "drunkard",
+      "machine": "drunkard",
+      "lookExport": "DRUNKARD_LOOK",
+      "machineExport": "DRUNKARD_MACHINE_LOOK",
+      "crash": "crash_drunkard.wav",
+      "stumble": "stumble_drunkard.wav",
+      "style": "DRUNK_STYLE"
+    },
+    {
+      "id": "flo-with-zo",
+      "machine": "flo-with-zo",
+      "lookExport": "FLO_WITH_ZO_LOOK",
+      "machineExport": "FLO_WITH_ZO_MACHINE_LOOK",
+      "crash": "crash_flo_with_zo.wav",
+      "stumble": null,
+      "style": "SOBER_STYLE"
+    },
+    {
+      "id": "seal-on-a-wheel",
+      "machine": "seal-on-a-wheel",
+      "lookExport": "SEAL_ON_A_WHEEL_LOOK",
+      "machineExport": "SEAL_ON_A_WHEEL_MACHINE_LOOK",
+      "crash": "crash_seal_on_a_wheel.wav",
+      "stumble": null,
+      "style": "SOBER_STYLE"
+    },
+    {
+      "id": "wyldist",
+      "machine": "wyldist",
+      "lookExport": "WYLDIST_LOOK",
+      "machineExport": "WYLDIST_MACHINE_LOOK",
+      "crash": "crash_wyldist.wav",
+      "stumble": null,
+      "style": "SOBER_STYLE"
+    },
+    {
+      "id": "gnarwheel",
+      "machine": "gnarwheel",
+      "lookExport": "GNARWHEEL_LOOK",
+      "machineExport": "GNARWHEEL_MACHINE_LOOK",
+      "crash": "crash_gnarwheel.wav",
+      "stumble": null,
+      "style": "SOBER_STYLE"
+    }
+  ],
+  "eager": [
+    "app/nearSolids.js",
+    "app/oneFootPose.js",
+    "data/machines.js",
+    "data/rideStyles.js",
+    "data/riders.js",
+    "data/surfaces.js",
+    "data/tuning.js",
+    "input/actions.js",
+    "render/appearanceImports.js",
+    "render/appearanceLoader.js",
+    "render/appearanceRegistry.js",
+    "render/blockoutKit.js",
+    "render/euc.js",
+    "render/machineLook.js",
+    "render/rider.js",
+    "render/riderClothDrape.js",
+    "render/riderJointSurface.js",
+    "render/riderLook.js",
+    "render/ridingRig.js",
+    "render/rigConsolidation.js",
+    "shared/freeze.js",
+    "shared/maths.js",
+    "shared/ragdollBoot.js",
+    "shared/ragdollContact.js",
+    "shared/ragdollHip.js",
+    "shared/ragdollInterpolation.js",
+    "shared/ragdollLimbContact.js",
+    "shared/riderOccupancy.js",
+    "shared/riderSideContact.js",
+    "simulation/EucController.js",
+    "simulation/eucStepPrimitives.js",
+    "simulation/hazards.js",
+    "simulation/lateralCeiling.js",
+    "simulation/launchPadField.js",
+    "simulation/planSampler.js",
+    "simulation/ragdoll.js",
+    "simulation/riderLean.js",
+    "simulation/roughness.js",
+    "simulation/softBodies.js",
+    "simulation/world.js"
+  ],
+  "deferred": [
+    "data/gnarwheelLogoAsset.js",
+    "data/mvLogoAsset.js",
+    "data/wimLogoAsset.js",
+    "render/appearancePixelImports.js",
+    "render/appearanceWorker.js",
+    "render/coolRiderAtlas.js",
+    "render/coolRiderLook.js",
+    "render/drunkardAtlas.js",
+    "render/drunkardMachineAtlas.js",
+    "render/floWithZoLook.js",
+    "render/gnarwheelAtlas.js",
+    "render/gnarwheelLook.js",
+    "render/gnarwheelMachineLook.js",
+    "render/inkKit.js",
+    "render/machineAppearance-adonisb2.js",
+    "render/machineAppearance-cool-rider.js",
+    "render/machineAppearance-drunkard.js",
+    "render/machineAppearance-flo-with-zo.js",
+    "render/machineAppearance-gnarwheel.js",
+    "render/machineAppearance-maribel-vargas.js",
+    "render/machineAppearance-red-rider.js",
+    "render/machineAppearance-seal-on-a-wheel.js",
+    "render/machineAppearance-trollina.js",
+    "render/machineAppearance-wheel-in-motion.js",
+    "render/machineAppearance-wyldist.js",
+    "render/maribelAtlas.js",
+    "render/maribelHair.js",
+    "render/pixels/coolRiderAtlas.js",
+    "render/pixels/drunkardAtlas.js",
+    "render/pixels/drunkardMachineAtlas.js",
+    "render/pixels/gnarwheelAtlas.js",
+    "render/pixels/maribelAtlas.js",
+    "render/pixels/paintColours.js",
+    "render/pixels/paintSurface.js",
+    "render/pixels/paintVector.js",
+    "render/pixels/sealAtlas.js",
+    "render/pixels/wimAtlas.js",
+    "render/pixels/wimMachineAtlas.js",
+    "render/pixels/wyldistAtlas.js",
+    "render/pngDecode.js",
+    "render/riderAppearance-adonisb2.js",
+    "render/riderAppearance-cool-rider.js",
+    "render/riderAppearance-drunkard.js",
+    "render/riderAppearance-flo-with-zo.js",
+    "render/riderAppearance-gnarwheel.js",
+    "render/riderAppearance-maribel-vargas.js",
+    "render/riderAppearance-red-rider.js",
+    "render/riderAppearance-seal-on-a-wheel.js",
+    "render/riderAppearance-trollina.js",
+    "render/riderAppearance-wheel-in-motion.js",
+    "render/riderAppearance-wyldist.js",
+    "render/sealAtlas.js",
+    "render/sealOnAWheelLook.js",
+    "render/wimAtlas.js",
+    "render/wimMachineAtlas.js",
+    "render/wyldistAtlas.js",
+    "render/wyldistHelmet.js",
+    "render/wyldistLook.js",
+    "render/wyldistMachineLook.js",
+    "shared/letterPaths.js"
+  ],
+  "appearances": {
+    "cool-rider": [
+      "data/surfaces.js",
+      "data/tuning.js",
+      "render/appearanceRegistry.js",
+      "render/blockoutKit.js",
+      "render/coolRiderAtlas.js",
+      "render/coolRiderLook.js",
+      "render/inkKit.js",
+      "render/machineAppearance-cool-rider.js",
+      "render/riderAppearance-cool-rider.js",
+      "shared/freeze.js",
+      "shared/letterPaths.js"
+    ],
+    "trollina": [
+      "data/surfaces.js",
+      "data/tuning.js",
+      "render/blockoutKit.js",
+      "render/machineAppearance-trollina.js",
+      "render/riderAppearance-trollina.js",
+      "shared/freeze.js"
+    ],
+    "red-rider": [
+      "data/surfaces.js",
+      "data/tuning.js",
+      "render/blockoutKit.js",
+      "render/machineAppearance-red-rider.js",
+      "render/riderAppearance-red-rider.js",
+      "shared/freeze.js"
+    ],
+    "adonisb2": [
+      "data/surfaces.js",
+      "data/tuning.js",
+      "render/blockoutKit.js",
+      "render/machineAppearance-adonisb2.js",
+      "render/riderAppearance-adonisb2.js",
+      "shared/freeze.js"
+    ],
+    "maribel-vargas": [
+      "data/mvLogoAsset.js",
+      "data/surfaces.js",
+      "data/tuning.js",
+      "render/appearanceRegistry.js",
+      "render/blockoutKit.js",
+      "render/inkKit.js",
+      "render/machineAppearance-maribel-vargas.js",
+      "render/maribelAtlas.js",
+      "render/maribelHair.js",
+      "render/pngDecode.js",
+      "render/riderAppearance-maribel-vargas.js",
+      "shared/freeze.js",
+      "shared/letterPaths.js"
+    ],
+    "wheel-in-motion": [
+      "data/surfaces.js",
+      "data/tuning.js",
+      "data/wimLogoAsset.js",
+      "render/appearanceRegistry.js",
+      "render/blockoutKit.js",
+      "render/inkKit.js",
+      "render/machineAppearance-wheel-in-motion.js",
+      "render/pngDecode.js",
+      "render/riderAppearance-wheel-in-motion.js",
+      "render/wimAtlas.js",
+      "render/wimMachineAtlas.js",
+      "shared/freeze.js",
+      "shared/letterPaths.js"
+    ],
+    "drunkard": [
+      "data/surfaces.js",
+      "data/tuning.js",
+      "render/appearanceRegistry.js",
+      "render/blockoutKit.js",
+      "render/drunkardAtlas.js",
+      "render/drunkardMachineAtlas.js",
+      "render/inkKit.js",
+      "render/machineAppearance-drunkard.js",
+      "render/riderAppearance-drunkard.js",
+      "shared/freeze.js",
+      "shared/letterPaths.js"
+    ],
+    "flo-with-zo": [
+      "data/surfaces.js",
+      "data/tuning.js",
+      "render/blockoutKit.js",
+      "render/floWithZoLook.js",
+      "render/machineAppearance-flo-with-zo.js",
+      "render/riderAppearance-flo-with-zo.js",
+      "shared/freeze.js"
+    ],
+    "seal-on-a-wheel": [
+      "data/surfaces.js",
+      "data/tuning.js",
+      "render/appearanceRegistry.js",
+      "render/blockoutKit.js",
+      "render/inkKit.js",
+      "render/machineAppearance-seal-on-a-wheel.js",
+      "render/riderAppearance-seal-on-a-wheel.js",
+      "render/sealAtlas.js",
+      "render/sealOnAWheelLook.js",
+      "shared/freeze.js",
+      "shared/letterPaths.js"
+    ],
+    "wyldist": [
+      "data/surfaces.js",
+      "data/tuning.js",
+      "render/appearanceRegistry.js",
+      "render/blockoutKit.js",
+      "render/inkKit.js",
+      "render/machineAppearance-wyldist.js",
+      "render/riderAppearance-wyldist.js",
+      "render/wyldistAtlas.js",
+      "render/wyldistHelmet.js",
+      "render/wyldistLook.js",
+      "render/wyldistMachineLook.js",
+      "shared/freeze.js",
+      "shared/letterPaths.js"
+    ],
+    "gnarwheel": [
+      "data/gnarwheelLogoAsset.js",
+      "data/surfaces.js",
+      "data/tuning.js",
+      "render/appearanceRegistry.js",
+      "render/blockoutKit.js",
+      "render/gnarwheelAtlas.js",
+      "render/gnarwheelLook.js",
+      "render/gnarwheelMachineLook.js",
+      "render/inkKit.js",
+      "render/machineAppearance-gnarwheel.js",
+      "render/pngDecode.js",
+      "render/riderAppearance-gnarwheel.js",
+      "render/sealAtlas.js",
+      "render/sealOnAWheelLook.js",
+      "shared/freeze.js",
+      "shared/letterPaths.js"
+    ]
+  },
+  "audio": [
+    {
+      "source": "assets/live/audio/crash_wipeout.wav",
+      "sourceSha256": "44bec4433734386116c51190c54ee072569151fba2717058439f3259030dc4b0",
+      "bytes": 299958,
+      "shipped": true
+    },
+    {
+      "source": "assets/live/audio/crash_trollina.wav",
+      "sourceSha256": "c88274f3ea5230cbbb7e19b726e45924f491c2fd10b74cc29401a7a10b51d662",
+      "bytes": 299924,
+      "shipped": true
+    },
+    {
+      "source": "assets/live/audio/crash_red_rider.wav",
+      "sourceSha256": "05acf9bd3e21b3df341946be48df2d98f0f92b649c79d6883e47f36530a5a99e",
+      "bytes": 299924,
+      "shipped": true
+    },
+    {
+      "source": "assets/live/audio/crash_adonisb2.wav",
+      "sourceSha256": "187cee08cbafc33901c919959fc5a248e7d0107948ab83e1f34e77bec8759f6d",
+      "bytes": 299924,
+      "shipped": true
+    },
+    {
+      "source": "assets/live/audio/crash_maribel.wav",
+      "sourceSha256": "7c1e549d13853ba49b5b8837433d5aba143497faa65ddc8c61fe046f2ee139b9",
+      "bytes": 299924,
+      "shipped": true
+    },
+    {
+      "source": "assets/live/audio/crash_wheel_in_motion.wav",
+      "sourceSha256": "fafd15e0fb6bc19ff9ec5611f216fc91976e8333e7a4f4cfea07e399d35430d4",
+      "bytes": 299924,
+      "shipped": true
+    },
+    {
+      "source": "assets/live/audio/crash_drunkard.wav",
+      "sourceSha256": "56e1e118a1dd2cd882e6c78587ffb69f10dc0737b33b2e84b4a162985049cc75",
+      "bytes": 299924,
+      "shipped": true
+    },
+    {
+      "source": "assets/live/audio/crash_flo_with_zo.wav",
+      "sourceSha256": "7cfec9e5e0c05ba3441a56a1d4a838f874dc88c1117f0687dee04ac387ded016",
+      "bytes": 299924,
+      "shipped": true
+    },
+    {
+      "source": "assets/live/audio/crash_seal_on_a_wheel.wav",
+      "sourceSha256": "1462d5753b58c22dab8dd3a7cdea5216f05aed4e0442bef64b5e0bb7ef76d9af",
+      "bytes": 299924,
+      "shipped": true
+    },
+    {
+      "source": "assets/live/audio/crash_wyldist.wav",
+      "sourceSha256": "1a17e0c6ab6e671a67cdd6bd4aefb60abaa56c9a507d18251d6b22b9b36f03bd",
+      "bytes": 299924,
+      "shipped": true
+    },
+    {
+      "source": "assets/live/audio/crash_gnarwheel.wav",
+      "sourceSha256": "dda0cf3b706bd4fbb0dca2ed837a4bb52cafd10b06e77f20f077b03b283d4392",
+      "bytes": 599804,
+      "shipped": true
+    },
+    {
+      "source": "assets/live/audio/stumble_drunkard.wav",
+      "sourceSha256": "e9403a65bddba102f29add453ae7ea47165ef35c15629e88658c6d2e8cda2004",
+      "bytes": 35324,
+      "shipped": true
+    },
+    {
+      "source": "assets/live/audio/tyre_offroad_loop.wav",
+      "sourceSha256": "0ded352777f872ec6df9566fe6f203ca5c3b13fd31031eb043592b487fc791fc",
+      "bytes": 255858,
+      "shipped": false,
+      "unshippedReason": "No active SF offroad sample consumer"
+    },
+    {
+      "source": "assets/live/audio/tyre_solid_loop.wav",
+      "sourceSha256": "5ca9cff89e24dbffc1ad0752d829de3a997420e14cd2756b4abf941b70ba45a9",
+      "bytes": 215644,
+      "shipped": true
+    },
+    {
+      "source": "assets/live/audio/wind_howl_loop.wav",
+      "sourceSha256": "042440716b1331ead0247d39bdd2e522318e226be049637305ed14d19675c3ba",
+      "bytes": 432258,
+      "shipped": true
+    },
+    {
+      "source": "assets/live/audio/siren_far_loop.wav",
+      "sourceSha256": "09d77eacb93910f55565119a35b96b338c642f9862ba2723e2e077ac5e3100e7",
+      "bytes": 516048,
+      "shipped": false,
+      "unshippedReason": "Dorkins/siren is post-initial-release"
+    },
+    {
+      "source": "assets/live/audio/siren_close_loop.wav",
+      "sourceSha256": "0f34dc0bf177406aaaaded4fb1ac7e980bf497dd4a29423218458606fd7feed6",
+      "bytes": 688038,
+      "shipped": false,
+      "unshippedReason": "Dorkins/siren is post-initial-release"
+    },
+    {
+      "source": "assets/live/audio/overspeed_beep.wav",
+      "sourceSha256": "363851aa808ed5a7c66a548bbbdd113ffdbe45fa4b8f9a310ed7085f925a87b6",
+      "bytes": 6660,
+      "shipped": true
+    }
+  ],
+  "provenance": [
+    {
+      "source": "LICENSE",
+      "sourceSha256": "38afeea0bd30fff98b23d7b384c9f4be22bd89f84783d2faeae98d736c8f41be"
+    },
+    {
+      "source": "NOTICE.md",
+      "sourceSha256": "6719e312c9c80593e1a516148c85751f2d47c1bc2130c4f722635adf49ca6663"
+    },
+    {
+      "source": "src/audio/samples.ts",
+      "sourceSha256": "e03d0da5c9bac3648a118cfa694557544ccdf3f73c528a2deaba6d25f2df2ee8"
+    }
+  ],
+  "files": {
+    "app/nearSolids.js": {
+      "source": "src/app/nearSolids.ts",
+      "sourceSha256": "59350bb61e53a9bda09660f6cf8a0f6cded9557815fb34cda977ca5f97ef2480",
+      "sourceCommit": "d37efc07cddc0d76ff7aa585901710d357b8e5a1",
+      "donor": {
+        "commit": "d37efc07cddc0d76ff7aa585901710d357b8e5a1",
+        "source": "src/app/nearSolids.ts",
+        "sourceSha256": "59350bb61e53a9bda09660f6cf8a0f6cded9557815fb34cda977ca5f97ef2480",
+        "selection": "complete helper; NYC elevation forwarding and selected visual tyre envelope; native physical axle and flat-floor answers preserved"
+      },
+      "outputSha256": "e80a38338eb3d52e3fd9f247c17300a13693d0de1f42a5d95d2bfdc57f9dc52b",
+      "sliced": true
+    },
+    "app/oneFootPose.js": {
+      "source": "src/app/oneFootPose.ts",
+      "sourceSha256": "c5f70bd5e52f9e07ace049932101829ce0e89427e313f608a684d2beefe7dcb4",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "b1735f9c91f128e911687bb7eba764ad1b5ae215a15acd9bd0b112dd58dfa146",
+      "sliced": false
+    },
+    "data/gnarwheelLogoAsset.js": {
+      "source": "src/data/gnarwheelLogoAsset.ts",
+      "sourceSha256": "baaf2c57d01ee64f2b454ba06d5fc05b7a0e0a3fae2c13fa8e17669b3ef31dac",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "0ebb30c68b890251b2ecbc32a04381abb97b93d453ba4cc5bc2aeda40cad24af",
+      "sliced": false
+    },
+    "data/machines.js": {
+      "source": "src/data/machines.ts",
+      "sourceSha256": "eb58503c7dba462c43d04700b1768c2222957d81109039069232d80bdefb261b",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "a55520b13d08964f92849502a88c6a525a96b0d70bff0754be6b404abbc09b12",
+      "sliced": false
+    },
+    "data/mvLogoAsset.js": {
+      "source": "src/data/mvLogoAsset.ts",
+      "sourceSha256": "8b44a49127e4f5da64cdc75e911cc9409a9c8884edd764f2c7b54018c1e2af31",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "9a67ce46e6b249c7e805dca4a20d60a842d2fbdfefd4f55107d905be9d76562a",
+      "sliced": false
+    },
+    "data/riders.js": {
+      "source": "src/data/riders.ts",
+      "sourceSha256": "940b36c4713fc655d0111a582364ae6eef5bb764eb514960f355d91a85e41278",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "249ad0f9abc33d3a0878f3d77f54d85c8deb62003bd67e7dc09d84f88cba755f",
+      "sliced": true
+    },
+    "data/rideStyles.js": {
+      "source": "src/data/rideStyles.ts",
+      "sourceSha256": "3bb3fadfb1cd032ef6d51035e385824bd32d54bec1606ab35ff15266d29b0ccd",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "a056369fc07db9484fb463f2b66ae6c4181b8dfef610884a06b9b1c2f9564475",
+      "sliced": false
+    },
+    "data/surfaces.js": {
+      "source": "src/data/surfaces.ts",
+      "sourceSha256": "758e7d5c46b1c6d5f7f3a1020a5ed96b9c4407e9458b7eefeb9276b8247d19aa",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "f4231d85efeda03a348276876b21a3ab4893d36709bba249a8664a027ac992f2",
+      "sliced": false
+    },
+    "data/tuning.js": {
+      "source": "src/data/tuning.ts",
+      "sourceSha256": "d0c462aa34845cb31246063f8416f2a607a89829f60c8ecca5f89abb041bfd04",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "donor": {
+        "commit": "d37efc07cddc0d76ff7aa585901710d357b8e5a1",
+        "source": "src/data/tuning.ts",
+        "sourceSha256": "a084dbc4237910707d41a949bc8d395aa6d09682c84a23fbdd049843e3fce069",
+        "selection": {
+          "declarations": [
+            "NEAR_SOLID",
+            "SKATE_TRANSITION"
+          ]
+        }
+      },
+      "outputSha256": "7bcb56f91a1ba7eaacc7d9491b2e37b8050d2a902292109acfefe9afc05fda5f",
+      "sliced": true
+    },
+    "data/wimLogoAsset.js": {
+      "source": "src/data/wimLogoAsset.ts",
+      "sourceSha256": "c15c2e604e966f5fbf217b988386709524acd2a7c5316351537197e4586768c8",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "b9e6a702cd3a6c09b00df74342f159ad1dfb7f71fe892e478dbfb12785725755",
+      "sliced": false
+    },
+    "input/actions.js": {
+      "source": "src/input/actions.ts",
+      "sourceSha256": "beed52da5550107ce52ae6a4b246ad0791690a7c6b25f52e007c98234b68eaa1",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "186bcd652cef52cc22a13e1585765bafb7d8d9fdceda776625df8f68ad20713b",
+      "sliced": false
+    },
+    "render/appearanceImports.js": {
+      "source": null,
+      "sourceSha256": null,
+      "derivedFrom": [],
+      "outputSha256": "eecd93c0b4d12d11d15e8a0835e350a318b76c1f2f1cac1b22f2e101e10d93ff",
+      "sliced": false
+    },
+    "render/appearanceLoader.js": {
+      "source": null,
+      "sourceSha256": null,
+      "derivedFrom": [],
+      "outputSha256": "fa36f8bd246897550ac5d949a2b95796e18e0993589c3543660b1f9b1c437a8e",
+      "sliced": false
+    },
+    "render/appearancePixelImports.js": {
+      "source": null,
+      "sourceSha256": null,
+      "derivedFrom": [],
+      "outputSha256": "85115ab4b35ad138c68d5bc33afe2a466adb4acbe74b10d627fca500a68689ed",
+      "sliced": false
+    },
+    "render/appearanceRegistry.js": {
+      "source": null,
+      "sourceSha256": null,
+      "derivedFrom": [],
+      "outputSha256": "c64fc633d11a302876ab12f509f7a06e33b4a2508a5426beee3dd5265e05e1f8",
+      "sliced": false
+    },
+    "render/appearanceWorker.js": {
+      "source": null,
+      "sourceSha256": null,
+      "derivedFrom": [],
+      "outputSha256": "fb03da5a4a00b59e6a2d7897d45a7defc77716487432865286ed0165dca4b072",
+      "sliced": false
+    },
+    "render/blockoutKit.js": {
+      "source": "src/render/blockoutKit.ts",
+      "sourceSha256": "e651a01f03ae3e5d826195f726066b38bd10db75f94aa0e5beff4964352a2801",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "9f3af864160c6a8eb0ae74cee140e4971a49d9b011391f44486e27b50ed17c8b",
+      "sliced": false
+    },
+    "render/coolRiderAtlas.js": {
+      "source": "src/render/coolRiderAtlas.ts",
+      "sourceSha256": "bab14b1ec5a813afc1596c0e987c0432abcd63e742c7e6a0115682b732a26e54",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "86949c8beaf010af8e600013a6d407839be57c3ea4e053974fa610213b637b73",
+      "sliced": false
+    },
+    "render/coolRiderLook.js": {
+      "source": "src/render/coolRiderLook.ts",
+      "sourceSha256": "d3b7e14cf6aaafd65c2f994d39019e785bfd1f270775a53553801cc3561f646f",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "89f62f92432531052a38100dbc4aaedf56ad36b9fdb7d7b4b407e33609d001d6",
+      "sliced": false
+    },
+    "render/drunkardAtlas.js": {
+      "source": "src/render/drunkardAtlas.ts",
+      "sourceSha256": "e4fb4d4a2dd8103f147326febfd9ea38a355df15a2d627bf608684d27f3e33c6",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "561d42499e90992e56b8689e276c0c9f889a6a04a1c1f0e1aeb45202f46437e9",
+      "sliced": false
+    },
+    "render/drunkardMachineAtlas.js": {
+      "source": "src/render/drunkardMachineAtlas.ts",
+      "sourceSha256": "ea91d4c259c18256a4163c8f0973a6cf2d34a691ff4dc3c687a80585f2982d03",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "9b765c69e1700ebd428954600c95e6f3894d6730f87ee020f63425ecd553b71a",
+      "sliced": false
+    },
+    "render/euc.js": {
+      "source": "src/render/euc.ts",
+      "sourceSha256": "c56888018a2a64c99593ccc7a8d3cf3336f357fa249d06b3c2ca4f5e90579f97",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "ff42ca0d27ecd3484b25b8f5caa9d3b7d213fd90958ab34ffca3a6d715e5ed64",
+      "sliced": true
+    },
+    "render/floWithZoLook.js": {
+      "source": "src/render/floWithZoLook.ts",
+      "sourceSha256": "c1437da95ae6089efbdcec32cf3d1f028ae127b0a13c5d8e3f7dd5bb7bc658e4",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "1103013dbb5be87942aaa2a1b8354b10f18a5000aebf8d9e9bf82be69df229de",
+      "sliced": false
+    },
+    "render/gnarwheelAtlas.js": {
+      "source": "src/render/gnarwheelAtlas.ts",
+      "sourceSha256": "35e95a80ed7fe1ed9db6ed1e9ea309e0f0b14218da42a5ea0669e2877c499450",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "a524c41320e470499441768a9876cd5be0f316adaea17bdc7f67d6e4c1f8f7df",
+      "sliced": false
+    },
+    "render/gnarwheelLook.js": {
+      "source": "src/render/gnarwheelLook.ts",
+      "sourceSha256": "62baf7d163b12cff7d9d2057b582dc513bf8319f78126877b8016c338bd9b210",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "e0f31ae726e00b3c30d32af86db986bb5455b747737e5bf48e86bdf52253af75",
+      "sliced": false
+    },
+    "render/gnarwheelMachineLook.js": {
+      "source": "src/render/gnarwheelMachineLook.ts",
+      "sourceSha256": "c34d4cd7ce253d74e936d81b8d164f0995a18d5e00d5d4a4bd1c1d0b0ab22577",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "ec851fcaddcbd53a6cff531f99fbe4df2d39136788f967b245bda2c6938fe907",
+      "sliced": false
+    },
+    "render/inkKit.js": {
+      "source": "src/render/inkKit.ts",
+      "sourceSha256": "76e05570e3cd2b50a9e2f888f252239fe0310ef21290152a7efdbcfd0764c957",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "06f20bdca5eb6224280738e02120ba2719ad3bea35971613dd07c40a1374b679",
+      "sliced": false
+    },
+    "render/machineAppearance-adonisb2.js": {
+      "source": null,
+      "sourceSha256": null,
+      "derivedFrom": [
+        {
+          "source": "src/render/machineLook.ts",
+          "sourceSha256": "720088d38842186e4e43101744c564f92389dc6fec4cac98e3de0eef0cce5612"
+        }
+      ],
+      "outputSha256": "4f67231572d0bb416440175c4fba0b193fda8bc9c1fabfd0447edfa23a001107",
+      "sliced": false
+    },
+    "render/machineAppearance-cool-rider.js": {
+      "source": null,
+      "sourceSha256": null,
+      "derivedFrom": [
+        {
+          "source": "src/render/machineLook.ts",
+          "sourceSha256": "720088d38842186e4e43101744c564f92389dc6fec4cac98e3de0eef0cce5612"
+        }
+      ],
+      "outputSha256": "08166ceba2d8c4842416eb8afcc6f621af602d04c86d734584c89f7e98433288",
+      "sliced": false
+    },
+    "render/machineAppearance-drunkard.js": {
+      "source": null,
+      "sourceSha256": null,
+      "derivedFrom": [
+        {
+          "source": "src/render/machineLook.ts",
+          "sourceSha256": "720088d38842186e4e43101744c564f92389dc6fec4cac98e3de0eef0cce5612"
+        }
+      ],
+      "outputSha256": "72131044ada9e68a5983233d427b7fcccd1064b5ab6621a8d99e90c21fc7f5b4",
+      "sliced": false
+    },
+    "render/machineAppearance-flo-with-zo.js": {
+      "source": null,
+      "sourceSha256": null,
+      "derivedFrom": [
+        {
+          "source": "src/render/machineLook.ts",
+          "sourceSha256": "720088d38842186e4e43101744c564f92389dc6fec4cac98e3de0eef0cce5612"
+        }
+      ],
+      "outputSha256": "db0fe88d8a2136d27ba1f86b83caa1416edcff35836ee6c2a25a7f3f3a39a2b3",
+      "sliced": false
+    },
+    "render/machineAppearance-gnarwheel.js": {
+      "source": null,
+      "sourceSha256": null,
+      "derivedFrom": [
+        {
+          "source": "src/render/machineLook.ts",
+          "sourceSha256": "720088d38842186e4e43101744c564f92389dc6fec4cac98e3de0eef0cce5612"
+        }
+      ],
+      "outputSha256": "218c4ce5dd1660f2fe0b66b2158f4caf623e9be2707495d583be632114ee4f4d",
+      "sliced": false
+    },
+    "render/machineAppearance-maribel-vargas.js": {
+      "source": null,
+      "sourceSha256": null,
+      "derivedFrom": [
+        {
+          "source": "src/render/machineLook.ts",
+          "sourceSha256": "720088d38842186e4e43101744c564f92389dc6fec4cac98e3de0eef0cce5612"
+        }
+      ],
+      "outputSha256": "dd70eac98a67bf990354050f3563e9ea70adde7d42fafb6f079058b351059114",
+      "sliced": false
+    },
+    "render/machineAppearance-red-rider.js": {
+      "source": null,
+      "sourceSha256": null,
+      "derivedFrom": [
+        {
+          "source": "src/render/machineLook.ts",
+          "sourceSha256": "720088d38842186e4e43101744c564f92389dc6fec4cac98e3de0eef0cce5612"
+        }
+      ],
+      "outputSha256": "7afd2b511eb619efa6051d5c9b2e52bf6c09be6e41bb1adf0ac74fd5393ff71b",
+      "sliced": false
+    },
+    "render/machineAppearance-seal-on-a-wheel.js": {
+      "source": null,
+      "sourceSha256": null,
+      "derivedFrom": [
+        {
+          "source": "src/render/machineLook.ts",
+          "sourceSha256": "720088d38842186e4e43101744c564f92389dc6fec4cac98e3de0eef0cce5612"
+        }
+      ],
+      "outputSha256": "9c0554b901b08f030c7a41493f31a049e0b6b600c029b620d5bf1a8b4100b85d",
+      "sliced": false
+    },
+    "render/machineAppearance-trollina.js": {
+      "source": null,
+      "sourceSha256": null,
+      "derivedFrom": [
+        {
+          "source": "src/render/machineLook.ts",
+          "sourceSha256": "720088d38842186e4e43101744c564f92389dc6fec4cac98e3de0eef0cce5612"
+        }
+      ],
+      "outputSha256": "7da018ddfd49883f841b96555b2c8a7f9d53e914f4174a4f48a4ac2440e976ed",
+      "sliced": false
+    },
+    "render/machineAppearance-wheel-in-motion.js": {
+      "source": null,
+      "sourceSha256": null,
+      "derivedFrom": [
+        {
+          "source": "src/render/machineLook.ts",
+          "sourceSha256": "720088d38842186e4e43101744c564f92389dc6fec4cac98e3de0eef0cce5612"
+        }
+      ],
+      "outputSha256": "886d4ee79da4a68963e334a937cf052ce983461371618bb22e50694f0bcc3a29",
+      "sliced": false
+    },
+    "render/machineAppearance-wyldist.js": {
+      "source": null,
+      "sourceSha256": null,
+      "derivedFrom": [
+        {
+          "source": "src/render/machineLook.ts",
+          "sourceSha256": "720088d38842186e4e43101744c564f92389dc6fec4cac98e3de0eef0cce5612"
+        }
+      ],
+      "outputSha256": "fe2e7f65be9ad8ac9ec89c241917274f1e6ddfaa138cde50d24beb25041cef13",
+      "sliced": false
+    },
+    "render/machineLook.js": {
+      "source": "src/render/machineLook.ts",
+      "sourceSha256": "720088d38842186e4e43101744c564f92389dc6fec4cac98e3de0eef0cce5612",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "eb90272ff73130c2805980594b93f1224acbf1e6713bfc69a170148209af7065",
+      "sliced": true
+    },
+    "render/maribelAtlas.js": {
+      "source": "src/render/maribelAtlas.ts",
+      "sourceSha256": "d7087c958b5513f3e2e5d4edd5850eec36adf681c1e034cc475bf6b273db3032",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "20c5afa9fa4c39241686c0dd7f8a5ec1a3b54a3829011f847cb69f363fe33386",
+      "sliced": false
+    },
+    "render/maribelHair.js": {
+      "source": "src/render/maribelHair.ts",
+      "sourceSha256": "ae6651cdbde6ca174f17de42b79323dba7d916414432bfd7ad146eccf63b9d67",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "a0f686e3c1b6c0e5d43dee6332b784acf6340469af88596ed9698e78bedd8694",
+      "sliced": false
+    },
+    "render/pixels/coolRiderAtlas.js": {
+      "source": null,
+      "sourceSha256": null,
+      "derivedFrom": [
+        {
+          "source": "src/render/coolRiderAtlas.ts",
+          "sourceSha256": "bab14b1ec5a813afc1596c0e987c0432abcd63e742c7e6a0115682b732a26e54"
+        }
+      ],
+      "outputSha256": "c18d8f70734e1412bf0682c5a7665c090a38ffd0692b77cb15781930ebebe62c",
+      "sliced": false
+    },
+    "render/pixels/drunkardAtlas.js": {
+      "source": null,
+      "sourceSha256": null,
+      "derivedFrom": [
+        {
+          "source": "src/render/drunkardAtlas.ts",
+          "sourceSha256": "e4fb4d4a2dd8103f147326febfd9ea38a355df15a2d627bf608684d27f3e33c6"
+        }
+      ],
+      "outputSha256": "897dc1cf53bbcd69dc1f294b4a99e49bd235c18d85a45f4041ea52ef0562d5a1",
+      "sliced": false
+    },
+    "render/pixels/drunkardMachineAtlas.js": {
+      "source": null,
+      "sourceSha256": null,
+      "derivedFrom": [
+        {
+          "source": "src/render/drunkardMachineAtlas.ts",
+          "sourceSha256": "ea91d4c259c18256a4163c8f0973a6cf2d34a691ff4dc3c687a80585f2982d03"
+        }
+      ],
+      "outputSha256": "634403e302586b26286cc75c8cc8fd87ee508a470c8c398a3b5e094a49139487",
+      "sliced": false
+    },
+    "render/pixels/gnarwheelAtlas.js": {
+      "source": null,
+      "sourceSha256": null,
+      "derivedFrom": [
+        {
+          "source": "src/render/gnarwheelAtlas.ts",
+          "sourceSha256": "35e95a80ed7fe1ed9db6ed1e9ea309e0f0b14218da42a5ea0669e2877c499450"
+        }
+      ],
+      "outputSha256": "52b649918c0548b2330631df7a3de4a75ed4f5dec51a6c906078baa64e897398",
+      "sliced": false
+    },
+    "render/pixels/maribelAtlas.js": {
+      "source": null,
+      "sourceSha256": null,
+      "derivedFrom": [
+        {
+          "source": "src/render/maribelAtlas.ts",
+          "sourceSha256": "d7087c958b5513f3e2e5d4edd5850eec36adf681c1e034cc475bf6b273db3032"
+        }
+      ],
+      "outputSha256": "25d3f242ac9dcda26228d051cce71f0f27b84a36da2df7dc640d0a9b8e6f8d99",
+      "sliced": false
+    },
+    "render/pixels/paintColours.js": {
+      "source": null,
+      "sourceSha256": null,
+      "derivedFrom": [
+        {
+          "source": "src/data/tuning.ts",
+          "sourceSha256": "d0c462aa34845cb31246063f8416f2a607a89829f60c8ecca5f89abb041bfd04"
+        }
+      ],
+      "outputSha256": "0309ebcda23d4de49c7419c6faa293034e9501a5a80111eeff7272c4089dc826",
+      "sliced": false
+    },
+    "render/pixels/paintSurface.js": {
+      "source": null,
+      "sourceSha256": null,
+      "derivedFrom": [
+        {
+          "source": "src/render/blockoutKit.ts",
+          "sourceSha256": "e651a01f03ae3e5d826195f726066b38bd10db75f94aa0e5beff4964352a2801"
+        }
+      ],
+      "outputSha256": "07fe86a797fb467194a5925b4593fd0015e08b9c581dc151de4ece454c5c4e63",
+      "sliced": false
+    },
+    "render/pixels/paintVector.js": {
+      "source": null,
+      "sourceSha256": null,
+      "derivedFrom": [
+        {
+          "source": "vendor/three/build/three.core.js",
+          "sourceSha256": "5fb576f559a503bdaaac4990a632984a3673f13369e947540986b0d392be3a2f",
+          "methods": [
+            "constructor",
+            "set",
+            "copy",
+            "distanceTo",
+            "distanceToSquared",
+            "subVectors",
+            "crossVectors",
+            "length",
+            "multiplyScalar",
+            "addScaledVector"
+          ],
+          "license": "vendor/three/LICENSE"
+        }
+      ],
+      "outputSha256": "e47a5df1285d852bb0ad9e60a5d5e71651b12c4e878dc551f6e9b7bac6c3fc80",
+      "sliced": false
+    },
+    "render/pixels/sealAtlas.js": {
+      "source": null,
+      "sourceSha256": null,
+      "derivedFrom": [
+        {
+          "source": "src/render/sealAtlas.ts",
+          "sourceSha256": "2558be80d6157084b3b8e9c11cf027bbdb26c0ea7b878e6339d8cc7906e2f3a4"
+        }
+      ],
+      "outputSha256": "07c2c3c6ae197d0a739590b1848261d4b7e49d52abc228ddc48db65bbb3f2881",
+      "sliced": false
+    },
+    "render/pixels/wimAtlas.js": {
+      "source": null,
+      "sourceSha256": null,
+      "derivedFrom": [
+        {
+          "source": "src/render/wimAtlas.ts",
+          "sourceSha256": "7181af9f73fe05787202e217db8252162d06e06c4688e4126b9f8d3c411c888f"
+        }
+      ],
+      "outputSha256": "70b971c6d1274c1acc9a87e1e1a0877c1bd8ff95212fb3c838fa1dccc17c7cbd",
+      "sliced": false
+    },
+    "render/pixels/wimMachineAtlas.js": {
+      "source": null,
+      "sourceSha256": null,
+      "derivedFrom": [
+        {
+          "source": "src/render/wimMachineAtlas.ts",
+          "sourceSha256": "7f0c84127bfbde76d3e8dd99ed57460e112f2dfb38c01bf0b4157be0335d233f"
+        }
+      ],
+      "outputSha256": "5f25f0e352d8bcc5e2fb8e35ffac5ba694f77284c731d77ce5ebfa4e8603c7fa",
+      "sliced": false
+    },
+    "render/pixels/wyldistAtlas.js": {
+      "source": null,
+      "sourceSha256": null,
+      "derivedFrom": [
+        {
+          "source": "src/render/wyldistAtlas.ts",
+          "sourceSha256": "d805d365bd030b39b5fdba0473706e212ae8406b0ad9bea36dcafd4dcbcd66a2"
+        }
+      ],
+      "outputSha256": "5a4d07b6ec07ecd1d19f026298abb188bd25d15fed0e4379977afdad8563327d",
+      "sliced": false
+    },
+    "render/pngDecode.js": {
+      "source": "src/render/pngDecode.ts",
+      "sourceSha256": "524b1d00257a2749a4077c00aed7fe1c1ddaf9088a61b40cffea9a5a386bcf15",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "7691459ec819bba6cb4a59021c698702956d466369c9937b439e6ad8d786c9db",
+      "sliced": false
+    },
+    "render/rider.js": {
+      "source": "src/render/rider.ts",
+      "sourceSha256": "fcc67783bda9e4cc68d0522ef394c9c4145877bf48e5d56d7a79c6413d9e13b4",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "941183437f2cc2358c0161dbe4c67a71d079af6ea0ef060b8fa0f06f8790a14a",
+      "sliced": true
+    },
+    "render/riderAppearance-adonisb2.js": {
+      "source": null,
+      "sourceSha256": null,
+      "derivedFrom": [
+        {
+          "source": "src/render/riderLook.ts",
+          "sourceSha256": "a5d06cdd735631c8acdc021cf6651e9843f08957e7c286d4c3d7e7fd823dacb5"
+        }
+      ],
+      "outputSha256": "174db90c0be2be8e05e93362d89fbb4f93c4e3a9aeca2132f1f5f57127d33f15",
+      "sliced": false
+    },
+    "render/riderAppearance-cool-rider.js": {
+      "source": null,
+      "sourceSha256": null,
+      "derivedFrom": [
+        {
+          "source": "src/render/riderLook.ts",
+          "sourceSha256": "a5d06cdd735631c8acdc021cf6651e9843f08957e7c286d4c3d7e7fd823dacb5"
+        }
+      ],
+      "outputSha256": "c0b6b58ad54bfb4a2bdd3e856f00f7294ecc1c64d91d253bade8a186103cc0be",
+      "sliced": false
+    },
+    "render/riderAppearance-drunkard.js": {
+      "source": null,
+      "sourceSha256": null,
+      "derivedFrom": [
+        {
+          "source": "src/render/riderLook.ts",
+          "sourceSha256": "a5d06cdd735631c8acdc021cf6651e9843f08957e7c286d4c3d7e7fd823dacb5"
+        }
+      ],
+      "outputSha256": "6036628be6b059a645839be7a12ea30b848d1418396eb113d1efe617861690e2",
+      "sliced": false
+    },
+    "render/riderAppearance-flo-with-zo.js": {
+      "source": null,
+      "sourceSha256": null,
+      "derivedFrom": [
+        {
+          "source": "src/render/riderLook.ts",
+          "sourceSha256": "a5d06cdd735631c8acdc021cf6651e9843f08957e7c286d4c3d7e7fd823dacb5"
+        }
+      ],
+      "outputSha256": "ded751cd048e6eb5a4eec7ec99ace9c8c3e2679e0764032b3ee615d36ed826f7",
+      "sliced": false
+    },
+    "render/riderAppearance-gnarwheel.js": {
+      "source": null,
+      "sourceSha256": null,
+      "derivedFrom": [
+        {
+          "source": "src/render/riderLook.ts",
+          "sourceSha256": "a5d06cdd735631c8acdc021cf6651e9843f08957e7c286d4c3d7e7fd823dacb5"
+        }
+      ],
+      "outputSha256": "50605875ad40d0bba6a180c151ae2a0846dd56db7c0fae199f42e6a76a68946a",
+      "sliced": false
+    },
+    "render/riderAppearance-maribel-vargas.js": {
+      "source": null,
+      "sourceSha256": null,
+      "derivedFrom": [
+        {
+          "source": "src/render/riderLook.ts",
+          "sourceSha256": "a5d06cdd735631c8acdc021cf6651e9843f08957e7c286d4c3d7e7fd823dacb5"
+        }
+      ],
+      "outputSha256": "ed7431c8aaeee3df3dae4312f81b1ca3ad821da30322ef2061488731f91d8170",
+      "sliced": false
+    },
+    "render/riderAppearance-red-rider.js": {
+      "source": null,
+      "sourceSha256": null,
+      "derivedFrom": [
+        {
+          "source": "src/render/riderLook.ts",
+          "sourceSha256": "a5d06cdd735631c8acdc021cf6651e9843f08957e7c286d4c3d7e7fd823dacb5"
+        }
+      ],
+      "outputSha256": "08094b172022757d596a2dae2585d444f03dd5989af673f09fc0999244f8f068",
+      "sliced": false
+    },
+    "render/riderAppearance-seal-on-a-wheel.js": {
+      "source": null,
+      "sourceSha256": null,
+      "derivedFrom": [
+        {
+          "source": "src/render/riderLook.ts",
+          "sourceSha256": "a5d06cdd735631c8acdc021cf6651e9843f08957e7c286d4c3d7e7fd823dacb5"
+        }
+      ],
+      "outputSha256": "c943cbaa03c00b90fa1c8a2f18343f3f77d1fa74ffbc14e9ee106fa4764c648b",
+      "sliced": false
+    },
+    "render/riderAppearance-trollina.js": {
+      "source": null,
+      "sourceSha256": null,
+      "derivedFrom": [
+        {
+          "source": "src/render/riderLook.ts",
+          "sourceSha256": "a5d06cdd735631c8acdc021cf6651e9843f08957e7c286d4c3d7e7fd823dacb5"
+        }
+      ],
+      "outputSha256": "40b8578f76c85d3db9621b746b6fe8b97a0857492bc85eaa40fe411f49a2b499",
+      "sliced": false
+    },
+    "render/riderAppearance-wheel-in-motion.js": {
+      "source": null,
+      "sourceSha256": null,
+      "derivedFrom": [
+        {
+          "source": "src/render/riderLook.ts",
+          "sourceSha256": "a5d06cdd735631c8acdc021cf6651e9843f08957e7c286d4c3d7e7fd823dacb5"
+        }
+      ],
+      "outputSha256": "12658c4d201ef7d20c72d437c8d20c09f4a8e6504d1e0c8085e16329f830cfd2",
+      "sliced": false
+    },
+    "render/riderAppearance-wyldist.js": {
+      "source": null,
+      "sourceSha256": null,
+      "derivedFrom": [
+        {
+          "source": "src/render/riderLook.ts",
+          "sourceSha256": "a5d06cdd735631c8acdc021cf6651e9843f08957e7c286d4c3d7e7fd823dacb5"
+        }
+      ],
+      "outputSha256": "be37f347ee31538a80027d57ee6abacc0f7c95c3aa99521b92b51a68f41d4940",
+      "sliced": false
+    },
+    "render/riderClothDrape.js": {
+      "source": "src/render/riderClothDrape.ts",
+      "sourceSha256": "d716ea81d7b920c28ef80cd71e32bada0859fd6846664519dd85d1f878cec763",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "36227c081000af7f8d5e9bf4a0fd7e2fd3584dfd8d9706e17d63a0e18e930d8d",
+      "sliced": false
+    },
+    "render/riderJointSurface.js": {
+      "source": "src/render/riderJointSurface.ts",
+      "sourceSha256": "ed2d1d08cc47edbe2230288af1a9c12db21a70a949dcd85b4b6bc6d1d707995f",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "70001a8d6a7f22674a589e2f964df5c0d7e7ecba1a7c33dcf48c8e98d56f4dd7",
+      "sliced": false
+    },
+    "render/riderLook.js": {
+      "source": "src/render/riderLook.ts",
+      "sourceSha256": "a5d06cdd735631c8acdc021cf6651e9843f08957e7c286d4c3d7e7fd823dacb5",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "b6f69ca273028bba11c6dc3af11291d7e3339e1be1c78b77b78e88ec15b0d2e8",
+      "sliced": true
+    },
+    "render/ridingRig.js": {
+      "source": "src/render/ridingRig.ts",
+      "sourceSha256": "7968df84e06b8cc51a61a02a27fcff9dc1acea8825c84fc26568200c5b0f67e8",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "donor": {
+        "commit": "d37efc07cddc0d76ff7aa585901710d357b8e5a1",
+        "source": "src/render/ridingRig.ts",
+        "sourceSha256": "7413e04db970dd1c791eb9fa59a06cfb62556c464b9e98502baff4a12912bad0",
+        "selection": "near-solid presentation channel; NYC cached selected-geometry visual tyre radius, flight/crash exclusions and constraint-safe release easing; no appearance/resource graph migration"
+      },
+      "outputSha256": "d3ac5287facbf959fdbe21f3a6ac39d6d769164471e873f5df39f4c7d5b3bd41",
+      "sliced": true
+    },
+    "render/rigConsolidation.js": {
+      "source": "src/render/rigConsolidation.ts",
+      "sourceSha256": "64082e5d6fc76a5cf74ea1c9d8fcd8d56ba9bff979827dfbf23b2fbba0740ac7",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "982be7412471116138e7a56a481a9a4261951d1bd104306086377be66aa0b756",
+      "sliced": false
+    },
+    "render/sealAtlas.js": {
+      "source": "src/render/sealAtlas.ts",
+      "sourceSha256": "2558be80d6157084b3b8e9c11cf027bbdb26c0ea7b878e6339d8cc7906e2f3a4",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "c0a58eac4a0741f8cb8b31ec43c18d1b028045c01d39243c8471c795ca12d4dc",
+      "sliced": false
+    },
+    "render/sealOnAWheelLook.js": {
+      "source": "src/render/sealOnAWheelLook.ts",
+      "sourceSha256": "2e2f24ceda63410ecee8aafb9c7ebfdafc4d96b6a78887c7d8c3c0a2ac2827bf",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "8a031caf2915cc2f202b95db783dca4f78e029bde6f0c61f157646fd5b11819a",
+      "sliced": false
+    },
+    "render/wimAtlas.js": {
+      "source": "src/render/wimAtlas.ts",
+      "sourceSha256": "7181af9f73fe05787202e217db8252162d06e06c4688e4126b9f8d3c411c888f",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "45c0f5b2c0772796cd54dd3c69f1dff3b9a48af1305a40efbb3c536a96c5cf5f",
+      "sliced": false
+    },
+    "render/wimMachineAtlas.js": {
+      "source": "src/render/wimMachineAtlas.ts",
+      "sourceSha256": "7f0c84127bfbde76d3e8dd99ed57460e112f2dfb38c01bf0b4157be0335d233f",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "d6ac95814a5c22e767df41e969006daab611e21323776b037b1b888723cc8895",
+      "sliced": false
+    },
+    "render/wyldistAtlas.js": {
+      "source": "src/render/wyldistAtlas.ts",
+      "sourceSha256": "d805d365bd030b39b5fdba0473706e212ae8406b0ad9bea36dcafd4dcbcd66a2",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "96524743a3cfc8a3a087394c460387ffcfc7e0e67c0937e85e319ddc7f837bba",
+      "sliced": false
+    },
+    "render/wyldistHelmet.js": {
+      "source": "src/render/wyldistHelmet.ts",
+      "sourceSha256": "c0720baff0cd651b03e5dea83f06d1bd6730613b97f74029a5084d568a0ccf6f",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "73d28092c8aec82600638567c2429bc0760f9d98b860f8507f2fd7d42d84507a",
+      "sliced": false
+    },
+    "render/wyldistLook.js": {
+      "source": "src/render/wyldistLook.ts",
+      "sourceSha256": "af4cceb81db176141745ea1cf2bc43588c93064327ee10a60ac7565de5290e14",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "12e4b2130568c35296f3748b8d701bc7c4f5743da30667fe4bdb96596abba805",
+      "sliced": false
+    },
+    "render/wyldistMachineLook.js": {
+      "source": "src/render/wyldistMachineLook.ts",
+      "sourceSha256": "762514c83cdfe59819e20a816de1ef34c3929382a7dbec40c3fef6148163ea40",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "2fc20c0e54bf9ef15f2ffac9f12690a2cae51d98759938b5768eabda4d55bc3d",
+      "sliced": false
+    },
+    "shared/freeze.js": {
+      "source": "src/shared/freeze.ts",
+      "sourceSha256": "c87caf18e229c9284cbe2ae217809923ebc44978077e6471ae5675210b35c43f",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "4712c12bf48b918286ee0cdef60dbfac9d01203bff093d689075e6b915b83d1b",
+      "sliced": false
+    },
+    "shared/letterPaths.js": {
+      "source": "src/shared/letterPaths.ts",
+      "sourceSha256": "fe2db9c5a6b92ee465ce14df3c39cff5027f6cd2e4a622b4ae482f3a10b8e86c",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "e2204b5ec5ccc1cc1468221562f9d96565463940f988aa161176d3aed575c2dc",
+      "sliced": false
+    },
+    "shared/maths.js": {
+      "source": "src/shared/maths.ts",
+      "sourceSha256": "1d5c06d01c714d271858a13aa9f172461c95b4ba5ede55d07f4720d5c2c27182",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "a7f15bc841ada14f9cf6d6660034b9cc8f1f3c3a1b365ef961b7e68af3631037",
+      "sliced": false
+    },
+    "shared/ragdollBoot.js": {
+      "source": "src/shared/ragdollBoot.ts",
+      "sourceSha256": "0be26353470074c21976d6d1966414d82b2d379882dccf8746cda0e966fb955c",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "7ce9c02a720e5240545c3b26ebf45e09f1eb27e7750341ad27f464a2921f39cd",
+      "sliced": false
+    },
+    "shared/ragdollContact.js": {
+      "source": "src/shared/ragdollContact.ts",
+      "sourceSha256": "262df4d8cfe1a6a99df3c95bfc6666bf23def8a91121c37ae2221d9d30775e7a",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "07a44e02e25ff5475f4d57ae4558f46d96deb1d234e5a52ab7c14d7a313cd6ee",
+      "sliced": true
+    },
+    "shared/ragdollHip.js": {
+      "source": "src/shared/ragdollHip.ts",
+      "sourceSha256": "062ecd95184a29ce8abef5eb6eb821c098686f61a477c03a1ca33be858310d08",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "d2afa73c7d01f87d1f609fbab1eaedf3fc960c88832d3a6d68f75a253856188d",
+      "sliced": false
+    },
+    "shared/ragdollInterpolation.js": {
+      "source": "src/shared/ragdollInterpolation.ts",
+      "sourceSha256": "a6f509cbd52629bdb611166261d67006d284fc67ef75076f79d6868894ca861f",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "cdcabec95dd6edacd3667ea7b4647048e1bdcf75587e3fbbe5b75f614774ed59",
+      "sliced": false
+    },
+    "shared/ragdollLimbContact.js": {
+      "source": "src/shared/ragdollLimbContact.ts",
+      "sourceSha256": "db362adce4057ed82f6586d898a87cb1337bf202b36098be7d8cf678a87cd100",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "25022647336b4521d9743aa961f6be52a0dd502e2cbad1f754dd3914ca94cb3e",
+      "sliced": false
+    },
+    "shared/riderOccupancy.js": {
+      "source": "src/shared/riderOccupancy.ts",
+      "sourceSha256": "631c3fc947bd7fb292464ba75150318c82d91c7b8e2bc309127a7590a64dcdba",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "8a215d3d9ed945a438af95ab314fd942f7bcacab1f5e302c6f345862a2cc1216",
+      "sliced": false
+    },
+    "shared/riderSideContact.js": {
+      "source": "src/shared/riderSideContact.ts",
+      "sourceSha256": "a38965f5230cbdb519e36564a0f23a7cc20112e30f56253b04608590dfcd79fe",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "10bbccb03b362c3a6567558cb318be751db19030b8cf14f48a588eeb78b2c410",
+      "sliced": false
+    },
+    "simulation/EucController.js": {
+      "source": "src/simulation/EucController.ts",
+      "sourceSha256": "da69eec9eb35bae6dbef9f068c21f7bd1e6ff35afd87feeaa200546f9f23ca81",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "donor": {
+        "commit": "d37efc07cddc0d76ff7aa585901710d357b8e5a1",
+        "source": "src/simulation/EucController.ts",
+        "sourceSha256": "5304c5f60cc443418d7b8836932482b2ef806b3bc69f6fe0d5565cadf91cdfe9",
+        "selection": {
+          "fields": [
+            "wallTurnSeconds",
+            "wallTurnDirection",
+            "wallTurns",
+            "comeBackTurn",
+            "comeBackDirection",
+            "comeBackFlight",
+            "comeBackClimb",
+            "comeBackUpX",
+            "comeBackUpZ",
+            "comeBackAirs",
+            "kickRise",
+            "kickRun",
+            "kickOnTop",
+            "flaggedSlopeRun"
+          ],
+          "methods": [
+            "transitionLaunch",
+            "onFlaggedSlope",
+            "kickArmed",
+            "transitionHop",
+            "stepKickLatch",
+            "stepWallTurn",
+            "faceBrake",
+            "comeBackAtLip",
+            "updateComeBackClimb",
+            "startComeBack",
+            "comeBackAgainstFace",
+            "alignComeBackWithSpin",
+            "comeBackTouchdown",
+            "clearTransitionMotion",
+            "wallTurnCount",
+            "comeBackAirCount",
+            "inComeBackAir"
+          ],
+          "replace": [
+            "reset",
+            "stepNative",
+            "updateSafePosition",
+            "obstacleWithinWheelRadius",
+            "stepHop",
+            "launchHop",
+            "leaveGround",
+            "separate"
+          ],
+          "excluded": [
+            "respawn",
+            "recoveryTarget",
+            "clearAheadRecoveryTarget",
+            "clearAhead"
+          ],
+          "nyc": [
+            "validated fallen-support rest policy",
+            "dynamic admission restores automatic turn sweep"
+          ]
+        }
+      },
+      "outputSha256": "d8d99a78a63ebc054241110187c9c93326209e4f5f5de3bb647d67f38cc897b0",
+      "sliced": true
+    },
+    "simulation/eucStepPrimitives.js": {
+      "source": "src/simulation/eucStepPrimitives.ts",
+      "sourceSha256": "9d0a8bcabdce43282ba2de6ffd2911617ec59c4ff95edb5fe40a691c1510eea0",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "donor": {
+        "commit": "d37efc07cddc0d76ff7aa585901710d357b8e5a1",
+        "source": "src/simulation/eucStepPrimitives.ts",
+        "sourceSha256": "46c74ca9d4845b9c4b47049da0cd9f9861ff1c9d85220cdc29f3c2ad9f043d27",
+        "selection": {
+          "fields": [
+            "wallTurnSeconds",
+            "wallTurnDirection",
+            "wallTurns",
+            "comeBackTurn",
+            "comeBackDirection",
+            "comeBackFlight",
+            "comeBackClimb",
+            "comeBackUpX",
+            "comeBackUpZ",
+            "comeBackAirs",
+            "kickRise",
+            "kickRun",
+            "kickOnTop",
+            "flaggedSlopeRun"
+          ],
+          "nycFields": [
+            "dynamicComeBackApplied"
+          ]
+        }
+      },
+      "outputSha256": "cce3b5b6b0a27ab14d27cf0ddd8344259be16f1596a4edb12c5bd8ba71cf6467",
+      "sliced": true
+    },
+    "simulation/hazards.js": {
+      "source": "src/simulation/hazards.ts",
+      "sourceSha256": "6c3000531e71a756dc2490a9eb23907161a099d5c7c622269adb71ceaa7f2171",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "2bafdd7037290f41529251426e34349c08eaf5117c2881fa52d6298e81eff6d5",
+      "sliced": false
+    },
+    "simulation/lateralCeiling.js": {
+      "source": "src/simulation/lateralCeiling.ts",
+      "sourceSha256": "2ebc0b7216371ab39d9e3069d6dff1eba23e296e4f6eb1f76cf9fb70d05aac7f",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "acf6c7b3c2cf60ac117e38719477cc3ac1e5eb98280a997bb6ce8842c24f1da5",
+      "sliced": false
+    },
+    "simulation/launchPadField.js": {
+      "source": "src/simulation/launchPadField.ts",
+      "sourceSha256": "1cdf083b639d0e812d876158b1380931d5f20d88d17060a2b895f0eb09a1b9f1",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "6949c6ce18c6db4a0564e31e81135cae740c0e30294502a8dd898e2c46dac13d",
+      "sliced": false
+    },
+    "simulation/planSampler.js": {
+      "source": "src/simulation/planSampler.ts",
+      "sourceSha256": "99da7e8316d0c06cfd7d4222b6fc411c130416e74407b184b09e16a960d2934d",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "fe825796a0b3de4fca536b2892f9064c5a0c166021b248e9d9d80ce678e691c0",
+      "sliced": false
+    },
+    "simulation/ragdoll.js": {
+      "source": "src/simulation/ragdoll.ts",
+      "sourceSha256": "494188a5269e2673513ff7bc66e1d83aba047b27c568e63270b4fbe0af510d19",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "4ec0f49cbfc60895b4d347c02ab5b6be588343c2c5eff1fb93e7d59acf784972",
+      "sliced": true
+    },
+    "simulation/riderLean.js": {
+      "source": "src/simulation/riderLean.ts",
+      "sourceSha256": "0a54a84a1908af0865c2b84c96c3713d59edaf8af306ab70c5b7c9fac6bce7ed",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "340d536951bf4734bd2175352b8d82acbc565c38a4bb85ffbc913ccb3def9883",
+      "sliced": false
+    },
+    "simulation/roughness.js": {
+      "source": "src/simulation/roughness.ts",
+      "sourceSha256": "6cd11c0abd81fefb1073fc79a7d802f8663a79abf4029b87cfdf626dae2aa16c",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "0f4bcb73e8310cb09f8ad88ab23a72a5aa98624a406a3d90a931f861dd8bb946",
+      "sliced": false
+    },
+    "simulation/softBodies.js": {
+      "source": "src/simulation/softBodies.ts",
+      "sourceSha256": "6ca7eefc5488925a943c3be6b3f4710bed4ee8658d558746f775b154f7e0ee67",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "fbef28fd85d5b386fe3f0b4fb8978abd09c7870a1c6ab40ecc4323f3b0d008d9",
+      "sliced": false
+    },
+    "simulation/world.js": {
+      "source": "src/simulation/world.ts",
+      "sourceSha256": "f204a73961edec7f6d530839e7b5ae489f866596cc4e024cb5b7d9ba478ae5ba",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "donor": {
+        "commit": "d37efc07cddc0d76ff7aa585901710d357b8e5a1",
+        "source": "src/simulation/world.ts",
+        "sourceSha256": "fc42f20124279aae9b037de4b4940b4ea2603c568023a7ce8554a88350d6f400",
+        "selection": "transitionAt and restartsAtRest capability contracts; NYC location/elevation arguments and checked fallen-support validation"
+      },
+      "outputSha256": "531d7b8e138cf39b39d28ee60bce17096e48d9273732956527a9e59b5ea8692b",
+      "sliced": true
+    }
+  },
+  "shippedAudio": [
+    "assets/live/audio/crash_wipeout.wav",
+    "assets/live/audio/crash_trollina.wav",
+    "assets/live/audio/crash_red_rider.wav",
+    "assets/live/audio/crash_adonisb2.wav",
+    "assets/live/audio/crash_maribel.wav",
+    "assets/live/audio/crash_wheel_in_motion.wav",
+    "assets/live/audio/crash_drunkard.wav",
+    "assets/live/audio/crash_flo_with_zo.wav",
+    "assets/live/audio/crash_seal_on_a_wheel.wav",
+    "assets/live/audio/crash_wyldist.wav",
+    "assets/live/audio/crash_gnarwheel.wav",
+    "assets/live/audio/stumble_drunkard.wav",
+    "assets/live/audio/tyre_solid_loop.wav",
+    "assets/live/audio/wind_howl_loop.wav",
+    "assets/live/audio/overspeed_beep.wav"
+  ],
+  "counts": {
+    "modules": 100,
+    "eager": 40,
+    "deferred": 60,
+    "reviewedAudio": 18,
+    "shippedAudio": 15
+  }
+}

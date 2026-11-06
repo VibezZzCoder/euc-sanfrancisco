@@ -15,7 +15,9 @@ function build({ keepCreated = false } = {}) {
   let src = readFileSync(join(root, 'js/road-network.js'), 'utf8');
   // every edge with clear lanes, before the connectivity cut (for the coverage test)
   if (keepCreated) src = src.replace('  const genCreated = edges.filter', '  window.NYC._created = edges.slice();\n  const genCreated = edges.filter');
-  const context = vm.createContext({ window: { NYC: { DEBUG_ROADS: false } } });
+  // Time production arithmetic, not cross-context global proxy overhead (Node 24, as in the terrain/Drape fixtures).
+  const context = vm.createContext(vm.constants.DONT_CONTEXTIFY);
+  context.window = { NYC: { DEBUG_ROADS: false } };
   for (const f of ['js/sf-geodata.js', 'js/city-config.js', 'js/terrain.js']) vm.runInContext(readFileSync(join(root, f), 'utf8'), context);
   vm.runInContext(src, context);
   const NYC = context.window.NYC;

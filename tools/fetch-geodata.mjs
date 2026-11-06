@@ -1,7 +1,7 @@
 // tools/fetch-geodata.mjs — downloads every raw input of the SF pipeline for a named box into data/raw/
 // usage: node tools/fetch-geodata.mjs --box slice [--only datasf,osm,dem] [--osm coast,piers,...] [--force]
 //        node tools/fetch-geodata.mjs --verify            re-hash every file in the manifest
-// Sources (see docs/data-sources.md): DataSF (Socrata SoQL, paginated), OpenStreetMap (Overpass, via tools/overpass.sh),
+// Sources (see provenance/data-sources.md): DataSF (Socrata SoQL, paginated), OpenStreetMap (Overpass, via tools/overpass.sh),
 // USGS 1 m DEM (TNM API). data/raw/MANIFEST.json records url, query hash, size, sha256, rows & license per file; a file
 // whose query hash is unchanged is not fetched again.
 import fs from 'node:fs';
@@ -112,7 +112,7 @@ async function fetchDataSF() {
     const [{ n }] = await getJSON(`https://data.sf.gov/resource/${id}.json?${cq}`);
     if (Number(n) !== features.length) throw new Error(`${id}: got ${features.length} rows, server counts ${n}`);
     fs.writeFileSync(path.join(RAW, rel), JSON.stringify({ type: 'FeatureCollection', features }));
-    record(rel, { source: `DataSF ${id}`, url: `https://data.sf.gov/resource/${id}.geojson`, where, queryHash, rows: features.length, license: 'PDDL / CC0 (see docs/data-sources.md)', box: boxName });
+    record(rel, { source: `DataSF ${id}`, url: `https://data.sf.gov/resource/${id}.geojson`, where, queryHash, rows: features.length, license: 'PDDL / CC0 (see provenance/data-sources.md)', box: boxName });
     log(`${rel}: ${features.length} rows`);
   }
 }
@@ -153,7 +153,7 @@ async function fetchDEM() {
     fs.writeFileSync(tmp, Buffer.from(await r.arrayBuffer()));
     if (it.sizeInBytes && Math.abs(fs.statSync(tmp).size - it.sizeInBytes) > 1024) throw new Error(`${rel}: size ${fs.statSync(tmp).size} != ${it.sizeInBytes}`);
     fs.renameSync(tmp, path.join(RAW, rel));
-    record(rel, { source: `USGS TNM ${it.title}`, url: it.downloadURL, queryHash, publicationDate: it.publicationDate, license: 'USGS 3DEP (US government work; see docs/data-sources.md)', box: boxName });
+    record(rel, { source: `USGS TNM ${it.title}`, url: it.downloadURL, queryHash, publicationDate: it.publicationDate, license: 'USGS 3DEP (US government work; see provenance/data-sources.md)', box: boxName });
   }
 }
 

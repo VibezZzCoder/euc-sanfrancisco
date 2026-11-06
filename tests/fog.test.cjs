@@ -12,8 +12,10 @@ class N {
   get x(){return new N(this.v[0]);} get y(){return new N(this.v[1]);} get z(){return new N(this.v[2]);} get rgb(){return this;} get xyz(){return new N(this.v.slice(0,3));} get w(){return new N(this.v[3]);}
   add(b){return bin(this,b,(x,y)=>x+y);} sub(b){return bin(this,b,(x,y)=>x-y);}
   mul(b){return bin(this,b,(x,y)=>x*y);} div(b){return bin(this,b,(x,y)=>x/y);}
+  oneMinus(){return new N(1).sub(this);}
   negate(){return this.mul(-1);} toVar(){return new N([...this.v]);} assign(b){this.v=vals(b);return this;}
   greaterThan(b){return this.v[0]>vals(b)[0];} lessThan(b){return this.v[0]<vals(b)[0];}
+  greaterThanEqual(b){return this.v[0]>=vals(b)[0];} lessThanEqual(b){return this.v[0]<=vals(b)[0];}
 }
 const unary = fn => x => new N(vals(x).map(fn));
 const smooth = (a,b,x) => { const t=Math.max(0,Math.min(1,(x-a)/(b-a)));return t*t*(3-2*t); };
@@ -51,21 +53,51 @@ test('fog is finite at the eye and horizontal rays; density thins above the deck
   assert.ok(sample([0,300,500],[0,300,0])<sample([0,100,500],[0,100,0]));
 });
 
-test('resolved WebGPU depth reconstructs world points after camera rotation and translation',()=>{
-  const post=fs.readFileSync(require('node:path').join(__dirname,'../js/post-processing.js'),'utf8');
-  const expressions=post.slice(post.indexOf('      const clip ='),post.indexOf('      // Surface fog'));
-  const reconstruct=vm.runInNewContext(`(screenUV,depth,inverseProjection,cameraWorld)=>{${expressions};return {world,eye};}`,{
-    vec4:(...v)=>new N(v.flatMap(vals)),float:x=>new N(x)
+// Evaluate the production reconstruction and the pinned helper bodies numerically. Projection,
+// camera transforms and hardware-depth mapping are independent real Three matrix operations.
+for (const backend of ['webgpu', 'webgl2']) for (const reversedDepthBuffer of [false, true]) {
+  test(`${backend} ${reversedDepthBuffer ? 'reversed' : 'normal'} depth round-trips rotated/translated SF-height world points`, async () => {
+    const THREE = await import('../vendor/three/build/three.core.js');
+    const renderer = { coordinateSystem: backend === 'webgpu' ? THREE.WebGPUCoordinateSystem : THREE.WebGLCoordinateSystem,
+      reversedDepthBuffer };
+    const tsl = fs.readFileSync(require('node:path').join(__dirname, '../vendor/three/build/three.tsl.js'), 'utf8');
+    const helperSource = name => {
+      const start = tsl.indexOf(`const ${name} =`), end = tsl.indexOf('\n} );', start);
+      assert.ok(start >= 0 && end > start, `pinned helper ${name}`);
+      return tsl.slice(start, end + '\n} );'.length);
+    };
+    const vectors = { vec2: (...v) => new N(v.flatMap(vals)), vec3: (...v) => new N(v.flatMap(vals)), vec4: (...v) => new N(v.flatMap(vals)) };
+    const helpers = vm.runInNewContext(`${helperSource('getViewPosition')}\n${helperSource('isBackgroundDepth')}\n({getViewPosition,isBackgroundDepth});`, {
+      ...vectors, WebGPUCoordinateSystem: THREE.WebGPUCoordinateSystem,
+      Fn: callback => (...inputs) => callback(inputs, { renderer })
+    });
+    const post = fs.readFileSync(require('node:path').join(__dirname, '../js/post-processing.js'), 'utf8');
+    const start = post.indexOf('      const view ='), end = post.indexOf('      // Surface fog', start);
+    assert.ok(start >= 0 && end > start);
+    const reconstruct = vm.runInNewContext(`(screenUV,depth,inverseProjection,cameraWorld)=>{${post.slice(start,end)};return {world,eye};}`, {
+      ...vectors, ...helpers
+    });
+    const camera = new THREE.PerspectiveCamera(62, 1.5, .35, 60000);
+    camera.coordinateSystem = renderer.coordinateSystem;
+    camera._reversedDepth = reversedDepthBuffer; // same flag the pinned renderer sets before scene submission
+    camera.setViewOffset(1500, 1000, 100, 90, 1280, 720);
+    camera.position.set(-950, 110, -330);
+    camera.rotation.set(.21, 1.1, -.07, 'YXZ');
+    camera.updateMatrixWorld(true);
+    const matrixNode = matrix => ({ mul: v => new N(new THREE.Vector4(...vals(v)).applyMatrix4(matrix).toArray()) });
+    for (const point of [[0,0,-.35], [.2,-.1,-.7], [10,5,-100], [-1200,600,-10000], [200,-300,-59999]]) {
+      const view = new THREE.Vector3(...point), ndc = view.clone().applyMatrix4(camera.projectionMatrix);
+      const depth = renderer.coordinateSystem === THREE.WebGPUCoordinateSystem || reversedDepthBuffer ? ndc.z : ndc.z * .5 + .5;
+      // screenUV is top-left on both backends; on GL the pinned ScreenNode flips bottom-left gl_FragCoord first.
+      const screenUV = new N([(ndc.x + 1) / 2, (1 - ndc.y) / 2]);
+      const result = reconstruct(screenUV, { r: new N(depth) }, matrixNode(camera.projectionMatrixInverse), matrixNode(camera.matrixWorld));
+      const expected = view.applyMatrix4(camera.matrixWorld).toArray();
+      for (let i = 0; i < 3; i++) assert.ok(Math.abs(result.world.v[i] - expected[i]) < 2e-6, `${point}, axis ${i}`);
+      assert.deepEqual([...result.eye.v], camera.position.toArray());
+      assert.equal(helpers.isBackgroundDepth(new N(depth)), false, 'near and far surfaces receive aerial fog');
+    }
+    const clear = reversedDepthBuffer ? 0 : 1, near = reversedDepthBuffer ? 1 : 0;
+    assert.equal(helpers.isBackgroundDepth(new N(clear)), true, 'cleared sky receives horizon haze');
+    assert.equal(helpers.isBackgroundDepth(new N(near)), false, 'near-plane depth is not background');
   });
-  const matrix=rows=>({mul(v){const a=vals(v);return new N(rows.map(row=>row.reduce((sum,n,i)=>sum+n*a[i],0)));}});
-  // The app uses reversed Z: near maps to 1, the far plane to 0.
-  const near=.35,far=60000,fy=1/Math.tan(Math.PI/6),fx=fy/(1280/720),a=near/(far-near),b=far*near/(far-near);
-  const inverse=matrix([[1/fx,0,0,0],[0,1/fy,0,0],[0,0,0,-1],[0,0,1/b,a/b]]);
-  const world=matrix([[0,0,1,10],[0,1,0,300],[-1,0,0,50],[0,0,0,1]]);
-  for(const [x,y,z]of [[0,0,-1],[10,5,-100],[-1200,600,-10000],[0,0,-60000]]) {
-    const uv=new N([(fx*x/-z+1)/2,(1-fy*y/-z)/2]);
-    const result=reconstruct(uv,{r:new N((a*z+b)/-z)},inverse,world);
-    for(const [i,expected]of [10+z,300+y,50-x].entries())assert.ok(Math.abs(result.world.v[i]-expected)<1e-6);
-    assert.deepEqual([...result.eye.v],[10,300,50]);
-  }
-});
+}

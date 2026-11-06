@@ -5,3 +5,9 @@ tools/node_modules/
 shots/
 *.tmp.*
 dist/
+qa-artifacts/
+.venv/
+__pycache__/
+*.pyc
+.env
+.env.*

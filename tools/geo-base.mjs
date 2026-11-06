@@ -3,7 +3,7 @@
 // Frame: 1 unit = 1 m, x = east, z = south (north = -z), y = up = NAVD88 elevation in metres. Local tangent plane at the
 // Market St & Montgomery St centreline node (tools/frame.json), not rotated (San Francisco has no single street grid).
 //
-// Inputs live in data/raw/ (fetched by tools/fetch-geodata.mjs; see docs/data-sources.md).
+// Inputs live in data/raw/ (fetched by tools/fetch-geodata.mjs; see provenance/data-sources.md).
 //
 // usage: import { toWorld, fromWorld, ... } from './geo-base.mjs'
 

@@ -3,8 +3,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { ROOT, toWorld, fromWorld } from '../tools/geo-base.mjs';
-import { readBin } from '../tools/geo-terrain.mjs';
-import { orientedBox, splitBoxes, encodeRLE, coastRows } from '../tools/geo-region.mjs';
+import { readBin } from './helpers/runtime-region.cjs';
+import { offlineGeoSkip } from './helpers/optional-source.mjs';
+const offlineSkip = offlineGeoSkip(new URL('../', import.meta.url));
+const { orientedBox, splitBoxes, encodeRLE, coastRows } = offlineSkip ? {} : await import('../tools/geo-region.mjs');
 const M=JSON.parse(fs.readFileSync(path.join(ROOT,'data/region/manifest.json')));
 
 test('region assets are bounded, complete and below 50 MB; the whole-city snapshot is represented',()=>{
@@ -53,10 +55,13 @@ test('region mask run lengths fill the declared grid exactly and only use known 
  const {header:h,payload}=readBin(path.join(ROOT,M.mask.url)),runs=new Uint32Array(payload.buffer,payload.byteOffset,payload.byteLength/4);let total=0;const counts=new Array(h.classes.length).fill(0);
  for(const r of runs){const n=r>>>8,v=r&255;assert.ok(n>0&&v<h.classes.length);total+=n;counts[v]+=n;}
  assert.equal(total,h.w*h.h);assert.deepEqual(counts,h.counts);assert.ok(counts[5]>0&&counts[3]>0&&counts[1]>0);
+});
+
+test('offline region RLE encoder retains exact run packing',{skip:offlineSkip},()=>{
  const encoded=encodeRLE(new Uint8Array([0,0,2,2,2,8]));assert.deepEqual([...encoded],[512,770,264]);
 });
 
-test('minimum rectangles rotate with footprints and split a concave L into two tighter boxes',()=>{
+test('minimum rectangles rotate with footprints and split a concave L into two tighter boxes',{skip:offlineSkip},()=>{
  const ring=[[0,0],[12,0],[12,3],[3,3],[3,12],[0,12]];assert.equal(splitBoxes(ring).length,2);
  assert.ok(splitBoxes(ring).reduce((n,b)=>n+b.area,0)<orientedBox(ring).area*.6);
  const a=.42,rotated=ring.map(([x,z])=>[100+x*Math.cos(a)-z*Math.sin(a),200+x*Math.sin(a)+z*Math.cos(a)]);
@@ -74,7 +79,7 @@ test('horizon bay water is normalized even when the source DEM has a positive ti
 });
 
 
-test('directed coastlines preserve low mainland and separate an island from surrounding water',()=>{
+test('directed coastlines preserve low mainland and separate an island from surrounding water',{skip:offlineSkip},()=>{
  const way=points=>({tags:{natural:'coastline'},geometry:points.map(p=>{const [lon,lat]=fromWorld(...p);return {lon,lat};})});
  // Southbound shore has mainland to the east. Clockwise world-x/z island has land to its left.
  const coast=way([[35,-20],[35,40]]),island=way([[5,0],[5,20],[25,20],[25,0],[5,0]]);

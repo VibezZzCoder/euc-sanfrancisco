@@ -36,6 +36,8 @@ test('rail vehicles keep to their runs, their speeds, their gaps and their stops
   const header = JSON.parse(buf.subarray(8, 8 + n).toString('utf8'));
   NYC.Terrain.load(header, new Uint16Array(buf.buffer.slice(buf.byteOffset + 8 + n, buf.byteOffset + buf.length), 0, header.w * header.h));
   Object.assign(NYC, { THREE: stub(), TSL: stub(), Addons: stub(), cityUniforms: stub() });
+  vm.runInContext(readFileSync(join(root, 'js/sf-dynamic-bodies.js'), 'utf8'), context);
+  NYC.sfVehicleShape = () => [{ z: 0, halfWidthMetres: 1.5, halfLengthMetres: 12, minY: 0, maxY: 4 }];
   vm.runInContext(readFileSync(join(root, 'js/sf-transit.js'), 'utf8'), context);
   const transit = NYC.buildSFTransit(stub());
   const kinds = new Set(transit.vehicles.map((v) => v.run.kind));

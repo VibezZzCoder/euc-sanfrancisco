@@ -72,28 +72,29 @@ function buildSidewalkScenes(parent, network, obstacles, furniture) {
   const T=N.THREE, sites=planSidewalkScenes(network,obstacles,furniture);
   const material=new T.MeshStandardNodeMaterial({vertexColors:true,roughness:.94});
   const parts=[];
-  function part(geometry,hex,x=0,y=0,z=0,rx=0,ry=0,rz=0) {
+  function part(geometry,hex,x=0,y=0,z=0,rx=0,ry=0,rz=0,contact=false) {
     let g=geometry.index?geometry.toNonIndexed():geometry;
     if(g!==geometry)geometry.dispose();
     g.rotateX(rx);g.rotateY(ry);g.rotateZ(rz);g.translate(x,y,z);
     const c=new T.Color(hex),colors=new Float32Array(g.attributes.position.count*3);
     for(let i=0;i<colors.length;i+=3){colors[i]=c.r;colors[i+1]=c.g;colors[i+2]=c.b;}
     g.setAttribute('color',new T.BufferAttribute(colors,3));g.deleteAttribute('uv');parts.push(g);
+    g.userData.rideContact=contact;
   }
-  const box=(w,h,d,c,x,y,z,ry=0)=>part(new T.BoxGeometry(w,h,d),c,x,y,z,0,ry);
-  const ball=(w,h,d,c,x,y,z)=>part(new T.SphereGeometry(1,10,7).scale(w,h,d),c,x,y,z);
+  const box=(w,h,d,c,x,y,z,ry=0)=>part(new T.BoxGeometry(w,h,d),c,x,y,z,0,ry,0,{sides:{maxSlices:1}});
+  const ball=(w,h,d,c,x,y,z)=>part(new T.SphereGeometry(1,10,7).scale(w,h,d),c,x,y,z,0,0,0,{sides:{maxSlices:4,sliceHeight:.1}});
   function bar(a,b,r,c) {
     const av=new T.Vector3(...a),bv=new T.Vector3(...b),delta=bv.clone().sub(av);
     const g=new T.CylinderGeometry(r,r,delta.length(),7);
     g.applyQuaternion(new T.Quaternion().setFromUnitVectors(new T.Vector3(0,1,0),delta.normalize()));
-    const m=av.add(bv).multiplyScalar(.5);part(g,c,m.x,m.y,m.z);
+    const m=av.add(bv).multiplyScalar(.5);part(g,c,m.x,m.y,m.z,0,0,0,r>=.065?{sides:{maxSlices:4,sliceHeight:.2}}:false);
   }
   function tent(x, shade, variant) {
     const start=parts.length;
     // A low dome with a sewn-in groundsheet, two crossed poles and a recessed door.
     box(2.25,.045,1.66,0x343b3d,x,.035,0);
     const dome=new T.SphereGeometry(1,16,8,0,Math.PI*2,0,Math.PI/2).scale(1.1,1.12,.8);
-    part(dome,shade,x,.06,0);
+    part(dome,shade,x,.06,0,0,0,0,{sides:{maxSlices:8,sliceHeight:.15}});
     for(const angle of [-.62,.62]) {
       let prev;
       for(let i=0;i<=16;i++) {
@@ -152,7 +153,7 @@ function buildSidewalkScenes(parent, network, obstacles, furniture) {
     for(const dx of [-.25,.25])bar([x+dx,.7,-.2],[x+dx,.92,-.36],.018,metal);
     bar([x-.25,.92,-.36],[x+.25,.92,-.36],.025,0x363c3c);
     box(.43,.28,.34,0x786b57,x,.52,0);
-    part(new T.CylinderGeometry(.12,.12,.46,10),0x636f70,x,.78,0,0,0,Math.PI/2);
+    part(new T.CylinderGeometry(.12,.12,.46,10),0x636f70,x,.78,0,0,0,Math.PI/2,{sides:{maxSlices:4,sliceHeight:.1}});
   }
   sites.forEach((site,i)=>{
     parts.length=0;
@@ -160,6 +161,14 @@ function buildSidewalkScenes(parent, network, obstacles, furniture) {
     person(.05,.05,'seated',0x6e6460,0xad8063,.25+i*.12);
     person(1.5,i===0?.15:-.13,i===0?'hunched':'standing',i===1?0x64716e:0x545d6b,0x976b53,i===0?-.5:.55);
     belongings(2.45);
+    if(N.RideGeometry) {
+      const matrix=new T.Matrix4().compose(new T.Vector3(site.x,site.y,site.z),
+        new T.Quaternion().setFromAxisAngle(new T.Vector3(0,1,0),Math.atan2(-site.uz,site.ux)),new T.Vector3(1,1,1));
+      // Separate drawn tent, people, chair and belongings. The scene's reserved walking /
+      // navigation polygon below is deliberately not a collision body.
+      for(const g of parts) if(g.userData.rideContact) N.RideGeometry.addMesh({geometry:g,matrixWorld:matrix},'pavement',
+        {layered:true,...g.userData.rideContact});
+    }
     const geometry=N.Addons.mergeGeometries(parts);parts.forEach(g=>g.dispose());
     geometry.rotateY(Math.atan2(-site.uz,site.ux));geometry.translate(site.x,site.y,site.z);
     const mesh=new T.Mesh(geometry,material);mesh.name=`SidewalkScene-${site.id}`;

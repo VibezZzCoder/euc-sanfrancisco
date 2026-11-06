@@ -42,7 +42,7 @@ function build() {
   const NYC = {};
   const window = { NYC };
   const context = vm.createContext({ window, document: stub(), console: { info() {}, log() {}, warn() {} }, Math, performance: { now: () => 0 } });
-  for (const f of ['js/sf-geodata.js', 'js/city-config.js', 'js/terrain.js']) vm.runInContext(readFileSync(join(root, f), 'utf8'), context);
+  for (const f of ['js/sf-geodata.js', 'js/city-config.js', 'js/terrain.js', 'js/sf-ride-geometry.js']) vm.runInContext(readFileSync(join(root, f), 'utf8'), context);
   const t = readBin(binOf('terrain'));
   NYC.Terrain.load(t.header, new Uint16Array(t.ab, 0, t.header.w * t.header.h));
   const b = readBin(binOf('buildings'));
@@ -140,4 +140,27 @@ test('outline buildings keep exact concave polygons instead of protruding strips
     assert.ok(c.polygon.every(p=>p.x>=c.minX&&p.x<=c.maxX&&p.z>=c.minZ&&p.z<=c.maxZ));
   }
   assert.ok(count>50,`${count} exact outline colliders`);
+});
+
+test('EUC additions supply exact foundations and roof support without duplicating main masses', { skip }, () => {
+  const { NYC, city } = build(), ride = NYC.ride;
+  assert.ok(ride.tops.length >= city.colliders.length, 'every main mass/podium/outline has a drawn roof');
+  // This fixture stubs detail meshes, but all main mass roofs/foundations, facade bays,
+  // cornices, crowns and metadata roof gear execute their actual construction paths.
+  assert.ok(ride.solids.filter((b) => b.halfExtents.y === .5).length > 50000, 'one-metre foundations');
+  const foundations = new Map(ride.prisms.map((p) => [JSON.stringify(p.outer), p]));
+  let checked = 0;
+  for (const c of city.colliders) if (c.polygon) {
+    const p = foundations.get(JSON.stringify(c.polygon)); assert.ok(p);
+    assert.equal(p.minY, c.minY - 1); assert.equal(p.maxY, c.minY);
+    assert.equal(p.support, false); checked++;
+  }
+  assert.ok(checked > 50, 'concave outlines retained in missing foundations');
+  const tallBodies = new Set(ride.solids.filter((b) => b.halfExtents.y > 40).map((b) =>
+    [b.centre.x, b.centre.z, b.halfExtents.x, b.halfExtents.z].join(',')));
+  for (const c of city.colliders) if (c.obb && c.maxY - c.minY > 80) {
+    assert.equal(tallBodies.has([c.obb.cx, c.obb.cz, c.obb.hx, c.obb.hz].join(',')), false, 'no duplicate full-height tower body');
+  }
+  assert.ok(ride.tops.every((t) => t.layered), 'roofs remain elevation-selected, not terrain replacements');
+  console.info(`CPU building fixture coverage (detail meshes stubbed): ${ride.tops.length} tops / ${ride.solids.length} boxes / ${ride.prisms.length} prisms; ${city.colliders.length} existing main bodies retained`);
 });

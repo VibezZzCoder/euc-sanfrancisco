@@ -3,109 +3,81 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <title>Slop San Francisco</title>
+  <title>SF Spin-off: EUC Thrills</title>
   <link rel="icon" href="data:," />
-  <meta name="description" content="San Francisco in the browser, built with three.js WebGPURenderer and TSL: walk, drive and cycle the detailed downtown streets, or fly across the city and bay through marine fog." />
-  <link rel="canonical" href="https://unable12.github.io/slop-sanfrancisco/" />
-  <meta property="og:type" content="website" />
-  <meta property="og:site_name" content="Slop San Francisco" />
-  <meta property="og:title" content="Slop San Francisco" />
-  <meta property="og:description" content="Waymos, helicopters, hills and fog. Explore San Francisco in your browser. Open source." />
-  <meta property="og:url" content="https://unable12.github.io/slop-sanfrancisco/" />
-  <meta property="og:image" content="https://unable12.github.io/slop-sanfrancisco/assets/og-waymo.jpg" />
-  <meta property="og:image:type" content="image/jpeg" />
-  <meta property="og:image:width" content="1280" />
-  <meta property="og:image:height" content="720" />
-  <meta property="og:image:alt" content="A white Waymo driving along Market Street in the Slop San Francisco browser demo." />
-  <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:site" content="@unable0_" />
-  <meta name="twitter:creator" content="@unable0_" />
-  <meta name="twitter:title" content="Slop San Francisco" />
-  <meta name="twitter:description" content="Waymos, helicopters, hills and fog. Explore San Francisco in your browser. Open source." />
-  <meta name="twitter:image" content="https://unable12.github.io/slop-sanfrancisco/assets/og-waymo.jpg" />
-  <meta name="twitter:image:alt" content="A white Waymo driving along Market Street in the Slop San Francisco browser demo." />
-  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
-  <script>
-    // Download the city scripts while Three.js loads; execute them only after its imports are ready below.
-    const nycAppScripts = (() => {
-      const assetVersion = '20261023-sf-p8';
-      return [
-        './js/sf-geodata.js',
-        './js/sf-places.js',
-        './js/city-config.js',
-        './js/data-loader.js',
-        './js/terrain.js',
-        './js/drape.js',
-        './js/tsl-materials.js',
-        './js/trees.js',
-        './js/actor-models.js',
-        './js/waymo-detail.js',
-        './js/world-collision.js',
-        './js/vehicle-lights.js',
-        './js/pedestrians.js',
-        './js/lighting.js',
-        './js/terrain-mesh.js',
-        './js/region.js',
-        './js/sf-ground.js',
-        './js/sf-style.js',
-        './js/buildings.js',
-        './js/sf-buildings.js',
-        './js/landmarks.js',
-        './js/sf-bridges.js',
-        './js/street-details.js',
-        './js/sf-street-details.js',
-        './js/sf-sidewalk-scenes.js',
-        './js/road-network.js',
-        './js/road-paint.js',
-        './js/grade-separation.js',
-        './js/traffic.js',
-        './js/sf-transit.js',
-        './js/controllers.js',
-        './js/touch-controls.js',
-        './js/cameras.js',
-        './js/sf-map.js',
-        './js/scene-culling.js',
-        './js/post-processing.js',
-        './js/settings.js',
-        './js/ride.js',
-        './js/ride-audio.js',
-        './js/ride-ui.js',
-        './js/main.js'
-      ].map((src) => `${src}?v=${assetVersion}`);
-    })();
-    for (const src of nycAppScripts) {
-      const preload = document.createElement('link');
-      preload.rel = 'preload';
-      preload.as = 'script';
-      preload.href = src;
-      document.head.appendChild(preload);
-    }
-  </script>
-  <!-- Inter (UI) & Overpass (street-name signs: modelled on Highway Gothic, the US road sign typeface) -->
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..800&amp;family=Overpass:wght@600;700&amp;display=swap" />
-  <link rel="stylesheet" href="./css/style.css?v=20261022-repo-link" />
-  <!-- three.js dev branch pinned to commit bc7d0b3 (builds committed to mrdoob/three.js, served by jsDelivr); see PLAN.md D10 -->
+  <meta name="description" content="Ride an electric unicycle through San Francisco's hills, streets and marine fog. A free EUC Thrills city destination." />
+  <link rel="preload" href="./fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="preload" href="./fonts/overpass-latin.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="stylesheet" href="./css/fonts.css" />
+  <link rel="stylesheet" href="./css/style.css" />
+  <!-- One local Three identity, pinned to e27dfa9 by tools/vendor-three.mjs. -->
   <script type="importmap">
     {
       "imports": {
-        "three": "https://cdn.jsdelivr.net/gh/mrdoob/three.js@bc7d0b3c3838d5da9495b5e603afd77ed3154d57/build/three.webgpu.js",
-        "three/webgpu": "https://cdn.jsdelivr.net/gh/mrdoob/three.js@bc7d0b3c3838d5da9495b5e603afd77ed3154d57/build/three.webgpu.js",
-        "three/tsl": "https://cdn.jsdelivr.net/gh/mrdoob/three.js@bc7d0b3c3838d5da9495b5e603afd77ed3154d57/build/three.tsl.js",
-        "three/addons/": "https://cdn.jsdelivr.net/gh/mrdoob/three.js@bc7d0b3c3838d5da9495b5e603afd77ed3154d57/examples/jsm/"
+        "three": "./vendor/three/build/three.webgpu.js",
+        "three/webgpu": "./vendor/three/build/three.webgpu.js",
+        "three/tsl": "./vendor/three/build/three.tsl.js",
+        "three/addons/": "./vendor/three/examples/jsm/"
       }
     }
   </script>
+  <link rel="modulepreload" href="./vendor/three/build/three.webgpu.js" />
+  <link rel="modulepreload" href="./vendor/three/build/three.core.js" />
+  <link rel="modulepreload" href="./vendor/three/build/three.tsl.js" />
+  <link rel="modulepreload" href="./js/sf-bootstrap.js" />
+  <link rel="modulepreload" href="./js/main.js" />
+  <link rel="modulepreload" href="./js/graphics-quality.js" />
+  <!-- euc:preload:start (tools/vendor-euc.mjs) -->
+  <link rel="modulepreload" href="./js/euc/app/nearSolids.js" />
+  <link rel="modulepreload" href="./js/euc/app/oneFootPose.js" />
+  <link rel="modulepreload" href="./js/euc/data/machines.js" />
+  <link rel="modulepreload" href="./js/euc/data/rideStyles.js" />
+  <link rel="modulepreload" href="./js/euc/data/riders.js" />
+  <link rel="modulepreload" href="./js/euc/data/surfaces.js" />
+  <link rel="modulepreload" href="./js/euc/data/tuning.js" />
+  <link rel="modulepreload" href="./js/euc/input/actions.js" />
+  <link rel="modulepreload" href="./js/euc/render/appearanceImports.js" />
+  <link rel="modulepreload" href="./js/euc/render/appearanceLoader.js" />
+  <link rel="modulepreload" href="./js/euc/render/appearanceRegistry.js" />
+  <link rel="modulepreload" href="./js/euc/render/blockoutKit.js" />
+  <link rel="modulepreload" href="./js/euc/render/euc.js" />
+  <link rel="modulepreload" href="./js/euc/render/machineLook.js" />
+  <link rel="modulepreload" href="./js/euc/render/rider.js" />
+  <link rel="modulepreload" href="./js/euc/render/riderClothDrape.js" />
+  <link rel="modulepreload" href="./js/euc/render/riderJointSurface.js" />
+  <link rel="modulepreload" href="./js/euc/render/riderLook.js" />
+  <link rel="modulepreload" href="./js/euc/render/ridingRig.js" />
+  <link rel="modulepreload" href="./js/euc/render/rigConsolidation.js" />
+  <link rel="modulepreload" href="./js/euc/shared/freeze.js" />
+  <link rel="modulepreload" href="./js/euc/shared/maths.js" />
+  <link rel="modulepreload" href="./js/euc/shared/ragdollBoot.js" />
+  <link rel="modulepreload" href="./js/euc/shared/ragdollContact.js" />
+  <link rel="modulepreload" href="./js/euc/shared/ragdollHip.js" />
+  <link rel="modulepreload" href="./js/euc/shared/ragdollInterpolation.js" />
+  <link rel="modulepreload" href="./js/euc/shared/ragdollLimbContact.js" />
+  <link rel="modulepreload" href="./js/euc/shared/riderOccupancy.js" />
+  <link rel="modulepreload" href="./js/euc/shared/riderSideContact.js" />
+  <link rel="modulepreload" href="./js/euc/simulation/EucController.js" />
+  <link rel="modulepreload" href="./js/euc/simulation/eucStepPrimitives.js" />
+  <link rel="modulepreload" href="./js/euc/simulation/hazards.js" />
+  <link rel="modulepreload" href="./js/euc/simulation/lateralCeiling.js" />
+  <link rel="modulepreload" href="./js/euc/simulation/launchPadField.js" />
+  <link rel="modulepreload" href="./js/euc/simulation/planSampler.js" />
+  <link rel="modulepreload" href="./js/euc/simulation/ragdoll.js" />
+  <link rel="modulepreload" href="./js/euc/simulation/riderLean.js" />
+  <link rel="modulepreload" href="./js/euc/simulation/roughness.js" />
+  <link rel="modulepreload" href="./js/euc/simulation/softBodies.js" />
+  <link rel="modulepreload" href="./js/euc/simulation/world.js" />
+  <!-- euc:preload:end -->
+  <script defer src="./js/boot.js"></script>
 </head>
 <body>
   <!-- Icon sprite (24 × 24 stroke icons, drawn in currentColor) -->
   <svg class="icon-sprite" width="0" height="0" aria-hidden="true" focusable="false">
     <defs>
-      <symbol id="i-walk" viewBox="0 0 24 24"><circle cx="13" cy="4.4" r="2"/><path d="M12.3 8.2 10.8 13.8M10.8 13.8 9.2 17.2 7.2 20.5M10.8 13.8l2.4 3 1.6 3.8M12.3 8.6 9.6 10.2l-.8 2.6M12.3 8.6l2.1 2.4 2.4.8"/></symbol>
-      <symbol id="i-car" viewBox="0 0 24 24"><path d="M9.6 4.8V3.4a.6.6 0 0 1 .6-.6h3.6a.6.6 0 0 1 .6.6v1.4"/><path d="m5.2 10.5 1.4-4.1A2.2 2.2 0 0 1 8.7 4.8h6.6a2.2 2.2 0 0 1 2.1 1.6l1.4 4.1"/><rect x="3" y="10.5" width="18" height="6.5" rx="2"/><path d="M6 17v2.6M18 17v2.6M6.6 13.8h1.6M15.8 13.8h1.6"/></symbol>
-      <symbol id="i-bike" viewBox="0 0 24 24"><circle cx="5.5" cy="16.5" r="3.6"/><circle cx="18.5" cy="16.5" r="3.6"/><path d="M5.5 16.5 9.3 9.6h6.3M11.6 16.5 9.3 9.6M11.6 16.5l4-6.9M5.5 16.5h6.1M15.6 9.6l2.9 6.9M15.6 9.6 14.8 7h2.4M8 8.4h2.8"/></symbol>
-      <symbol id="i-heli" viewBox="0 0 24 24"><path d="M3.5 4h15M11 4v3.2"/><path d="M6 12.2a5 5 0 0 1 5-5h1.6a4.4 4.4 0 0 1 4.4 4.4V15H8.8A2.8 2.8 0 0 1 6 12.2z"/><path d="M17 11h4.2M21.2 8.8v4.4M7 19h10.5M9.5 15v4M15 15v4"/></symbol>
+      <symbol id="i-euc" viewBox="0 0 24 24"><circle cx="12" cy="17.2" r="4.4"/><circle cx="12" cy="17.2" r="1.3"/><path d="M8.3 14.4h7.4"/><circle cx="12" cy="3.5" r="1.7"/><path d="M12 5.5v4.4M12 9.9l-1.9 4.1M12 9.9l1.9 4.1M12 6.9 9.4 9M12 6.9 14.6 9"/></symbol>
+      <symbol id="i-sound" viewBox="0 0 24 24"><path d="m11 4-5 4H3v8h3l5 4V4ZM15 8a6 6 0 0 1 0 8M18 5a10 10 0 0 1 0 14"/></symbol>
+      <symbol id="i-sound-off" viewBox="0 0 24 24"><path d="m11 4-5 4H3v8h3l5 4V4ZM16 9l6 6M22 9l-6 6"/></symbol>
       <symbol id="i-golden" viewBox="0 0 24 24"><path d="M3 17.5h18M7 17.5a5 5 0 0 1 10 0M12 5v3M5.6 9.6l2 1.6M18.4 9.6l-2 1.6M7.5 21h9"/></symbol>
       <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.8v2.1M12 19.1v2.1M2.8 12h2.1M19.1 12h2.1M5.5 5.5 7 7M17 17l1.5 1.5M5.5 18.5 7 17M17 7l1.5-1.5"/></symbol>
       <symbol id="i-twilight" viewBox="0 0 24 24"><path d="M3 15.5h18M7.5 19h9M8 15.5a4 4 0 0 1 8 0M17.5 4v3.2M15.9 5.6h3.2M7 7.4v1.8M6.1 8.3h1.8"/></symbol>
@@ -143,54 +115,66 @@
     </svg>
     <div class="loader">
       <span class="mta-bullet loader-bullet" aria-hidden="true">SF</span>
-      <div class="loader-title">Slop San Francisco</div>
-      <div class="loader-tagline">Walk · Drive · Cycle · Fly</div>
+      <div class="loader-title">SF Spin-off: EUC Thrills</div>
+      <div class="loader-tagline">Hills · Streets · Electric unicycles</div>
       <div class="loader-track is-indeterminate" aria-hidden="true"><span id="loading-progress" class="loader-fill"></span></div>
-      <div id="loading-status">Initializing WebGPURenderer &amp; TSL Shaders...</div>
+      <div id="loading-status">Loading city code and data…</div>
+      <div id="startup-error" hidden>
+        <p id="startup-help"></p>
+        <button id="startup-retry" type="button">Retry</button>
+        <details class="startup-details"><summary>Technical details</summary><pre id="startup-detail"></pre></details>
+      </div>
+      <noscript>This game needs JavaScript. Enable it in your browser, then reload this page.</noscript>
     </div>
   </div>
 
   <!-- 3D WebGPU Viewport Container -->
-  <main id="canvas-container" aria-label="3D Interactive Slop San Francisco Viewport"></main>
+  <main id="canvas-container" aria-label="3D San Francisco viewport" tabindex="-1"></main>
 
-  <section id="ride-panel" class="hud panel ride-panel" aria-labelledby="ride-title" hidden>
-    <div class="ride-heading"><span>THE FIRST GREAT RIDE</span><button id="ride-close" type="button" aria-label="Hide ride card">×</button></div>
-    <h2 id="ride-title">From the bay to Nob Hill</h2>
-    <p id="ride-status" role="status" aria-live="polite"></p>
-    <p id="ride-detail"></p>
-    <progress id="ride-progress" max="100" value="0" aria-label="Trip progress" hidden></progress>
-    <button id="ride-action" type="button" class="ride-primary">Start at the Ferry Building</button>
-    <button id="ride-recover" type="button" hidden>Recover to the route</button>
-    <div class="ride-actions"><button id="ride-assist" type="button" hidden>Take the wheel</button><button id="ride-sound" type="button" aria-pressed="true">Sound on</button><button id="ride-cancel" type="button">End ride</button></div>
+  <!-- NYC's native title/menu DOM contract, with SF wording. The single world rig is the preview. -->
+  <section id="title-overlay" class="title-overlay" aria-labelledby="title-heading" hidden>
+    <div class="title-head">
+      <span class="brand-badge title-badge" aria-hidden="true"><svg class="icon"><use href="#i-euc"/></svg></span>
+      <p class="title-kicker">SF Spin-off</p>
+      <h1 id="title-heading" class="title-name">EUC Thrills</h1>
+      <p class="title-tagline">Ride an electric unicycle through San Francisco.</p>
+    </div>
+    <div class="title-foot">
+      <button id="title-rider" class="title-rider rider-entry" type="button" aria-haspopup="dialog" aria-controls="game-menu">
+        <span class="rider-entry-icon" aria-hidden="true"><svg class="icon"><use href="#i-euc"/></svg></span>
+        <span class="rider-entry-copy"><span class="rider-entry-label">Choose rider</span><strong id="title-rider-name">Cool Rider</strong></span>
+        <span class="rider-entry-action" aria-hidden="true">Change <svg class="icon icon-sm"><use href="#i-chevron-right"/></svg></span>
+      </button>
+      <button id="title-ride" class="title-ride" type="button">Ride</button>
+      <p id="title-status" class="title-status" role="status" aria-live="polite"></p>
+      <p id="title-audio-status" class="title-status" role="status" hidden></p>
+      <div class="title-preparation-actions"><button id="title-retry" type="button" hidden>Retry</button><button id="title-cancel" type="button" hidden>Cancel</button></div>
+      <p class="title-hint title-hint--keyboard"><kbd>Enter</kbd> Activate · <kbd>C</kbd> Choose rider</p>
+      <p class="title-hint title-hint--gamepad"><kbd data-pad="A">A</kbd> Activate · <kbd>LB</kbd> <kbd>RB</kbd> Choose rider</p>
+      <a class="website-link title-website" href="https://euc.erodmen.com/" target="_blank" rel="noopener noreferrer" aria-label="EUC Thrills website (opens in a new tab)">EUC Thrills website <span aria-hidden="true">↗</span></a>
+      <a id="title-main-menu" class="website-link title-return" href="https://vibezzzcoder.github.io/EUC-thrills/">← EUC Thrills main menu</a>
+      <p class="title-credits">Riding and riders from <em>EUC Thrills</em> by VibezZzCoder · City by Kamil / Mr.doob · Map data © OpenStreetMap contributors · DataSF · USGS</p>
+    </div>
   </section>
-
-  <dialog id="settings-dialog" aria-labelledby="settings-title">
-    <form method="dialog" class="settings-panel">
-      <p class="settings-eyebrow">SLOP SAN FRANCISCO</p>
-      <h2 id="settings-title">Take a moment</h2>
-      <p>The city is paused. Make yourself at home.</p>
-      <label>Time of day<select id="settings-time"><option value="golden">Golden hour</option><option value="midday">Midday</option><option value="twilight">Blue hour</option><option value="midnight">Night</option></select></label>
-      <label>Atmosphere<select id="settings-fog"><option value="clear">Clear</option><option value="haze">Light haze</option><option value="marine">Marine layer</option></select></label>
-      <label>Downtown traffic<select id="settings-traffic"><option value="1">Normal</option><option value="0.5">Light</option><option value="0">None</option></select></label>
-      <label>Graphics quality<select id="settings-quality"><option value="auto">Automatic</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></label>
-      <label class="settings-check"><input type="checkbox" id="settings-shadows" checked> Sun shadows</label>
-      <p id="settings-status" role="status">Automatic quality: measuring…</p>
-      <button id="settings-resume" type="button">Resume exploring</button>
-      <p class="settings-credit">Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a> · City and County of San Francisco / DataSF · USGS</p>
-    </form>
-  </dialog>
 
   <!-- Top-Left: Brand & Renderer Telemetry -->
   <div class="hud-topbar">
   <header class="hud hud-top-left">
     <div class="panel brand">
-      <span class="mta-bullet" aria-hidden="true">SF</span>
+      <span class="brand-badge" aria-hidden="true"><svg class="icon"><use href="#i-euc"/></svg></span>
       <div class="brand-titles">
         <div class="brand-heading">
-          <h1>Slop San Francisco</h1>
+          <h1>SF Spin-off: EUC Thrills</h1>
+          <a class="repo-link" href="https://github.com/VibezZzCoder/euc-sanfrancisco" target="_blank" rel="noopener noreferrer" aria-label="SF Spin-off: EUC Thrills on GitHub (opens in a new tab)">GitHub <span aria-hidden="true">↗</span></a>
+          <a class="website-link" href="https://euc.erodmen.com/" target="_blank" rel="noopener noreferrer" aria-label="EUC Thrills website (opens in a new tab)">Website <span aria-hidden="true">↗</span></a>
         </div>
-        <div class="brand-subtitle">three.js · WebGPU · TSL · <span id="hud-fps" class="fps-ok">60</span> fps</div>
+        <div class="brand-subtitle">three.js · <span id="hud-backend">Graphics</span> · TSL</div>
       </div>
+    </div>
+    <div class="performance-controls">
+      <label class="panel fps-control" for="fps-limit"><span class="fps-label-full">Frame rate</span><span class="fps-reading" title="Measured rendered frames per second, not the selected limit"><span class="fullmap-sr-only">Measured frame rate: </span><span id="hud-fps">—</span> FPS</span><select id="fps-limit" aria-label="Frame rate" title="Render limit; Auto follows your display. The FPS readout is measured; riding physics stay unchanged."><option value="auto">Auto</option><option value="120">120</option><option value="60">60</option><option value="30">30</option></select></label>
+      <label class="panel resolution-control" for="render-resolution"><span class="resolution-label-full">3D resolution</span><span class="resolution-label-short" aria-hidden="true">3D res</span><select id="render-resolution" aria-label="3D resolution" title="Only the 3D pixels change; map, menus and riding stay unchanged."><option value="100">100%</option><option value="75">75%</option><option value="50">50%</option></select></label>
+      <label class="panel graphics-control" for="graphics-quality"><span aria-hidden="true">Graphics</span><select id="graphics-quality" data-quality="high" aria-label="Graphics quality" title="High: original effects. Medium: no screen-space reflections, smaller sun shadows. Low: also no bloom or cast sun shadows. FPS and 3D resolution are separate."><option value="high" selected>High</option><option value="medium">Medium</option><option value="low">Low</option></select></label>
     </div>
   </header>
 
@@ -218,14 +202,13 @@
         <svg class="icon icon-sm" aria-hidden="true"><use href="#i-chevron-down"/></svg>
       </label>
       <span class="toolbar-divider" aria-hidden="true"></span>
-      <button id="btn-sound" type="button" class="tool-btn" aria-pressed="true">Sound on</button>
-      <button id="btn-ride" type="button" class="tool-btn" aria-controls="ride-panel">First ride</button>
-      <button id="btn-settings" type="button" class="tool-btn" aria-haspopup="dialog">Settings <kbd>Esc</kbd></button>
+      <button id="btn-sound" type="button" class="tool-btn icon-only" aria-label="Mute sound" aria-pressed="true" aria-describedby="sound-unavailable"><svg class="icon" aria-hidden="true"><use href="#i-sound"/></svg></button>
+      <span id="sound-unavailable" class="sound-unavailable" role="status" hidden></span>
       <button id="btn-teleport" class="tool-btn" type="button" popovertarget="teleport-popover" title="Teleport the active player">
         <svg class="icon" aria-hidden="true"><use href="#i-pin"/></svg><span class="tool-label">Teleport</span><svg class="icon icon-sm" aria-hidden="true"><use href="#i-chevron-down"/></svg>
       </button>
       <button id="btn-open-map" class="tool-btn" type="button" title="Full San Francisco street map [M]">
-        <svg class="icon" aria-hidden="true"><use href="#i-map"/></svg><span class="tool-label">Map</span><kbd>M</kbd>
+        <svg class="icon" aria-hidden="true"><use href="#i-map"/></svg><span class="tool-label">Map</span><kbd data-keyboard="M" data-gamepad="Start">M</kbd>
       </button>
       <span class="toolbar-divider" aria-hidden="true"></span>
       <button id="btn-toggle-hud" class="tool-btn icon-only" type="button" title="Clean view: hide the HUD [H]" aria-label="Hide HUD" aria-pressed="false">
@@ -241,9 +224,9 @@
     <div class="pop-title">Teleport to</div>
     <button id="tp-ferry" class="pop-item tp-btn" data-teleport="ferry" type="button"><span class="pop-name">Ferry Building</span><span class="pop-sub">The Embarcadero · Embarcadero</span></button>
     <button class="pop-item tp-btn" data-teleport="salesforce" type="button"><span class="pop-name">Salesforce Tower</span><span class="pop-sub">Financial District</span></button>
-    <button class="pop-item tp-btn" data-teleport="paintedladies" type="button"><span class="pop-name">Painted Ladies · Fly</span><span class="pop-sub">Steiner St · Regional scenery</span></button>
-    <button class="pop-item tp-btn" data-teleport="twinpeaks" type="button"><span class="pop-name">Twin Peaks · Fly</span><span class="pop-sub">Twin Peaks Blvd · Regional scenery</span></button>
-    <button class="pop-item tp-btn" data-teleport="goldengate" type="button"><span class="pop-name">Golden Gate viewpoint · Fly</span><span class="pop-sub">Marine Dr · Regional scenery</span></button>
+    <button class="pop-item tp-btn" data-teleport="paintedladies" type="button"><span class="pop-name">Painted Ladies</span><span class="pop-sub">Steiner St</span></button>
+    <button class="pop-item tp-btn" data-teleport="twinpeaks" type="button"><span class="pop-name">Twin Peaks</span><span class="pop-sub">Twin Peaks Blvd</span></button>
+    <button class="pop-item tp-btn" data-teleport="goldengate" type="button"><span class="pop-name">Golden Gate viewpoint</span><span class="pop-sub">Marine Dr</span></button>
     <button id="tp-market" class="pop-item tp-btn" data-teleport="market" type="button"><span class="pop-name">Market &amp; Montgomery</span><span class="pop-sub">Market St · Financial District</span></button>
     <button id="tp-transamerica" class="pop-item tp-btn" data-teleport="transamerica" type="button"><span class="pop-name">Transamerica Pyramid</span><span class="pop-sub">Montgomery St · Financial District</span></button>
     <button id="tp-chinatown" class="pop-item tp-btn" data-teleport="chinatown" type="button"><span class="pop-name">Chinatown Gate</span><span class="pop-sub">Grant Ave · Chinatown</span></button>
@@ -260,43 +243,66 @@
   <!-- Bottom-Left: Street-Name Signs & Live GPS Radar Minimap -->
   <div class="hud hud-bottom-left">
     <div id="hud-location" class="location" aria-live="off"></div>
-    <aside id="minimap-card" class="panel radar" aria-label="Live San Francisco Street Radar Minimap" title="Open the full San Francisco street map [M]">
+    <button id="minimap-card" type="button" class="panel radar" aria-label="Open the full San Francisco street map" aria-haspopup="dialog" aria-controls="fullmap-modal" title="Open the full San Francisco street map [M]">
       <canvas id="minimap-canvas"></canvas>
       <span class="radar-north" aria-hidden="true">N</span>
-      <kbd class="radar-key">M</kbd>
-    </aside>
+      <kbd class="radar-key" data-keyboard="M" data-gamepad="Start" aria-hidden="true">M</kbd>
+    </button>
   </div>
 
-  <!-- Bottom-Center: Third-Person Mode Switcher & Controls Guide -->
+  <!-- Bottom-Center: EUC rider picker & Controls Guide -->
   <footer class="hud hud-bottom-center">
     <div id="hud-controls-hint" class="controls-hint"></div>
-    <nav id="mode-switch" class="panel mode-switch" aria-label="Third-Person Navigation Mode">
-      <span class="mode-indicator" aria-hidden="true"></span>
-      <button id="mode-person" class="mode-btn" data-mode="person" type="button" title="Person [1]">
-        <svg class="icon" aria-hidden="true"><use href="#i-walk"/></svg><span class="mode-label">Walk</span><kbd>1</kbd>
-      </button>
-      <button id="mode-car" class="mode-btn active" data-mode="car" type="button" title="Car · Robotaxi [2]">
-        <svg class="icon" aria-hidden="true"><use href="#i-car"/></svg><span class="mode-label">Drive</span><kbd>2</kbd>
-      </button>
-      <button id="mode-cyclist" class="mode-btn" data-mode="cyclist" type="button" title="Cyclist [3]">
-        <svg class="icon" aria-hidden="true"><use href="#i-bike"/></svg><span class="mode-label">Cycle</span><kbd>3</kbd>
-      </button>
-      <button id="mode-helicopter" class="mode-btn" data-mode="helicopter" type="button" title="Helicopter [4]">
-        <svg class="icon" aria-hidden="true"><use href="#i-heli"/></svg><span class="mode-label">Fly</span><kbd>4</kbd>
-      </button>
+    <nav id="rider-switch" class="panel mode-switch rider-switch" aria-label="Rider and game menu">
+      <button id="btn-rider" class="mode-btn" type="button" aria-haspopup="dialog" aria-controls="game-menu" title="Choose rider [C]"><svg class="icon" aria-hidden="true"><use href="#i-euc"/></svg><span>Change rider <span id="rider-button-name">Cool Rider</span></span><kbd data-keyboard="C" data-gamepad="LB / RB">C</kbd></button>
+      <button id="btn-game-menu" class="mode-btn" type="button" aria-haspopup="dialog" aria-controls="game-menu" title="Pause / menu [P / Escape]">Menu <kbd data-keyboard="P" data-gamepad="View">P</kbd></button>
     </nav>
     <small class="data-credit">© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a> · DataSF · USGS</small>
   </footer>
 
+  <dialog id="game-menu" class="game-menu" aria-labelledby="game-menu-heading" data-view="pause">
+    <section data-menu-view="pause">
+      <p class="menu-kicker">SF Spin-off: EUC Thrills</p><h2 id="game-menu-heading">Paused</h2>
+      <p id="menu-audio-status" role="status"></p>
+      <button id="menu-resume" class="menu-primary" type="button">Resume riding</button>
+      <button id="menu-rider" class="menu-rider-entry" type="button">Change rider <span aria-hidden="true">→</span></button>
+      <p class="menu-help keyboard-prompt">W / S lean · A / D carve · Space hop · Shift crouch<br>R get up · V camera · M map · C change rider · P menu</p>
+      <p class="menu-help gamepad-prompt">RT / LT lean · LS steer · A hop · X crouch · B get up<br>Y camera · RS orbit · Start map · View menu · LB / RB change rider<br>A activates the focused button · B goes back</p>
+      <p class="menu-help touch-prompt">Use the stick to ride and steer. HOP jumps; hold CHARGE to crouch. Tap Change rider to choose another rider.</p>
+      <div class="menu-departure"><p>Leave SF and open the main game's menu.</p><button id="menu-return" type="button">Return to EUC Thrills main menu</button></div>
+    </section>
+    <section data-menu-view="picker" class="rider-picker" hidden aria-labelledby="rider-heading">
+      <header class="picker-head"><p class="menu-kicker">Find your style <span id="rider-count"></span></p><h2 id="rider-heading">Choose your rider</h2><p id="rider-current">Currently riding: Cool Rider</p></header>
+      <div class="rider-picker-body">
+        <div id="rider-options" class="rider-options" role="group" aria-label="Playable riders"></div>
+        <section class="rider-detail" aria-label="Highlighted rider profile">
+          <p class="rider-detail-kicker">Rider profile <span id="rider-detail-state"></span></p><h3 id="rider-detail-name"></h3><p id="rider-detail-blurb"></p>
+          <div class="rider-wheel"><p class="rider-detail-kicker">The wheel</p><h4 id="rider-wheel-name"></h4><p id="rider-wheel-blurb"></p></div>
+          <p id="rider-style-note" class="rider-style-note"></p>
+        </section>
+      </div>
+      <footer class="picker-foot">
+        <p id="rider-status" role="status" aria-live="polite" aria-atomic="true"></p>
+        <div class="menu-actions"><button id="rider-confirm" class="menu-primary" type="button">Select rider</button><button id="rider-retry" class="menu-primary" type="button" hidden>Retry</button><button id="rider-cancel" type="button">Cancel</button></div>
+        <p class="picker-controls keyboard-prompt">↑ ↓ Browse · Enter Select · Esc Back</p><p class="picker-controls gamepad-prompt">LS / D-pad Browse · RS Scroll details · A Select / activate · B Back</p><p class="picker-controls touch-prompt">Tap a rider for details, then Select to change.</p>
+      </footer>
+    </section>
+    <section data-menu-view="return" hidden aria-labelledby="return-heading"><h2 id="return-heading">Return to EUC Thrills main menu?</h2><p>This will leave SF and open the main game's menu in this tab.</p><button id="return-keep" class="menu-primary" type="button">Keep riding</button><div class="menu-departure"><button id="return-confirm" type="button">Return to main menu</button></div></section>
+  </dialog>
+
   <!-- Bottom-Right: Speed Cluster & Camera Switcher -->
   <div class="hud hud-bottom-right">
-    <section id="hud-cluster" class="panel cluster" aria-label="Vehicle telemetry and camera">
+    <div class="wheel-cues" aria-live="polite">
+      <div id="hud-trick" class="wheel-cue trick-cue" role="status" aria-atomic="true" hidden></div>
+      <div id="hud-overspeed" class="wheel-cue overspeed-cue" data-level="none" hidden><span aria-hidden="true">⚠</span> Max speed</div>
+      <div id="hud-warning" class="wheel-cue power-cue" data-level="none" role="status" hidden></div>
+    </div>
+    <section id="hud-cluster" class="panel cluster" aria-label="Speed, rider and camera">
       <div class="gauge">
         <div class="gauge-top">
-          <span id="hud-active-mode" class="gauge-label">Waymo Robotaxi</span>
-          <span class="gauge-alt"><span class="gauge-alt-label">Alt</span> <span id="hud-altitude">0</span> ft</span>
+          <span id="hud-active-mode" class="gauge-label">Cool Rider</span>
         </div>
-        <div class="gauge-speed"><span id="hud-speed">0</span><span class="gauge-unit">mph</span></div>
+        <div class="gauge-speed"><span id="hud-speed">0</span><span class="gauge-unit">mph</span><span class="gauge-alt" title="Speed in km/h"><span id="hud-speed-kmh">0</span> km/h</span></div>
         <div class="gauge-meter" aria-hidden="true"><span id="hud-speed-meter"></span></div>
       </div>
       <div id="camera-switch" class="camera-switch">
@@ -304,7 +310,7 @@
           <svg class="icon" aria-hidden="true"><use href="#i-chevron-left"/></svg>
         </button>
         <button id="cam-menu-btn" class="camera-current" type="button" popovertarget="camera-popover" title="All cameras [V cycles]">
-          <svg class="icon" aria-hidden="true"><use href="#i-camera"/></svg><span id="hud-active-camera">3rd-Person Chase</span><kbd>V</kbd>
+          <svg class="icon" aria-hidden="true"><use href="#i-camera"/></svg><span id="hud-active-camera">3rd-Person Chase</span><kbd data-keyboard="V" data-gamepad="Y">V</kbd>
         </button>
         <button id="cam-next" class="icon-btn" type="button" title="Next camera [V]" aria-label="Next camera">
           <svg class="icon" aria-hidden="true"><use href="#i-chevron-right"/></svg>
@@ -314,47 +320,40 @@
   </div>
 
   <!-- Touch input stays available in clean view; the map temporarily suspends it. -->
-  <section id="touch-controls" aria-label="Touch controls" hidden>
-    <div class="touch-movement">
-      <div id="touch-stick" role="group" aria-label="Movement joystick: drag up or down to move, left or right to turn">
-        <span class="touch-stick-axis" aria-hidden="true"></span>
-        <span id="touch-stick-knob" aria-hidden="true"></span>
-      </div>
-      <span class="touch-caption">Move &amp; steer</span>
+  <div id="hud-getup" class="getup-prompt" role="status" aria-live="assertive" hidden><span id="hud-getup-verb">Press</span><kbd id="hud-getup-key">R</kbd><span id="hud-getup-text">to get up</span></div>
+  <section id="touch-controls" class="euc-touch" aria-label="Touch controls" data-down="false" hidden>
+    <div class="touch-zone" data-touch="stick" aria-label="Ride stick: push up to lean forward, down to brake or reverse, sideways to carve"></div>
+    <div id="touch-stick" class="touch-stick" data-active="false" aria-hidden="true">
+      <span class="stick-hint stick-hint--left"></span><span class="stick-hint stick-hint--right"></span><span class="stick-hint stick-hint--up"></span><span class="stick-hint stick-hint--down"></span><span class="touch-knob"></span>
     </div>
-    <p class="touch-look-hint">Drag to look · Pinch to zoom</p>
-    <div class="touch-actions" role="group" aria-label="Hold to perform an action">
-      <button class="touch-action" data-touch-action="up" type="button" aria-label="Jump" aria-pressed="false" hidden>
-        <span aria-hidden="true">↑</span><span data-touch-label="up">Jump</span>
-      </button>
-      <button class="touch-action" data-touch-action="down" type="button" aria-label="Descend" aria-pressed="false" hidden>
-        <span aria-hidden="true">↓</span><span data-touch-label="down">Descend</span>
-      </button>
-      <button class="touch-action touch-boost" data-touch-action="boost" type="button" aria-label="Boost" aria-pressed="false">
-        <span aria-hidden="true">↟</span><span data-touch-label="boost">Boost</span>
-      </button>
+    <p class="touch-look-hint"><span class="touch-look-hint-full">Drag elsewhere to look · Pinch to zoom</span><span class="touch-look-hint-short">Drag<br>to look<br>Pinch<br>to zoom</span></p>
+    <div class="touch-actions" role="group" aria-label="Wheel actions">
+      <button class="touch-btn touch-btn--hop" data-touch="up" type="button" aria-label="Hop: tap to jump, hold for one-foot air, press again while rising for a 180">HOP</button>
+      <button class="touch-btn touch-btn--getup" data-touch="reset" type="button" aria-label="Get up after a crash, like R on a keyboard">GET UP</button>
+      <button class="touch-btn touch-btn--charge" data-touch="boost" type="button" aria-label="Crouch and charge a bigger hop; hold in the air to tuck">CHARGE</button>
     </div>
   </section>
 
-  <!-- All Cameras: 3 Follow Cameras + 7 Iconic NYC Vantage Cameras + Auto-Director Drone -->
+  <!-- Eleven rider-relative cameras, including cinematic tracking and an aerial director -->
   <div id="camera-popover" class="popover" popover data-side="above" data-anchor="hud-cluster" data-align="hud-cluster" aria-label="Multiple Camera Angles">
     <div class="pop-title">Follow</div>
     <button id="cam-chase" class="pop-item cam-btn active" data-camera="chase" type="button"><span class="pop-name">3rd-Person Chase</span><kbd>5</kbd></button>
     <button id="cam-action" class="pop-item cam-btn" data-camera="action" type="button"><span class="pop-name">Low-Angle Action</span><kbd>6</kbd></button>
-    <button id="cam-pov" class="pop-item cam-btn" data-camera="pov" type="button"><span class="pop-name">First-Person / Cockpit</span><kbd>7</kbd></button>
-    <div class="pop-title">Scenic</div>
-    <button id="cam-centralPark" class="pop-item cam-btn" data-camera="centralPark" type="button"><span class="pop-name">Coit Tower &amp; Telegraph Hill</span></button>
-    <button id="cam-fifthAve" class="pop-item cam-btn" data-camera="fifthAve" type="button"><span class="pop-name">Transamerica Pyramid</span><kbd>8</kbd></button>
-    <button id="cam-timesSquare" class="pop-item cam-btn" data-camera="timesSquare" type="button"><span class="pop-name">Ferry Building &amp; Bay</span><kbd>9</kbd></button>
-    <button id="cam-chryslerGCT" class="pop-item cam-btn" data-camera="chryslerGCT" type="button"><span class="pop-name">City Hall &amp; Civic Center</span><kbd>0</kbd></button>
-    <button id="cam-observatory" class="pop-item cam-btn" data-camera="observatory" type="button"><span class="pop-name">Financial District Skyline</span></button>
-    <button id="cam-bryantPark" class="pop-item cam-btn" data-camera="bryantPark" type="button"><span class="pop-name">Lombard Street</span></button>
-    <button id="cam-waterfront" class="pop-item cam-btn" data-camera="waterfront" type="button"><span class="pop-name">Oracle Park &amp; Waterfront</span></button>
+    <button id="cam-pov" class="pop-item cam-btn" data-camera="pov" type="button"><span class="pop-name">First-Person</span><kbd>7</kbd></button>
+    <div class="pop-title">Cinematic · follows you</div>
+    <button id="cam-centralPark" class="pop-item cam-btn" data-camera="centralPark" type="button"><span class="pop-name">Elevated</span></button>
+    <button id="cam-fifthAve" class="pop-item cam-btn" data-camera="fifthAve" type="button"><span class="pop-name">Avenue</span><kbd>8</kbd></button>
+    <button id="cam-timesSquare" class="pop-item cam-btn" data-camera="timesSquare" type="button"><span class="pop-name">Crossroads</span><kbd>9</kbd></button>
+    <button id="cam-chryslerGCT" class="pop-item cam-btn" data-camera="chryslerGCT" type="button"><span class="pop-name">Architecture</span><kbd>0</kbd></button>
+    <button id="cam-observatory" class="pop-item cam-btn" data-camera="observatory" type="button"><span class="pop-name">Overlook</span></button>
+    <button id="cam-bryantPark" class="pop-item cam-btn" data-camera="bryantPark" type="button"><span class="pop-name">Side Tracking</span></button>
+    <button id="cam-waterfront" class="pop-item cam-btn" data-camera="waterfront" type="button"><span class="pop-name">Panorama</span></button>
     <button id="cam-drone" class="pop-item cam-btn" data-camera="drone" type="button"><span class="pop-name">Auto-Director Aerial</span></button>
   </div>
 
   <!-- Full-Screen Interactive San Francisco Street Map ([M]) -->
-  <dialog id="fullmap-modal" class="fullmap-modal hidden" role="dialog" aria-modal="true" aria-label="Full San Francisco Interactive Street Map">
+  <dialog id="fullmap-modal" class="fullmap-modal hidden" role="dialog" aria-modal="true" aria-label="Full San Francisco Interactive Street Map" aria-describedby="fullmap-instructions" tabindex="-1" inert>
+    <p id="fullmap-instructions" class="fullmap-sr-only">Search streets or landmarks. Tab to a result and press Enter or Space for a checked arrival. The waypoint line shows direction, not a route. Press Escape to close the map.</p>
     <div id="fullmap-canvas-wrap" class="fullmap-canvas-wrap">
       <canvas id="fullmap-canvas"></canvas>
     </div>
@@ -367,12 +366,12 @@
           <p id="fullmap-player-info" class="fullmap-subtitle">You are at Market St &amp; Montgomery St</p>
         </div>
       </div>
-      <label class="panel fullmap-search-wrap">
+      <div class="fullmap-search-panel"><label class="panel fullmap-search-wrap">
         <svg class="icon" aria-hidden="true"><use href="#i-search"/></svg>
-        <input id="fullmap-search" class="fullmap-search" type="text" placeholder="Search streets &amp; landmarks — Market St, Lombard St, Coit Tower…" aria-label="Search street or landmark" autocomplete="off" spellcheck="false" />
-      </label>
-      <button id="close-fullmap-btn" class="panel tool-btn fullmap-close" type="button" title="Close map [M / Esc]">
-        <svg class="icon" aria-hidden="true"><use href="#i-close"/></svg><span class="tool-label">Close</span><kbd>Esc</kbd>
+        <input id="fullmap-search" class="fullmap-search" type="text" placeholder="Search streets &amp; landmarks — Market St, Lombard St, Coit Tower…" aria-label="Search street or landmark" aria-controls="fullmap-search-list" aria-describedby="fullmap-search-status" autocomplete="off" spellcheck="false" />
+      </label><p id="fullmap-search-status" class="fullmap-sr-only" role="status" aria-live="polite" aria-atomic="true"></p><div id="fullmap-search-results" class="panel fullmap-search-results" hidden><p id="fullmap-search-summary" aria-hidden="true"></p><ul id="fullmap-search-list" aria-label="Landmark arrival results"></ul></div></div>
+      <button id="close-fullmap-btn" class="panel tool-btn fullmap-close" type="button" title="Close map [M / Esc]" aria-label="Close map">
+        <svg class="icon" aria-hidden="true"><use href="#i-close"/></svg><span class="tool-label">Close</span><kbd data-keyboard="Esc" data-gamepad="B / Start">Esc</kbd>
       </button>
     </div>
 
@@ -396,12 +395,15 @@
       </div>
     </div>
 
-    <div class="fullmap-footer">
+    <div id="fullmap-footer" class="fullmap-footer">
       <div class="panel fullmap-status">
-        <span id="fullmap-hover-info">Click to teleport · Outside downtown, arrivals switch to flight · Drag to pan · Scroll to zoom</span>
+        <span id="fullmap-hover-info">Click for a checked arrival · Drag to pan · Scroll to zoom · Waypoint shows direction, not a route</span>
+        <span id="fullmap-action-status" class="fullmap-action-status" role="status" aria-live="polite" aria-atomic="true"></span>
+        <p class="fullmap-pad-help gamepad-prompt">LS Cursor · RS Pan · LT / RT Zoom · A Select / teleport<br>X Center · Y Whole SF · D-pad Controls · B / Start Close · View Menu</p>
       </div>
     </div>
 
+    <p id="fullmap-credits" class="panel fullmap-credits">Map data: City and County of San Francisco / DataSF · USGS · © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap contributors</a> (ODbL). City: <a href="https://github.com/unable12/slop-sanfrancisco" target="_blank" rel="noopener noreferrer">Slop San Francisco</a> by Kamil / Mr.doob (MIT). EUC riding: <a href="https://github.com/VibezZzCoder/EUC-thrills" target="_blank" rel="noopener noreferrer"><i>EUC Thrills</i></a> by VibezZzCoder (MIT). Assets from <i>EUC Thrills</i> by VibezZzCoder — CC BY 4.0 — <a href="https://github.com/VibezZzCoder/EUC-thrills" target="_blank" rel="noopener noreferrer">source</a>, excluding real identities, supplied logos, contributed recordings, SMLS and generated vocals as detailed in the <a href="NOTICE-EUC-THRILLS.md" target="_blank" rel="noopener noreferrer">rights notice</a>. Independent forks: create original characters; keeping the name grants no participant rights. <a href="FORK_GUIDE.md" target="_blank" rel="noopener noreferrer">Fork guide</a>.</p>
     <div class="panel fullmap-legend">
       <span class="legend-item"><span class="legend-swatch player-swatch"></span>You</span>
       <span class="legend-item"><span class="legend-swatch landmark-swatch"></span>Landmark</span>
@@ -411,37 +413,5 @@
     </div>
   </dialog>
 
-  <script type="module">
-    import * as THREE from 'three/webgpu';
-    import * as TSL from 'three/tsl';
-    import { bloom } from 'three/addons/tsl/display/BloomNode.js';
-    import { ssr } from 'three/addons/tsl/display/SSRNode.js';
-    import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
-    import { SkyMesh } from 'three/addons/objects/SkyMesh.js';
-    import { SunLight } from 'three/addons/lights/SunLight.js';
-    import { SunLightNode } from 'three/addons/lights/SunLightNode.js';
-    import { ClusteredLighting } from 'three/addons/lighting/ClusteredLighting.js';
-
-    window.NYC = {
-      THREE,
-      TSL,
-      PostFX: { bloom, ssr },
-      Addons: {
-        mergeGeometries,
-        mergeVertices,
-        SkyMesh,
-        SunLight,
-        SunLightNode,
-        ClusteredLighting
-      }
-    };
-
-    for (const src of nycAppScripts) {
-      const s = document.createElement('script');
-      s.src = src;
-      s.async = false;
-      document.head.appendChild(s);
-    }
-  </script>
 </body>
 </html>

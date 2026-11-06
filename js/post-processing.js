@@ -1,7 +1,7 @@
 (function () {
 // Scene-linear color grading and lens bloom, composed in the existing final render pass.
 const { THREE } = window.NYC;
-const { Fn, uniform, float, vec2, vec3, vec4, dot, mix, min, max, pow, smoothstep, length, screenUV, screenSize, If, normalize } = window.NYC.TSL;
+const { Fn, uniform, float, vec2, vec3, vec4, dot, mix, min, max, pow, smoothstep, length, screenUV, screenSize, If, normalize, getViewPosition, isBackgroundDepth } = window.NYC.TSL;
 const { bloom } = window.NYC.PostFX;
 
 // Exposure and white balance belong to the camera, independently of the physical lighting presets.
@@ -13,7 +13,9 @@ const LOOKS = {
   midnight: { exposure: 1.04, contrast: 1.08, saturation: 1.06, balance: [0.985, 1.00, 1.035], bloom: 0.30, threshold: 1.00 }
 };
 
-function createPostProcessing(renderer, sceneColor, reflections, depth, camera, lighting) {
+// Optional effect ownership adapted from euc-newyork@4a88f17 (MIT, VibezZzCoder).
+// SF's depth reconstruction/aerial fog and grading remain identical in every tier.
+function createPostProcessing(renderer, sceneColor, reflections, depth, camera, lighting, { glow = true } = {}) {
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   // Exposure is applied before bloom so its threshold follows the image's exposed brightness.
   // RenderPipeline performs ACES and the output color-space conversion exactly once, after this graph.
@@ -26,18 +28,18 @@ function createPostProcessing(renderer, sceneColor, reflections, depth, camera, 
   const fogEnabled = uniform(1);
   const inverseProjection = uniform(camera.projectionMatrixInverse);
   const cameraWorld = uniform(camera.matrixWorld);
-  // WebGPU clip depth is [0,1], reversed Z clears to zero, and texture V runs downwards.
-  // The camera inverse already includes reversed Z. Resolved depth makes fog
-  // independent of material count/overdraw. The sky keeps its physical shader above the marine horizon.
+  // e27dfa9 normalizes screenUV to top-left on both backends. Its native helper selects
+  // [0,1] clip depth for WebGPU/reversed WebGL2, or remaps default WebGL2 depth to [-1,1].
+  // Use the renderer's actual reversed-depth mode: WebGL2 may lack EXT_clip_control.
+  // The camera inverse already includes reversed Z; never invert sampled depth again.
   const fogged = Fn(() => {
     const color = sceneColor.rgb.add(reflections.rgb).toVar();
     If(fogEnabled.greaterThan(0.5), () => {
-      const clip = vec4(screenUV.x.mul(2).sub(1), float(1).sub(screenUV.y.mul(2)), depth.r, 1);
-      const view = inverseProjection.mul(clip).toVar();
-      const world = cameraWorld.mul(vec4(view.xyz.div(view.w), 1)).xyz;
+      const view = getViewPosition(screenUV, depth.r, inverseProjection);
+      const world = cameraWorld.mul(vec4(view, 1)).xyz;
       const eye = cameraWorld.mul(vec4(0, 0, 0, 1)).xyz;
       // Surface fog uses the resolved opaque depth; the sky only receives horizon haze.
-      If(depth.r.greaterThan(0), () => {
+      If(isBackgroundDepth(depth.r).not(), () => {
         const atmosphere = lighting.createAerialFogNode(world, eye);
         color.assign(mix(color, atmosphere.color, atmosphere.amount));
       }).Else(() => {
@@ -55,12 +57,14 @@ function createPostProcessing(renderer, sceneColor, reflections, depth, camera, 
   // The original HDR image keeps its full range for the tone mapper's highlight shoulder.
   const peak = max(max(exposed.r, exposed.g), exposed.b);
   const bloomInput = vec4(exposed.mul(float(8.0).div(max(peak, 8.0))), 1.0);
-  const bloomPass = bloom(bloomInput, 0.24, 0.40, 1.20);
-  bloomPass.smoothWidth.value = 0.30;
-  bloomPass.setResolutionScale(0.5);
+  const bloomPass = glow ? bloom(bloomInput, 0.24, 0.40, 1.20) : null;
+  if (bloomPass) {
+    bloomPass.smoothWidth.value = 0.30;
+    bloomPass.setResolutionScale(0.5);
+  }
 
   const outputNode = Fn(() => {
-    const color = exposed.add(bloomPass.rgb).toVar();
+    const color = (bloomPass ? exposed.add(bloomPass.rgb) : exposed).toVar();
     const luma = dot(color, vec3(0.2126, 0.7152, 0.0722)).toVar();
 
     // Gentle cool shadow / warm highlight separation; multiply rather than lifting the black level.
@@ -88,12 +92,19 @@ function createPostProcessing(renderer, sceneColor, reflections, depth, camera, 
     contrast.value = look.contrast;
     saturation.value = look.saturation;
     balance.value.set(...look.balance);
-    bloomPass.strength.value = look.bloom;
-    bloomPass.threshold.value = look.threshold;
+    if (bloomPass) {
+      bloomPass.strength.value = look.bloom;
+      bloomPass.threshold.value = look.threshold;
+    }
   }
 
   applyPreset('golden');
-  return { outputNode, fogEnabled, bloomPass, applyPreset, exposure, contrast, saturation, balance };
+  return {
+    outputNode, fogEnabled, bloomPass, applyPreset, exposure, contrast, saturation, balance,
+    // Half-size, five-level bloom needs a 32px input to keep every level >=1px.
+    park: () => bloomPass?.setSize(32, 32),
+    dispose: () => bloomPass?.dispose()
+  };
 }
 
 Object.assign(window.NYC, { createPostProcessing });

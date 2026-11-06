@@ -29,7 +29,7 @@ function stub() {
   });
 }
 
-function loadTraffic({ seed } = {}) {
+function loadTraffic({ seed, actors, trafficSource, dynamicSource, headless = true } = {}) {
   const randomMath = Object.create(Math);
   if (seed !== undefined) randomMath.random = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
   const NYC = {};
@@ -46,11 +46,25 @@ function loadTraffic({ seed } = {}) {
   const names = ['THREE', 'cityUniforms', 'createContactShadowMaterial', 'createCarFlareMaterial', 'HEADLIGHTS', 'createVehicleHeadlight',
     'placeVehicleHeadlight', 'CAR_PARTS', 'BODY_SPECS', 'BUS_SPEC', 'buildCarGeometry', 'buildCarProxyGeometry', 'buildSteerableWheelGeo',
     'createLoftedCarMaterial', 'buildLightbarGeometry', 'createLightbarMaterial', 'buildLoftedBusBodyGeometry', 'buildBusSignGeometry',
-    'buildBusWheelGeo', 'createBusWheelMaterial', 'createLoftedBusMaterial', 'PersonCrowd', 'PersonRig', 'Addons'];
+    'buildBusWheelGeo', 'createBusWheelMaterial', 'createCarWheelMaterial', 'createLoftedBusMaterial', 'PersonCrowd', 'PersonRig', 'Addons'];
   for (const k of names) NYC[k] = stub();
-  vm.runInContext(readFileSync(join(root, 'js/traffic.js'), 'utf8'), context);
+  vm.runInContext(dynamicSource || readFileSync(join(root, 'js/sf-dynamic-bodies.js'), 'utf8'), context);
+  if (actors) {
+    // Focused body tests use actual local geometry, without a renderer or GPU. Ordinary long-running traffic tests
+    // retain the cheap rendering stub; their assertions concern lanes/signals, not collision dimensions.
+    NYC.THREE = actors.THREE; NYC.Addons = actors.Addons; NYC.TSL = stub();
+    vm.runInContext(readFileSync(join(root, 'js/actor-models.js'), 'utf8'), context);
+    for (const key of ['createContactShadowMaterial', 'createCarFlareMaterial', 'createLoftedCarMaterial',
+      'createLightbarMaterial', 'createBusWheelMaterial', 'createLoftedBusMaterial']) NYC[key] = () => new actors.THREE.MeshBasicMaterial();
+    NYC.createVehicleHeadlight = () => new actors.THREE.SpotLight();
+    NYC.PersonCrowd = class { meshes = [new actors.THREE.Group()]; begin() {} end() {} add() {} };
+    NYC.PersonRig = class { reset() {} update() {} };
+  } else {
+    NYC.sfVehicleShape = () => [{ z: 0, halfWidthMetres: 1.3, halfLengthMetres: 6, minY: 0, maxY: 3 }];
+  }
+  vm.runInContext(trafficSource || readFileSync(join(root, 'js/traffic.js'), 'utf8'), context);
   const sidewalks = NYC.BLOCKS.map((b) => ({ minX: b.minX, maxX: b.maxX, minZ: b.minZ, maxZ: b.maxZ, block: b }));
-  const system = NYC.createTrafficSystem(stub(), sidewalks, [], { headless: true });
+  const system = NYC.createTrafficSystem(actors ? new actors.THREE.Scene() : stub(), sidewalks, [], { headless });
   return { NYC, system, context };
 }
 

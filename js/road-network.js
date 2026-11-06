@@ -1005,6 +1005,28 @@ function spans(pts, tunnel, measureOnly = false) {
   while (k0 > 0 && g[k0] - line(k0) > 1) k0--;
   let k1 = last;
   while (k1 < n && g[k1] - line(k1) > 1) k1++;
+  // A single-valued DEM blends a portal's vertical headwall into the roadway. PORTAL_COVER's first low sample
+  // can therefore be metres above the actual approach (Stockton), pitching traffic and leaving a riding lip.
+  // Re-anchor only an abrupt headwall, on a stable measured grade 8–16 m outside it. Ordinary hills, bridges,
+  // link geometry and navigation are unchanged; both traffic profiles and the drawn bore consume these endpoints.
+  const step = L / n;
+  const cleanApproach = (k, inward) => {
+    const inside = k + inward * 2, outside = k - inward * Math.ceil(8 / step);
+    if (inside < 0 || inside > n || outside < 2 || outside > n - 2) return k;
+    const innerGrade = (g[inside] - g[k]) / (2 * step);
+    const outerGrade = (g[outside + inward * 2] - g[outside]) / (2 * step);
+    if (innerGrade < .25 || innerGrade - outerGrade < .2) return k;
+    for (let distance = Math.ceil(8 / step); distance * step <= 16; distance++) {
+      const candidate = k - inward * distance;
+      if (candidate < 2 || candidate > n - 2) break;
+      const before = (g[candidate] - g[candidate - inward * 2]) / (2 * step);
+      const after = (g[candidate + inward * 2] - g[candidate]) / (2 * step);
+      if (Math.abs(after - before) <= .05) return candidate;
+    }
+    return k;
+  };
+  k0 = cleanApproach(k0, 1);
+  k1 = cleanApproach(k1, -1);
   return { kind: 'tunnel', p0: u[k0], p1: u[k1], y0: g[k0], y1: g[k1], pts, cum };
 }
 // The point u metres along a bore's link centreline

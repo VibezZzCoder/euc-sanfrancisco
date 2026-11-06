@@ -7,7 +7,7 @@
 //   unsignalized corners and to pedestrians on crosswalks, and never enter an intersection they can't clear.
 // - NUM_PEDS pedestrians stroll the sidewalks and cross at the crosswalks of signals (on the WALK) and stop signs.
 // - Vehicles and pedestrians are only ever moved while out of the camera's view, so nothing pops in or out.
-// - The player's vehicle or character pushes and is pushed by the traffic (SAT contact, impulses, sparks).
+// - EUC contact is owned by the native controller, via the indexed logical body snapshots below.
 
 const { THREE, buildRoadNetwork, signalPhase, walkSignal, CROSSWALK } = window.NYC;
 const {
@@ -25,6 +25,7 @@ const {
   buildCarGeometry,
   buildCarProxyGeometry,
   buildSteerableWheelGeo,
+  createCarWheelMaterial,
   createLoftedCarMaterial,
   buildLightbarGeometry,
   createLightbarMaterial,
@@ -36,6 +37,7 @@ const {
 } = window.NYC;
 const { PersonCrowd, PersonRig } = window.NYC;
 const { mergeGeometries } = window.NYC.Addons;
+const { createSfDynamicBodyIndex, sfVehicleShape, writeSfVehicleBody, readSfPlayerBody } = window.NYC;
 
 // San Francisco slice (P2.8): vehicles respawn around the camera, so these are a density, not a city total (New York's
 // Midtown ran 200 cars & 32 buses)
@@ -72,11 +74,11 @@ function createBusDestinationTexture() {
   ctx.font = '900 26px Inter, Arial, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText('M1', 37, 33);
+  ctx.fillText('CITY', 37, 33);
   ctx.fillStyle = '#ff9d1c';
   ctx.font = '800 22px JetBrains Mono, monospace';
   ctx.textAlign = 'left';
-  ctx.fillText('5 AV / HARLEM', 78, 33);
+  ctx.fillText('DOWNTOWN', 78, 33);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
@@ -163,6 +165,12 @@ function createTrafficSystem(scene, sidewalks, obstacles, opts = {}) {
   const sedanGeo = buildCarGeometry(BODY_SPECS.sedan, false);
   const suvGeo = buildCarGeometry(BODY_SPECS.suv, false);
   const vanGeo = buildCarGeometry(BODY_SPECS.van, false);
+  const vehicleProfiles = {
+    taxi: sfVehicleShape(taxiGeo, BODY_SPECS.taxi), sedan: sfVehicleShape(sedanGeo, BODY_SPECS.sedan),
+    suv: sfVehicleShape(suvGeo, BODY_SPECS.suv), van: sfVehicleShape(vanGeo, BODY_SPECS.van)
+  };
+  const patrolBarGeo = buildLightbarGeometry(BODY_SPECS.sedan);
+  const patrolProfile = vehicleProfiles.sedan.concat(sfVehicleShape(patrolBarGeo));
   const carWheelLeftGeo = buildSteerableWheelGeo(BODY_SPECS.sedan, -1);
   const carWheelRightGeo = buildSteerableWheelGeo(BODY_SPECS.sedan, 1);
 
@@ -170,7 +178,7 @@ function createTrafficSystem(scene, sidewalks, obstacles, opts = {}) {
   const sedanMat = createLoftedCarMaterial(BODY_SPECS.sedan);
   const suvMat = createLoftedCarMaterial(BODY_SPECS.suv);
   const vanMat = createLoftedCarMaterial(BODY_SPECS.van);
-  const carWheelMat = createLoftedCarMaterial(BODY_SPECS.sedan, 0xffbe14);
+  const carWheelMat = createCarWheelMaterial();
 
   const taxiYellow = new THREE.Color(0xf1f3f5); // the 'taxi' class is San Francisco's white robotaxi (actor-models.js)
   const nypdWhite = new THREE.Color(0x15171a); // the police cruiser's black body (its white doors: the car material)
@@ -288,7 +296,7 @@ function createTrafficSystem(scene, sidewalks, obstacles, opts = {}) {
   }
 
   // NYPD roof light bars (the blue & white livery is painted by the sedan material from the instance's carState)
-  const nypdBarInst = new THREE.InstancedMesh(buildLightbarGeometry(BODY_SPECS.sedan), createLightbarMaterial(), Math.max(1, nypdCount));
+  const nypdBarInst = new THREE.InstancedMesh(patrolBarGeo, createLightbarMaterial(), Math.max(1, nypdCount));
   const carShadowInst = new THREE.InstancedMesh(unitPlane, contactShadowMat, NUM_CARS);
   carShadowInst.renderOrder = 998;
 
@@ -306,9 +314,10 @@ function createTrafficSystem(scene, sidewalks, obstacles, opts = {}) {
   );
 
   // =========================================================================
-  // 2. LOFTED MUNI SILVER & RED CITY BUSES
+  // 2. LOFTED GENERIC CITY BUSES
   // =========================================================================
   const busBodyGeo = buildLoftedBusBodyGeometry();
+  const busProfile = sfVehicleShape(busBodyGeo, BUS_SPEC);
   // Per-instance lamp state the bus material reads: brake lights, left (+x) & right (-x) turn signals (renderBus)
   const busStates = new THREE.InstancedBufferAttribute(new Float32Array(NUM_BUSES * 4), 4);
   busBodyGeo.setAttribute('busState', busStates);
@@ -335,6 +344,8 @@ function createTrafficSystem(scene, sidewalks, obstacles, opts = {}) {
   const buses = [];
   for (let i = 0; i < NUM_BUSES; i++) buses.push(createVehicle(true, 6.0, 1.3, 3.6, BUS_DRIVER, 8 + (i % 3)));
   const vehicles = [...cars, ...buses];
+  for (const v of vehicles) v.dynamicBody = {};
+  const bodyIndex = createSfDynamicBodyIndex();
   group.add(busBodyInst, busHeaderInst, busWheelLeftInst, busWheelRightInst);
 
   // =========================================================================
@@ -351,7 +362,10 @@ function createTrafficSystem(scene, sidewalks, obstacles, opts = {}) {
   for (let i = 0; i < NUM_PEDS; i++) {
     const female = hash(i, 1) < 0.48;
     const hairRoll = hash(i, 2);
+    const scale = (female ? 0.91 : 0.97) + hash(i, 4) * 0.1;
+    const girth = 0.9 + hash(i, 5) * 0.24;
     peds.push({
+      dynamicBody: {}, bodyScale: scale, bodyGirth: girth,
       placed: false,
       crossesStreets: i % 6 === 0, // walks back and forth over a signalized crosswalk
       x: 0,
@@ -374,13 +388,17 @@ function createTrafficSystem(scene, sidewalks, obstacles, opts = {}) {
       rig: new PersonRig({
         seed: i * 1.6180339 + 0.13,
         female,
-        scale: (female ? 0.91 : 0.97) + hash(i, 4) * 0.1,
-        girth: 0.9 + hash(i, 5) * 0.24,
+        scale,
+        girth,
         hair: female ? (hairRoll < 0.68 ? 1 : 0.3 + hairRoll * 0.25) : hairRoll < 0.08 ? 1 : hairRoll * 0.35,
         armSwing: 0.75 + hash(i, 6) * 0.5,
         stride: 0.94 + hash(i, 7) * 0.12
       })
     });
+    const p = peds[peds.length - 1];
+    window.NYC.resetSfPedestrianReaction(p);
+    p.interruptConversation = interruptPedConversation;
+    Object.assign(p.dynamicBody, { kind: 'person', source: p, onEucImpact: window.NYC.reactSfPedestrian });
   }
   group.add(...pedCrowd.meshes);
 
@@ -434,7 +452,7 @@ function createTrafficSystem(scene, sidewalks, obstacles, opts = {}) {
   const phaseOf = (e) => signalPhase(clock + (e.to.signalOffset || 0), e.axisIndex === 0);
   let focusX = 0;
   let focusZ = 140;
-  const player = { active: false, entity: null, x: 0, z: 0, vx: 0, vz: 0, halfW: 0.86, halfL: 2.18, push: 0.5 };
+  const player = { active: false, x: 0, z: 0, vx: 0, vz: 0, halfW: 0.35, halfL: 0.5 };
 
   // Lane lists hold pooled { v, s } entries sorted by position s along the lane, rebuilt every frame
   const pool = [];
@@ -585,6 +603,9 @@ function createTrafficSystem(scene, sidewalks, obstacles, opts = {}) {
   function relateToPlayer(v) {
     v.pAhead = Infinity;
     if (!player.active) return;
+    // Explicit player elevation matters under bridges and in tunnels; never compare with terrain above a bore.
+    const body = v.dynamicBody;
+    if (body.maxY <= player.minY || body.minY >= player.maxY) return;
     const dx = player.x - v.x;
     const dz = player.z - v.z;
     if (Math.abs(dx) > LOOKAHEAD + 10 || Math.abs(dz) > LOOKAHEAD + 10) return;
@@ -598,8 +619,9 @@ function createTrafficSystem(scene, sidewalks, obstacles, opts = {}) {
   // Gap to the player if it is ahead in the lane whose centre is `off` metres to the right of v
   function playerGap(v, off) {
     if (v.pAhead < 0 || v.pAhead > LOOKAHEAD) return Infinity;
-    if (Math.abs(v.pRight - off) > v.halfWidth + player.halfW + 0.4) return Infinity;
-    return v.pAhead - v.half - player.halfL;
+    const angle = player.headingY - v.yaw, c = Math.abs(Math.cos(angle)), s = Math.abs(Math.sin(angle));
+    if (Math.abs(v.pRight - off) > v.halfWidth + player.halfW * c + player.halfL * s + 0.4) return Infinity;
+    return v.pAhead - v.half - player.halfL * c - player.halfW * s;
   }
 
   // =========================================================================
@@ -709,10 +731,6 @@ function createTrafficSystem(scene, sidewalks, obstacles, opts = {}) {
     return m && m.out[j] >= 0 ? m : null;
   }
 
-  // A held approach has surrendered right-of-way to the draining set. It still
-  // occupies physical space, but must not win a wait-time or merge-priority vote.
-  const heldByRide = v => v.edge?.to.rideReservation && !v.edge.to.rideReservation.draining.has(v) && !v.conn && !v.commit;
-
   // Could the vehicle of lane entry o, approaching the end of edge a, still stop easily before its line? Vehicles
   // already standing can; drivers who have been waiting a while accept any gap it can still stop for comfortably.
   function canStop(o, a, impatient) {
@@ -731,7 +749,7 @@ function createTrafficSystem(scene, sidewalks, obstacles, opts = {}) {
     if (o.to.signal && phaseOf(o) === 'red') return false;
     for (const list of o.occ) {
       const lead = leadOf(list);
-      if (!lead || heldByRide(lead.v) || (lead.v.edge === o && lead.v.move.turn === 'L')) continue;
+      if (!lead || (lead.v.edge === o && lead.v.move.turn === 'L')) continue;
       if (!canStop(lead, o, impatient)) return true;
       const u = lead.v;
       const j = u.edge === o ? u.move.out[u.lane] : -1;
@@ -762,7 +780,7 @@ function createTrafficSystem(scene, sidewalks, obstacles, opts = {}) {
       if (e.stop ? a.stop || a.axisIndex === e.axisIndex : a.axisIndex !== 0) continue;
       for (const list of a.occ) {
         const lead = leadOf(list);
-        if (lead && !heldByRide(lead.v) && !canStop(lead, a, v.wait > 8)) return true;
+        if (lead && !canStop(lead, a, v.wait > 8)) return true;
       }
     }
     return false;
@@ -806,7 +824,7 @@ function createTrafficSystem(scene, sidewalks, obstacles, opts = {}) {
     let w = 0;
     for (const list of a.occ) {
       const o = leadOf(list);
-      if (o && !heldByRide(o.v) && !o.v.claimed && o.v.move && o.v.move.to === f && o.v.move.out[o.v.lane] === j) w = Math.max(w, o.v.wait);
+      if (o && !o.v.claimed && o.v.move && o.v.move.to === f && o.v.move.out[o.v.lane] === j) w = Math.max(w, o.v.wait);
     }
     return w;
   }
@@ -818,7 +836,7 @@ function createTrafficSystem(scene, sidewalks, obstacles, opts = {}) {
       const first = a !== v.edge && roadWait(a, f, j) > ownWait;
       for (const list of a.occ) {
         const o = leadOf(list);
-        if (!o || heldByRide(o.v) || o.v.claimed || !o.v.move || o.v.move.to !== f || o.v.move.out[o.v.lane] !== j) continue;
+        if (!o || o.v.claimed || !o.v.move || o.v.move.to !== f || o.v.move.out[o.v.lane] !== j) continue;
         if (a === v.edge ? precedence(o.v, o.s) > precedence(v, v.s) : first) free -= 2 * o.v.half + o.v.driver.s0;
       }
     }
@@ -867,7 +885,7 @@ function createTrafficSystem(scene, sidewalks, obstacles, opts = {}) {
     merger.v = null;
     for (let i = 0; i < e.lanes.length; i++) {
       const o = i === v.lane ? null : leadOf(e.occ[i]);
-      if (!o || heldByRide(o.v) || o.v === v || o.v.claimed || o.v.move.to !== f || precedence(o.v, o.s) <= precedence(v, v.s)) continue;
+      if (!o || o.v === v || o.v.claimed || o.v.move.to !== f || precedence(o.v, o.s) <= precedence(v, v.s)) continue;
       if (o.v.bus && besideTail(o.v)) continue; // it waits for the bus beside its tail
       const oj = o.v.move.out[o.v.lane];
       if (oj < 0 || (oj !== j && !(Math.abs(oj - j) === 1 && v.move.turn !== 'S' && (v.bus || o.v.bus)))) continue;
@@ -892,7 +910,7 @@ function createTrafficSystem(scene, sidewalks, obstacles, opts = {}) {
       if (a === v.edge || !a.stop) continue;
       for (const list of a.occ) {
         const lead = leadOf(list);
-        if (lead && !heldByRide(lead.v) && lead.v.stopDone && !lead.v.claimed && lead.v.stopAt < v.stopAt) return false;
+        if (lead && lead.v.stopDone && !lead.v.claimed && lead.v.stopAt < v.stopAt) return false;
       }
     }
     return true;
@@ -908,7 +926,6 @@ function createTrafficSystem(scene, sidewalks, obstacles, opts = {}) {
     const stoppable = canStopBefore(v, d) || (phase !== 'green' && v.speed * v.speed < 2 * v.driver.b * d);
     if (stoppable) v.commit = null; // could stop after all: decide afresh
     if (v.commit === n) return true;
-    if (n.rideReservation && !n.rideReservation.draining.has(v)) return false;
     if (v.move.out[v.lane] < 0) {
       // missed the lane for the planned move: go wherever this lane goes instead
       if (d > 12) return false;
@@ -1008,8 +1025,9 @@ function createTrafficSystem(scene, sidewalks, obstacles, opts = {}) {
       if (gap < 1.5 || freeAcc(f) + brake(f, gap, v.speed) < bSafe) return false;
     }
     const off = v.edge.lanes[t] - v.edge.lanes[v.lane] - v.dl;
-    const reach = v.half + player.halfL + 6;
-    return !(Math.abs(v.pRight - off) < v.halfWidth + player.halfW + 0.4 && v.pAhead > -reach && v.pAhead < reach);
+    const angle = player.headingY - v.yaw, c = Math.abs(Math.cos(angle)), s = Math.abs(Math.sin(angle));
+    const reach = v.half + player.halfL * c + player.halfW * s + 6;
+    return !(Math.abs(v.pRight - off) < v.halfWidth + player.halfW * c + player.halfL * s + 0.4 && v.pAhead > -reach && v.pAhead < reach);
   }
 
   // Acceleration v would have in lane t behind the vehicle (or player) ahead there
@@ -1310,142 +1328,6 @@ function createTrafficSystem(scene, sidewalks, obstacles, opts = {}) {
     }
   }
 
-  // Physical 4-axis 2D SAT OBB test between a vehicle (half extents halfW x halfL, heading rotY) and the player.
-  // Returns the minimum translation axis (pointing from the vehicle towards the player), or null if they don't overlap.
-  const satHit = { nx: 0, nz: 0, pen: 0, localX: 0, localZ: 0, pSin: 0, pCos: 1 };
-  function overlapWithPlayer(relX, relZ, rotY, halfW, halfL, pH, pHalfW, pHalfL) {
-    const sinY = Math.sin(rotY);
-    const cosY = Math.cos(rotY);
-    const localX = relX * cosY - relZ * sinY;
-    const localZ = relX * sinY + relZ * cosY;
-    const pSin = Math.sin(pH);
-    const pCos = Math.cos(pH);
-    const pLocalX = relX * pCos - relZ * pSin;
-    const pLocalZ = relX * pSin + relZ * pCos;
-    const alignCos = Math.abs(Math.cos(pH - rotY));
-    const alignSin = Math.abs(Math.sin(pH - rotY));
-
-    const extX = halfW + pHalfW * alignCos + pHalfL * alignSin;
-    const extZ = halfL + pHalfW * alignSin + pHalfL * alignCos;
-    const pExtX = pHalfW + halfW * alignCos + halfL * alignSin;
-    const pExtZ = pHalfL + halfW * alignSin + halfL * alignCos;
-
-    const penX = extX - Math.abs(localX);
-    const penZ = extZ - Math.abs(localZ);
-    const pPenX = pExtX - Math.abs(pLocalX);
-    const pPenZ = pExtZ - Math.abs(pLocalZ);
-    if (!(penX > 0 && penZ > 0 && pPenX > 0 && pPenZ > 0)) return null;
-
-    let nx, nz, pen;
-    if (penX < penZ) {
-      const signX = localX >= 0 ? 1 : -1;
-      nx = cosY * signX;
-      nz = -sinY * signX;
-      pen = penX;
-    } else {
-      const signZ = localZ >= 0 ? 1 : -1;
-      nx = sinY * signZ;
-      nz = cosY * signZ;
-      pen = penZ;
-    }
-    if (pPenX < pen) {
-      const signPX = pLocalX >= 0 ? 1 : -1;
-      nx = pCos * signPX;
-      nz = -pSin * signPX;
-      pen = pPenX;
-    }
-    if (pPenZ < pen) {
-      const signPZ = pLocalZ >= 0 ? 1 : -1;
-      nx = pSin * signPZ;
-      nz = pCos * signPZ;
-      pen = pPenZ;
-    }
-
-    satHit.nx = nx;
-    satHit.nz = nz;
-    satHit.pen = pen;
-    satHit.localX = localX;
-    satHit.localZ = localZ;
-    satHit.pSin = pSin;
-    satHit.pCos = pCos;
-    return satHit;
-  }
-
-  // Player contact: push the player and the vehicle apart (a bus hardly moves) and trade momentum, with spin,
-  // suspension kicks and sparks
-  function collideWithPlayer(v, rotY, halfW, halfL) {
-    const pe = player.entity;
-    const relX = pe.position.x - v.x;
-    const relZ = pe.position.z - v.z;
-    if (Math.abs(relX) > halfL + 3 || Math.abs(relZ) > halfL + 3) return;
-    if (Math.abs(pe.position.y - v.y) > 3) return; // one in a tunnel, the other on the street above
-    const hit = overlapWithPlayer(relX, relZ, rotY, halfW, halfL, pe.heading || 0, player.halfW, player.halfL);
-    if (!hit) return;
-    const { nx, nz, pen, localX, localZ, pSin, pCos } = hit;
-    if(pe.rideMetrics && pen>.01)pe.rideMetrics.trafficOverlaps=(pe.rideMetrics.trafficOverlaps||0)+1;
-    const massRatio = v.bus ? 0.15 : v.isSUV ? 0.58 : 1.0 - player.push;
-    const pPush = 1.0 - massRatio;
-    pe.position.x += nx * pen * pPush;
-    pe.position.z += nz * pen * pPush;
-    if (pe.mesh) pe.mesh.position.copy(pe.position);
-    shove(v, -nx * pen * massRatio, -nz * pen * massRatio);
-
-    const sinY = Math.sin(rotY);
-    const cosY = Math.cos(rotY);
-    const pSpeed = pe.speed || 0;
-    const pvx = pSin * pSpeed + (pe.vx || 0);
-    const pvz = pCos * pSpeed + (pe.vz || 0);
-    const cvx = v.tx * v.speed + v.vx;
-    const cvz = v.tz * v.speed + v.vz;
-    const approachSpeed = (pvx - cvx) * (-nx) + (pvz - cvz) * (-nz);
-    if (approachSpeed <= 0) return;
-    if(pe.rideMetrics && approachSpeed>.5){pe.rideMetrics.trafficContacts++;if(pe.rideMetrics.contacts?.length<10)pe.rideMetrics.contacts.push({road:v.edge?.name,approachSpeed,playerSpeed:pe.speed,trafficSpeed:v.speed,playerHeading:pe.heading,trafficHeading:rotY,relX,relZ});}
-
-    const jImpulse = (1.0 + 0.28) * approachSpeed;
-    const cImpulse = v.bus ? approachSpeed * 0.22 : jImpulse * massRatio * 0.92;
-    v.vx -= nx * cImpulse;
-    v.vz -= nz * cImpulse;
-    v.speed *= v.bus ? 0.55 : 0.35;
-
-    const localNx = nx * cosY - nz * sinY;
-    const localNz = nx * sinY + nz * cosY;
-    if (!v.bus) {
-      const torque = localZ * localNx - localX * localNz;
-      v.yawVel -= torque * Math.min(4.2, approachSpeed * 0.26);
-      v.yawOffset = clamp(v.yawOffset - torque * Math.min(0.35, approachSpeed * 0.025), -0.65, 0.65);
-      v.pitchVel -= localNz * Math.min(12.0, approachSpeed) * 0.18;
-      v.rollVel += localNx * Math.min(12.0, approachSpeed) * 0.24;
-    }
-
-    const contactLocalX = clamp(localX, -halfW, halfW);
-    const contactLocalZ = clamp(localZ, -halfL, halfL);
-    const contactX = v.x + contactLocalX * cosY + contactLocalZ * sinY;
-    const contactZ = v.z - contactLocalX * sinY + contactLocalZ * cosY;
-
-    if (typeof pe.speed === 'number') {
-      const headOnDot = Math.abs(pSin * nx + pCos * nz);
-      pe.speed *= 1.0 - (v.bus ? 0.68 : 0.50) * headOnDot;
-      if (pe.type === 'car') {
-        const pImpulse = v.bus ? approachSpeed * 0.65 : jImpulse * pPush * 0.48;
-        pe.vx = (pe.vx || 0) + nx * pImpulse;
-        pe.vz = (pe.vz || 0) + nz * pImpulse;
-        const pLocalNx = nx * pCos - nz * pSin;
-        const pLocalNz = nx * pSin + nz * pCos;
-        if (!v.bus) {
-          const pRelX = (contactX - pe.position.x) * pCos - (contactZ - pe.position.z) * pSin;
-          const pRelZ = (contactX - pe.position.x) * pSin + (contactZ - pe.position.z) * pCos;
-          const pTorque = pRelZ * pLocalNx - pRelX * pLocalNz;
-          pe.angularVel = (pe.angularVel || 0) + pTorque * Math.min(3.0, approachSpeed * 0.18) * pPush;
-        }
-        const kick = Math.min(v.bus ? 16.0 : 14.0, approachSpeed);
-        pe.pitchVel = (pe.pitchVel || 0) + pLocalNz * kick * (v.bus ? 0.22 : 0.18);
-        pe.rollVel = (pe.rollVel || 0) - pLocalNx * kick * (v.bus ? 0.28 : 0.24);
-        pe.heaveVel = (pe.heaveVel || 0) + Math.min(v.bus ? 1.6 : 1.4, approachSpeed * (v.bus ? 0.14 : 0.11));
-      }
-    }
-    if (approachSpeed > 1.8) spawnCollisionSparks(contactX, v.y + (v.bus ? 0.65 : 0.58), contactZ, nx, nz, approachSpeed);
-  }
-
   // =========================================================================
   // 6. PLACING VEHICLES
   // =========================================================================
@@ -1475,6 +1357,8 @@ function createTrafficSystem(scene, sidewalks, obstacles, opts = {}) {
     v.prevX = v.x;
     v.prevZ = v.z;
     v.yaw = Math.atan2(v.tx, v.tz);
+    v.velocityX = v.tx * v.speed;
+    v.velocityZ = v.tz * v.speed;
     v.yawRate = v.steer = 0;
     v.move = chooseMove(v, false);
     occupy(e.occ[lane], v, s);
@@ -1484,7 +1368,7 @@ function createTrafficSystem(scene, sidewalks, obstacles, opts = {}) {
   function spawnVehicle(v, rMin, rMax, hidden) {
     for (let attempt = 0; attempt < 12; attempt++) {
       const e = nearEdges[Math.floor(Math.random() * nearEdges.length)];
-      if (!e || e.from.rideReservation || e.to.rideReservation || (v.bus && e.axis !== 'ave') || e.len < 2 * v.half + 10) continue;
+      if (!e || (v.bus && e.axis !== 'ave') || e.len < 2 * v.half + 10) continue;
       const lane = Math.floor(Math.random() * e.lanes.length);
       const s = v.half + 5 + Math.random() * (e.len - 2 * v.half - 10);
       const x = e.sx + e.dx * s + e.rx * e.lanes[lane];
@@ -1510,6 +1394,8 @@ function createTrafficSystem(scene, sidewalks, obstacles, opts = {}) {
   // Along the sidewalk on either side of edge e, between its crosswalks: every 1.5 m on the curb island
   // (city-config.js blockAt) and clear of obstacles
   const { blockAt } = window.NYC;
+  const pedestrianSocial = window.NYC.createSfPedestrianSocial({ ground: pedGround, clear: walkable2D, blockAt });
+  function interruptPedConversation(p) { pedestrianSocial.interrupt(p, clock); }
   function sidewalkTrack(e) {
     if (e.noWalk || e.bore) return false; // stairs (Lombard's crooked block), tunnels and bridges
     const off = (Math.random() < 0.5 ? 1 : -1) * (e.half + 1.4 + Math.random() * 2.6);
@@ -1594,6 +1480,7 @@ function createTrafficSystem(scene, sidewalks, obstacles, opts = {}) {
       const d = Math.hypot(x - focusX, z - focusZ);
       if (d < rMin || d > rMax || (hidden && visible(x, z, 2))) continue;
       if (crosswalk && track.node.curb.some((q) => Math.hypot(q.x - x, q.z - z) < QUEUE_GAP)) continue;
+      pedestrianSocial.reset(p, clock);
       Object.assign(p, track);
       p.t = t;
       p.dir = t < track.len * 0.5 ? 1 : -1;
@@ -1601,6 +1488,7 @@ function createTrafficSystem(scene, sidewalks, obstacles, opts = {}) {
       p.z = z;
       p.v = crosswalk ? 0 : p.speed;
       p.pause = 0;
+      window.NYC.resetSfPedestrianReaction(p);
       p.rig.placed = false; // stands afresh where it now is
       p.placed = true;
       if (crosswalk) atCurb(p);
@@ -1646,7 +1534,7 @@ function createTrafficSystem(scene, sidewalks, obstacles, opts = {}) {
     const gx = p.ux * p.dir * 0.5, gz = p.uz * p.dir * 0.5;
     const climb = groundAt(p.x + gx, p.z + gz) - groundAt(p.x - gx, p.z - gz);
     const pace = p.speed * (1 - Math.min(0.5, Math.max(0, climb * 0.8)));
-    let vMax = p.pause > 0 ? 0 : Math.min(pace, Math.sqrt(2 * PED_BRAKE * ahead));
+    let vMax = p.pause > 0 || p.conversation ? 0 : Math.min(pace, Math.sqrt(2 * PED_BRAKE * ahead));
     if (p.node) {
       // room to walk before standing: up to the curb unless p may cross, and up to the back of whoever is ahead
       const s = curbProgress(p);
@@ -1700,8 +1588,12 @@ function createTrafficSystem(scene, sidewalks, obstacles, opts = {}) {
   let updates = 0;
 
   function flagRange(attr, n) {
+    // NYC d42fe9be1a0ec6bc94bb92b2fa40b068453f3456 (generalizes 99bf67f): retain tails across skipped draws.
+    // Only Three's native upload consumption retires these ranges; needsUpdate keeps its native version semantics.
+    let count = n * attr.itemSize;
+    for (const range of attr.updateRanges) count = Math.max(count, range.start + range.count);
     attr.clearUpdateRanges();
-    attr.addUpdateRange(0, n * attr.itemSize);
+    attr.addUpdateRange(0, count);
     attr.needsUpdate = true;
   }
 
@@ -1951,7 +1843,9 @@ function createTrafficSystem(scene, sidewalks, obstacles, opts = {}) {
   // bone transforms and are drawn, the far ones with the light LOD.
   function renderPed(p, dt) {
     const draw = !hasView || visible(p.x, p.z, 7);
-    p.rig.update(dt, p.x, p.z, Math.atan2(p.ux * p.dir, p.uz * p.dir), pedGround, p, 0, draw);
+    const pair = p.conversation, partner = pair && (pair.a === p ? pair.b : pair.a);
+    const heading = partner ? Math.atan2(partner.x - p.x, partner.z - p.z) : Math.atan2(p.ux * p.dir, p.uz * p.dir);
+    p.rig.update(dt, p.x, p.z, heading, pedGround, p, 0, draw);
     if (!draw) return;
     pedCrowd.add(p.rig, Math.hypot(p.x - focusX, p.z - focusZ));
   }
@@ -1997,7 +1891,8 @@ function createTrafficSystem(scene, sidewalks, obstacles, opts = {}) {
   let lastFocusX = Infinity;
   let lastFocusZ = Infinity;
 
-  function update(dt, elapsed, focusPos = null, playerEntity = null, activeMode = 'car', camera = null) {
+  // The fifth argument remains a compatibility slot for the host's mode; EUC is the only player.
+  function update(dt, elapsed, focusPos = null, playerEntity = null, activeMode = 'euc', camera = null) {
     clock = elapsed;
     focusX = focusPos ? focusPos.x : 0;
     focusZ = focusPos ? focusPos.z : 140;
@@ -2008,20 +1903,7 @@ function createTrafficSystem(scene, sidewalks, obstacles, opts = {}) {
     refreshNear();
     updateView(camera);
 
-    player.active = Boolean(playerEntity && activeMode !== 'helicopter' &&
-      playerEntity.position.y - groundAt(playerEntity.position.x, playerEntity.position.z) < 2.6);
-    if (playerEntity) {
-      const heading = playerEntity.heading || 0;
-      const speed = playerEntity.speed || 0;
-      player.entity = playerEntity;
-      player.x = playerEntity.position.x;
-      player.z = playerEntity.position.z;
-      player.vx = Math.sin(heading) * speed + (playerEntity.vx || 0);
-      player.vz = Math.cos(heading) * speed + (playerEntity.vz || 0);
-    }
-    player.halfW = activeMode === 'cyclist' ? 0.35 : activeMode === 'person' ? 0.32 : 0.86;
-    player.halfL = activeMode === 'cyclist' ? 0.85 : activeMode === 'person' ? 0.32 : 2.18;
-    player.push = activeMode === 'cyclist' ? 0.82 : activeMode === 'person' ? 0.88 : 0.50;
+    readSfPlayerBody(playerEntity, player);
 
     // 1. Cars & buses
     buildOccupancy();
@@ -2045,13 +1927,14 @@ function createTrafficSystem(scene, sidewalks, obstacles, opts = {}) {
 
       v.prevX = v.x;
       v.prevZ = v.z;
+      snapshotVehicle(v);
       relateToPlayer(v);
-      drive(v, dt);
+      if (dt > 0) drive(v, dt);
       locate(v);
-      knock(v, dt);
-      pose(v, dt);
-      if (player.active) collideWithPlayer(v, v.yaw + v.yawOffset, v.bus ? 1.30 : v.isSUV ? 0.92 : 0.86, v.bus ? 5.72 : v.isSUV ? 2.22 : 2.18);
+      if (dt > 0) { knock(v, dt); pose(v, dt); }
       if (v.vx * v.vx + v.vz * v.vz > 0.36) knockOn(v);
+      v.velocityX = dt > 0 ? (v.x - v.prevX) / dt : v.tx * v.speed + v.vx;
+      v.velocityZ = dt > 0 ? (v.z - v.prevZ) / dt : v.tz * v.speed + v.vz;
 
       if (headless) continue;
       if (v.bus) renderBus(v);
@@ -2062,6 +1945,7 @@ function createTrafficSystem(scene, sidewalks, obstacles, opts = {}) {
     // 2. Pedestrians
     for (const n of walkedNodes) n.walkers.length = 0;
     walkedNodes.length = 0;
+    pedestrianSocial.update(peds, dt, clock);
     gatherCurbs();
     let pedBudget = jump ? Infinity : 6;
     if (!headless) pedCrowd.begin();
@@ -2074,18 +1958,22 @@ function createTrafficSystem(scene, sidewalks, obstacles, opts = {}) {
         pedBudget--;
       }
       if (!p.placed) continue;
-      walk(p, dt);
+      const px = p.x, pz = p.z;
+      if (dt > 0) {
+        walk(p, dt);
+        window.NYC.dodgeSfPedestrian(p, dt, player, pedGround, walkable2D);
+        window.NYC.stepSfPedestrianReaction(p, dt, pedGround, walkable2D);
+      }
+      p.velocityX = dt > 0 ? (p.x - px) / dt : p.ux * p.dir * p.v;
+      p.velocityZ = dt > 0 ? (p.z - pz) / dt : p.uz * p.dir * p.v;
       if (!headless) renderPed(p, dt);
     }
+    // Snapshot only after all knock-on/path/walker updates, never from visible instance slots.
+    rebuildBodies();
     if (headless) return;
     pedCrowd.end();
 
-    // 3. Collision sparks, including the player's own impacts against buildings
-    if (playerEntity && playerEntity.lastCollisionSpark) {
-      const bs = playerEntity.lastCollisionSpark;
-      spawnCollisionSparks(bs.x, bs.y, bs.z, bs.nx, bs.nz, bs.speed);
-      playerEntity.lastCollisionSpark = null;
-    }
+    // 3. Ordinary traffic collision sparks; the EUC owns its own effects.
     updateSparks(dt);
   }
 
@@ -2137,48 +2025,37 @@ function createTrafficSystem(scene, sidewalks, obstacles, opts = {}) {
     updateTrafficLights();
   }
 
-  // One shared reservation drains existing/committed traffic before the ride enters.
-  // New arrivals wait at their normal stop lines; nobody is teleported or made intangible.
-  function requestRideJunction(junctions, owner) {
-    if(junctions.some(n=>n.rideReservation&&n.rideReservation.owner!==owner))return false;
-    let reservation=junctions[0].rideReservation;
-    const inside=v=>v.edge&&(junctions.includes(v.edge.from)&&v.s<v.half+5 ||
-      junctions.includes(v.edge.to)&&(v.conn||v.commit===v.edge.to));
-    if(!reservation){
-      reservation={owner,draining:new Set(),granted:false};
-      for(const v of vehicles){
-        if(v.disabled||!v.edge)continue;
-        // Vehicles between two closely spaced nodes must be allowed to leave the
-        // whole crossing, not trapped by a second stop line inside our reservation.
-        if((v.edge===owner.reservation?.edge && v.s>v.edge.len-(owner.reservation.entry-owner.progress)-3)||inside(v)||(junctions.includes(v.edge.from)&&junctions.includes(v.edge.to))||
-          (junctions.includes(v.edge.to)&&v.speed>.3&&!canStopBefore(v,v.edge.len-v.s-v.half)))reservation.draining.add(v);
-      }
-      for(const n of junctions)n.rideReservation=reservation;
-    }
-    for(const v of reservation.draining){
-      if(v.disabled||!v.edge||(!inside(v)&&!(junctions.includes(v.edge.from)&&junctions.includes(v.edge.to))&&
-        !junctions.includes(v.edge.to)))reservation.draining.delete(v);
-    }
-    // A leader using exactly the same lane and connector can be followed through
-    // the crossing. Conflicting drainers retain exclusive priority until clear.
-    reservation.granted=[...reservation.draining].every(v=>{
-      const i=owner.route.states.findIndex(s=>s.e===v.edge&&s.lane===v.lane);
-      if(i<0)return false;
-      if(!junctions.includes(v.edge.to))return true;
-      const next=owner.route.states[i+1];
-      return next&&v.move?.to===next.e&&v.move.out[v.lane]===next.lane;
-    });
-    return reservation.granted;
+  function snapshotVehicle(v) {
+    return writeSfVehicleBody(v.dynamicBody, v.bus ? busProfile : v.isNYPD ? patrolProfile : vehicleProfiles[v.bodyType],
+      v.x, v.y, v.z, v.yaw + v.yawOffset, v.pitch - v.gradePitch, v.roll + v.gradeRoll,
+      v.velocityX ?? v.tx * v.speed + v.vx, v.velocityZ ?? v.tz * v.speed + v.vz);
   }
-  function releaseRideJunction(junctions, owner) {
-    for(const node of junctions)if(node.rideReservation?.owner===owner)delete node.rideReservation;
+  function rebuildBodies() {
+    bodyIndex.begin();
+    // Stable array order/membership during the rebuild; avoid per-epoch iterator work.
+    for (let i = 0; i < vehicles.length; i++) {
+      const v = vehicles[i];
+      if (v.edge && !v.disabled) bodyIndex.add(snapshotVehicle(v));
+    }
+    for (let i = 0; i < peds.length; i++) {
+      const p = peds[i];
+      if (!p.placed) continue;
+      const b = p.dynamicBody;
+      b.x = p.x; b.z = p.z; b.headingY = Math.atan2(p.ux * p.dir, p.uz * p.dir);
+      b.halfWidthMetres = 0.3 * p.bodyScale * p.bodyGirth; b.halfLengthMetres = 0.28 * p.bodyScale;
+      b.minY = pedGround(p, p.x, p.z); b.maxY = b.minY + 1.75 * p.bodyScale;
+      b.velocityX = p.velocityX || 0; b.velocityZ = p.velocityZ || 0;
+      bodyIndex.add(b);
+    }
+    bodyIndex.commit();
   }
 
   return {
     group,
     update,
-    requestRideJunction,
-    releaseRideJunction,
+    dynamicBodiesNear: bodyIndex.dynamicBodiesNear,
+    bodyVersion: bodyIndex.bodyVersion,
+    bodyQueryStats: bodyIndex.stats,
     cars,
     buses,
     peds,
@@ -2186,6 +2063,7 @@ function createTrafficSystem(scene, sidewalks, obstacles, opts = {}) {
     setDensity(fraction) {
       const count = Math.round(vehicles.length * Math.max(0, Math.min(1, fraction)));
       vehicles.forEach((v,i) => { v.disabled = i >= count; if(v.disabled) { v.edge=null; v.conn=null; v.commit=null; } });
+      rebuildBodies();
     }
   };
 }
@@ -2207,6 +2085,7 @@ const HWY_NEAR_LOD = 170;
 const HWY_MID_LOD = 450;
 const HWY_FAR_CULL = 1600;
 const HWY_RAMP = 32; // the dip at the lane ends: 2.4 m down over this many metres
+const HWY_BOX_RUN = 16; // lane segments per player-query bounding box
 
 function createHighwayTraffic(scene, lanes) {
   const group = new THREE.Group();
@@ -2236,13 +2115,20 @@ function createHighwayTraffic(scene, lanes) {
     });
     lane.box = [Infinity, -Infinity, Infinity, -Infinity];
     for (const p of P) lane.box = [Math.min(lane.box[0], p.x), Math.max(lane.box[1], p.x), Math.min(lane.box[2], p.z), Math.max(lane.box[3], p.z)];
+    // slop-newyork a2e4c33f8fcefdc425ec6ac3ac5972215fc9da36, via NYC 74794d4c1eb759b56f1cc44ca3456a1c99969ae1.
+    // Keep the whole-lane box above; these constant XZ bounds only prune player-query candidates, in source order.
+    lane.playerBoxes = [];
+    for (let s = 0; s + 1 < P.length; s += HWY_BOX_RUN) {
+      const run = P.slice(s, Math.min(P.length, s + HWY_BOX_RUN + 1));
+      lane.playerBoxes.push(Math.min(...run.map((p) => p.x)), Math.max(...run.map((p) => p.x)), Math.min(...run.map((p) => p.z)), Math.max(...run.map((p) => p.z)));
+    }
     lane.cars = [];
     for (let u = rand() * 30; u < lane.len - 12; u += 24 + rand() * 50) {
       const h = rand();
       const kind = h < 0.1 ? 'taxi' : h < 0.6 ? 'sedan' : 'suv';
       const col = new THREE.Color(PALETTES[kind][Math.floor(rand() * PALETTES[kind].length)]);
       // (float32 values, so update() can tell whether an instance slot's paint changes by comparing with the buffer)
-      const car = { lane, kind, u, v: lane.speed, acc: 0, seg: 0, col: [Math.fround(col.r), Math.fround(col.g), Math.fround(col.b)] };
+      const car = { lane, kind, u, v: lane.speed, acc: 0, seg: 0, dynamicBody: {}, col: [Math.fround(col.r), Math.fround(col.g), Math.fround(col.b)] };
       lane.cars.push(car);
       cars.push(car);
       counts[kind]++;
@@ -2252,11 +2138,14 @@ function createHighwayTraffic(scene, lanes) {
   // Per body type: [near (with wheels, casts shadows), mid (wheel-less), far (lofted proxy)] instanced meshes sharing
   // the traffic's cached car material (per-instance paintColor & carState)
   const meshes = {};
+  const profiles = {};
+  const bodyIndex = createSfDynamicBodyIndex();
   for (const kind of KINDS) {
     const spec = BODY_SPECS[kind];
     const n = Math.max(1, counts[kind]);
     meshes[kind] = [0, 1, 2].map((lod) => {
       const geo = lod === 2 ? buildCarProxyGeometry(spec) : buildCarGeometry(spec, lod === 0);
+      if (lod === 0) profiles[kind] = sfVehicleShape(geo, spec);
       geo.setAttribute('paintColor', new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3));
       geo.setAttribute('carState', new THREE.InstancedBufferAttribute(new Float32Array(n * 4), 4));
       const mesh = new THREE.InstancedMesh(geo, createLoftedCarMaterial(spec), n);
@@ -2332,43 +2221,77 @@ function createHighwayTraffic(scene, lanes) {
   let updates = 0;
   // Flags the first n items of an attribute for upload (static usage: once per frame, not once per render pass)
   function flagRange(attr, n) {
+    // Same NYC d42fe9b pending-prefix union as street traffic; native renderer consumption owns clearing.
+    let count = n * attr.itemSize;
+    for (const range of attr.updateRanges) count = Math.max(count, range.start + range.count);
     attr.clearUpdateRanges();
-    attr.addUpdateRange(0, n * attr.itemSize);
+    attr.addUpdateRange(0, count);
     attr.needsUpdate = true;
   }
 
-  // The player's arc position and speed along `lane` if they are in it (within 2 m of the centre line and near
-  // its road height, not on its underground stretches), else null
+  // EUC arc position and speed along `lane`, using projected hull width and explicit absolute elevation.
+  const playerLane = { u: 0, v: 0, halfL: 0 };
   function playerInLane(lane, pl) {
     const [x0, x1, z0, z1] = lane.box;
     if (pl.x < x0 - 3 || pl.x > x1 + 3 || pl.z < z0 - 3 || pl.z > z1 + 3) return null;
+    const B = lane.playerBoxes;
     const P = lane.pts;
-    for (let i = 0; i + 1 < P.length; i++) {
-      if (P[i].y < -1 && P[i + 1].y < -1) continue;
-      const ax = P[i].x, az = P[i].z;
-      const sx = P[i + 1].x - ax, sz = P[i + 1].z - az;
-      const horizontalLengthSq = sx * sx + sz * sz;
-      if (horizontalLengthSq === 0) continue;
-      const L = lane.cum[i + 1] - lane.cum[i];
-      const t = ((pl.x - ax) * sx + (pl.z - az) * sz) / horizontalLengthSq;
-      if (t < 0 || t > 1) continue;
-      const y = P[i].y + (P[i + 1].y - P[i].y) * t;
-      if (Math.abs(pl.y - y) >= 2.6) continue;
-      if (Math.abs((pl.z - az) * sx - (pl.x - ax) * sz) / Math.sqrt(horizontalLengthSq) < 2.0) {
-        // Convert horizontal progress to distance along the sloped lane, as with u above.
-        return { u: lane.cum[i] + t * L, v: Math.max(0, ((pl.vx * sx + pl.vz * sz) / horizontalLengthSq) * L) };
+    // Extra SF adaptation: bound every possible projected hull corner, not NYC's fixed 3 m point margin.
+    // The existing whole-lane gate and exact volumetric/absolute-Y tests remain authoritative.
+    const margin = Math.max(3, 1.4 + Math.hypot(pl.halfW, pl.halfL));
+    for (let r = 0; r < B.length; r += 4) {
+      if (pl.x < B[r] - margin || pl.x > B[r + 1] + margin || pl.z < B[r + 2] - margin || pl.z > B[r + 3] + margin) continue;
+      const end = Math.min(P.length - 1, (r / 4 + 1) * HWY_BOX_RUN);
+      for (let i = (r / 4) * HWY_BOX_RUN; i < end; i++) {
+        const ax = P[i].x, az = P[i].z;
+        const sx = P[i + 1].x - ax, sz = P[i + 1].z - az;
+        const horizontalLengthSq = sx * sx + sz * sz;
+        if (horizontalLengthSq === 0) continue;
+        const L = lane.cum[i + 1] - lane.cum[i];
+        const t = ((pl.x - ax) * sx + (pl.z - az) * sz) / horizontalLengthSq;
+        if (t < 0 || t > 1) continue;
+        const y = P[i].y + (P[i + 1].y - P[i].y) * t;
+        if (pl.maxY <= y || pl.minY >= y + 2.6) continue;
+        const heading = Math.atan2(sx, sz), c = Math.abs(Math.cos(pl.headingY - heading)), s = Math.abs(Math.sin(pl.headingY - heading));
+        if (Math.abs((pl.z - az) * sx - (pl.x - ax) * sz) / Math.sqrt(horizontalLengthSq) < 1 + pl.halfW * c + pl.halfL * s + 0.4) {
+          // Convert horizontal progress to distance along the sloped lane, as with u above.
+          playerLane.u = lane.cum[i] + t * L;
+          playerLane.v = Math.max(0, ((pl.vx * sx + pl.vz * sz) / horizontalLengthSq) * L);
+          playerLane.halfL = pl.halfL * c + pl.halfW * s;
+          return playerLane;
+        }
       }
     }
     return null;
   }
 
+  const player = {};
+  function locateCar(c) {
+    const lane = c.lane, cum = lane.cum;
+    while (c.seg < cum.length - 2 && cum[c.seg + 1] < c.u) c.seg++;
+    const i = c.seg, segLen = cum[i + 1] - cum[i];
+    const t = Math.min(1, Math.max(0, (c.u - cum[i]) / segLen));
+    const a = lane.pts[i], b = lane.pts[i + 1], toEnd = lane.len - c.u;
+    c.dip = Math.min(c.u, toEnd);
+    c.x = a.x + (b.x - a.x) * t; c.z = a.z + (b.z - a.z) * t;
+    c.y = a.y + (b.y - a.y) * t - 2.4 * (1 - ease(c.dip));
+    // Retain the existing drawn grade/dip and smoothed heading exactly.
+    const slope = (b.y - a.y) / segLen + 2.4 * easeSlope(c.dip) * (c.u < toEnd ? 1 : -1);
+    let dYaw = lane.yaw[i + 1] - lane.yaw[i];
+    if (dYaw > Math.PI) dYaw -= Math.PI * 2;
+    else if (dYaw < -Math.PI) dYaw += Math.PI * 2;
+    c.yaw = lane.yaw[i] + dYaw * t; c.pitch = -Math.atan(slope);
+    c.velocityX = (b.x - a.x) / segLen * c.v; c.velocityZ = (b.z - a.z) / segLen * c.v;
+    return writeSfVehicleBody(c.dynamicBody, profiles[c.kind], c.x, c.y, c.z, c.yaw, c.pitch, 0, c.velocityX, c.velocityZ);
+  }
+  function rebuildBodies() {
+    bodyIndex.begin();
+    for (let i = 0; i < cars.length; i++) bodyIndex.add(locateCar(cars[i]));
+    bodyIndex.commit();
+  }
   function update(dt, camera, entity, mode) {
     // 1. Car following (IDM) in every lane, the player counting as a leader
-    const pl = entity && mode !== 'helicopter' ? {
-      x: entity.position.x, y: entity.position.y, z: entity.position.z,
-      vx: Math.sin(entity.heading || 0) * (entity.speed || 0) + (entity.vx || 0),
-      vz: Math.cos(entity.heading || 0) * (entity.speed || 0) + (entity.vz || 0)
-    } : null;
+    const pl = readSfPlayerBody(entity, player).active ? player : null;
     for (const lane of lanes) {
       const list = lane.cars;
       const n = list.length;
@@ -2384,8 +2307,9 @@ function createHighwayTraffic(scene, lanes) {
           gap -= HWY_CAR_LEN;
           dv = c.v - lead.v;
         }
-        if (pIn && pIn.u > c.u && pIn.u - c.u - HWY_CAR_LEN < gap) {
-          gap = pIn.u - c.u - HWY_CAR_LEN;
+        const playerGap = pIn ? pIn.u - c.u - (BODY_SPECS[c.kind].zFront + pIn.halfL) : Infinity;
+        if (pIn && pIn.u > c.u && playerGap < gap) {
+          gap = playerGap;
           dv = c.v - pIn.v;
         }
         const sStar = D.s0 + Math.max(0, c.v * D.T + (c.v * dv) / brakeTerm);
@@ -2400,8 +2324,10 @@ function createHighwayTraffic(scene, lanes) {
         }
       }
     }
+    rebuildBodies();
 
     // 2. Instances: LOD by distance, far cars well behind the camera skipped; lamp flares at dusk & night
+    if (!camera) return;
     const cam = camera.position;
     camera.getWorldDirection(fwd);
     for (const kind of KINDS) for (const mesh of meshes[kind]) mesh.count = 0;
@@ -2410,19 +2336,7 @@ function createHighwayTraffic(scene, lanes) {
     flareCount = 0;
     hwyLitCount = 0;
     for (const c of cars) {
-      const lane = c.lane;
-      const cum = lane.cum;
-      while (c.seg < cum.length - 2 && cum[c.seg + 1] < c.u) c.seg++;
-      const i = c.seg;
-      const segLen = cum[i + 1] - cum[i];
-      const t = Math.min(1, Math.max(0, (c.u - cum[i]) / segLen));
-      const a = lane.pts[i];
-      const b = lane.pts[i + 1];
-      const x = a.x + (b.x - a.x) * t;
-      const z = a.z + (b.z - a.z) * t;
-      const toEnd = lane.len - c.u;
-      const dip = c.u < toEnd ? c.u : toEnd;
-      const y = a.y + (b.y - a.y) * t - 2.4 * (1 - ease(dip));
+      const { x, y, z, dip, yaw } = c;
       const dx = x - cam.x;
       const dz = z - cam.z;
       const dy = y - cam.y;
@@ -2431,12 +2345,7 @@ function createHighwayTraffic(scene, lanes) {
       const lod = d2 < HWY_NEAR_LOD * HWY_NEAR_LOD ? 0 : d2 < HWY_MID_LOD * HWY_MID_LOD ? 1 : 2;
       if (lod > 0 && dx * fwd.x + dz * fwd.z < -40) continue;
       if (y < -3.6) continue; // in the Battery Park Underpass, out of sight behind the portals' screens
-      const slope = (b.y - a.y) / segLen + 2.4 * easeSlope(dip) * (c.u < toEnd ? 1 : -1);
-      let dYaw = lane.yaw[i + 1] - lane.yaw[i];
-      if (dYaw > Math.PI) dYaw -= Math.PI * 2;
-      else if (dYaw < -Math.PI) dYaw += Math.PI * 2;
-      const yaw = lane.yaw[i] + dYaw * t;
-      euler.set(-Math.atan(slope), yaw, 0);
+      euler.set(c.pitch, yaw, 0);
       q.setFromEuler(euler);
       m4.compose(pos.set(x, y, z), q, ONE);
       const mesh = meshes[c.kind][lod];
@@ -2551,7 +2460,9 @@ function createHighwayTraffic(scene, lanes) {
     }
   }
 
-  return { group, update, cars, lanes };
+  rebuildBodies();
+  return { group, update, cars, lanes, dynamicBodiesNear: bodyIndex.dynamicBodiesNear,
+    bodyVersion: bodyIndex.bodyVersion, bodyQueryStats: bodyIndex.stats };
 }
 
 Object.assign(window.NYC, { createTrafficSystem, createHighwayTraffic });

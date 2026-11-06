@@ -23,7 +23,7 @@ import { writeBin } from './geo-terrain.mjs';
 proj4.defs('EPSG:26910', '+proj=utm +zone=10 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs');
 const toUTM = proj4('WGS84', 'EPSG:26910');
 
-// The modelled landmarks: OSM name -> slug (js/landmarks.js, docs/landmarks/<slug>.md) and tier (phase 5 file)
+// The modelled landmarks: OSM name -> slug (js/landmarks.js, provenance/landmarks/<slug>.md) and tier (phase 5 file)
 export const SITES = {
   'Transamerica Pyramid': { slug: 'transamerica', tier: 1 },
   'Salesforce Tower': { slug: 'salesforce-tower', tier: 1 },
@@ -348,7 +348,7 @@ function bridgeParts(els, which) {
 
 // Interim region ground (PLAN P5-1): the DEM's 8 m overview (image 3 of each SanFrancisco_B23 tile) sampled bilinearly
 // at 16 m over the "landmarks" box; off the tiles or nodata: the water level (the East Bay and Marin are not in these
-// tiles). Written in the terrain format (docs/formats.md) as data/terrain-region.bin
+// tiles). Written in the terrain format (provenance/formats.md) as data/terrain-region.bin
 export async function bakeRegionGround(waterLevel) {
   const B = boxWorld('landmarks');
   const x0 = Math.floor(B.x0 / REGION_CELL) * REGION_CELL, z0 = Math.floor(B.z0 / REGION_CELL) * REGION_CELL;

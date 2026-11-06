@@ -4,7 +4,7 @@
 // outline (GEO.landmarks via LANDMARK_SITES, tools/geo-landmarks.mjs) with `base`, the lowest DEM ground under it, and
 // `topH`, its OSM height. Every model is built in metres around a local origin on its site (y = 0 at the base, +x along
 // the outline's long axis unless a model says otherwise) and placed by fitToSite; facts, sources and what is simplified
-// are in docs/landmarks/<slug>.md. Where OSM draws the structure part by part (Sutro Tower), the parts are extruded as
+// are in provenance/landmarks/<slug>.md. Where OSM draws the structure part by part (Sutro Tower), the parts are extruded as
 // drawn. Outside the core the sites stand on the interim region ground (sf-ground.js, PLAN P5-1).
 // Exports: buildLandmarks(scene) -> { group, colliders }, window.NYC.landmarkCovers(x, z) (the generated building masses
 // under a model are left out, buildings.js) and window.NYC.landmarkStats (triangles and draws per landmark).
@@ -16,7 +16,7 @@ const { createPreWarBuildingMaterial, createCurtainWallMaterial } = window.NYC;
 const UP = new THREE.Vector3(0, 1, 0);
 
 // Geometry gathered per material and merged into one mesh each (a landmark costs one draw per material)
-function createParts() {
+function createParts({ frame = null, surfaceOf = () => 'pavement' } = {}) {
   const byMat = new Map();
   const _m = new THREE.Matrix4();
   const _q = new THREE.Quaternion();
@@ -24,14 +24,16 @@ function createParts() {
   const _s = new THREE.Vector3();
   const _p = new THREE.Vector3();
   const X = new THREE.Vector3(), Y = new THREE.Vector3(), Z = new THREE.Vector3();
+  const R = window.NYC.RideGeometry;
+  const world = (x, y, z) => frame ? { x: frame.cx + x * frame.cs - z * frame.sn, y: frame.y + y, z: frame.cz + x * frame.sn + z * frame.cs } : { x, y, z };
+  const worldRing = (r) => r.map(([x, z]) => world(x, 0, z));
+  const worldMatrix = frame ? new THREE.Matrix4().compose(new THREE.Vector3(frame.cx, frame.y, frame.cz),
+    new THREE.Quaternion().setFromAxisAngle(UP, -frame.ang), new THREE.Vector3(1, 1, 1)) : null;
   const P = {
     // a geometry (cloned, non-indexed) under matrix m; `paint` [wall rgb + surface, trim rgb + lit share] for the
     // paint-mode facade materials (tsl-materials.js createPreWarBuildingMaterial({ paint: true }))
-    add(mat, geo, m = null, paint = null) {
-      let g = geo.index ? geo.toNonIndexed() : geo.clone();
-      for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal' && k !== 'uv') g.deleteAttribute(k);
-      if (!g.attributes.uv) g.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
-      if (m) g.applyMatrix4(m);
+    add(mat, geo, m = null, paint = null, contact = {}) {
+      const g = P.body(mat, geo, m, contact);
       if (mat.userData.paint) {
         const [wall, trim] = paint || mat.userData.paint;
         const n = g.attributes.position.count;
@@ -44,6 +46,17 @@ function createParts() {
       byMat.get(mat).push(g);
       return P;
     },
+    // add()'s physical half only: registers the same contact body (surface of `mat`) without drawing; returns the
+    // prepared geometry (for parts drawn some other way, e.g. instanced trees)
+    body(mat, geo, m = null, contact = {}) {
+      const g = geo.index ? geo.toNonIndexed() : geo.clone();
+      for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal' && k !== 'uv') g.deleteAttribute(k);
+      if (!g.attributes.uv) g.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
+      if (m) g.applyMatrix4(m);
+      if (R && contact !== false && !mat.userData.noShadow) R.addMesh({ geometry: g, matrixWorld: worldMatrix }, surfaceOf(mat),
+        { layered: true, ...contact });
+      return g;
+    },
     // matrix: translate (x, y, z), turn ry about y (then rx, rz), scale (sx, sy, sz)
     at(x, y, z, ry = 0, sx = 1, sy = 1, sz = 1, rx = 0, rz = 0) {
       _e.set(rx, ry, rz, 'YXZ');
@@ -51,15 +64,19 @@ function createParts() {
     },
     // a box standing on y (w along x, d along z), turned ry
     box(mat, x, y, z, w, h, d, ry = 0, paint = null) {
-      return P.add(mat, UNIT_BOX, P.at(x, y + h / 2, z, ry, w, h, d), paint);
+      return P.add(mat, UNIT_BOX, P.at(x, y + h / 2, z, ry, w, h, d), paint, {
+        bodies: [{ centre: world(x, y + h / 2, z), halfExtents: { x: w / 2, y: h / 2, z: d / 2 }, rotationY: ry - (frame?.ang || 0) }]
+      });
     },
     // a frustum standing on y (radii at the bottom and the top), n sides
     cyl(mat, x, y, z, rBottom, rTop, h, n = 24, ry = 0, open = false, paint = null) {
-      return P.add(mat, new THREE.CylinderGeometry(rTop, rBottom, h, n, 1, open), P.at(x, y + h / 2, z, ry), paint);
+      return P.add(mat, new THREE.CylinderGeometry(rTop, rBottom, h, n, 1, open), P.at(x, y + h / 2, z, ry), paint,
+        open ? {} : { sides: { sliceHeight: 0.5, maxSlices: 16 } });
     },
     // a lathe of [r, y] points about the vertical through (x, z), from y
     lathe(mat, pts, x, y, z, n = 32, paint = null) {
-      return P.add(mat, new THREE.LatheGeometry(pts.map(([r, yy]) => new THREE.Vector2(Math.max(0, r), yy)), n), P.at(x, y, z), paint);
+      return P.add(mat, new THREE.LatheGeometry(pts.map(([r, yy]) => new THREE.Vector2(Math.max(0, r), yy)), n), P.at(x, y, z), paint,
+        { sides: { sliceHeight: 0.5, maxSlices: 32 } });
     },
     // a vertical prism over a local outline [[x, z], ...] (holes: more outlines) from y0 to y1
     prism(mat, outline, y0, y1, holes = [], paint = null) {
@@ -77,7 +94,8 @@ function createParts() {
       }
       g.rotateX(-Math.PI / 2);
       g.translate(0, y0, 0);
-      return P.add(mat, g, null, paint);
+      return P.add(mat, g, null, paint, { bodies: [{ outer: worldRing(outline), holes: shape.holes.length ? holes.map(worldRing) : [],
+        minY: world(0, y0, 0).y, maxY: world(0, y1, 0).y }] });
     },
     // a member from p0 to p1 ([x, y, z]), a thick (up-ish) by b wide
     beam(mat, p0, p1, a, b = a) {
@@ -89,7 +107,7 @@ function createParts() {
       Y.crossVectors(Z, X);
       _m.makeBasis(X.multiplyScalar(len), Y.multiplyScalar(a), Z.multiplyScalar(b));
       _m.setPosition((p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2, (p0[2] + p1[2]) / 2);
-      return P.add(mat, UNIT_BOX, _m);
+      return P.add(mat, UNIT_BOX, _m, null, { sides: { sliceHeight: 0.5, maxSlices: 24 } });
     },
     // one mesh per material under `parent`; returns { tris, draws }
     build(parent, name, { shadow = true } = {}) {
@@ -152,6 +170,7 @@ function buildLandmarks(scene) {
   group.name = 'SFLandmarks';
   const colliders = [];
   const covers = [];
+  const landmarkTreeSites = (window.NYC.landmarkTreeSites = []);
   const stats = [];
   const T = window.NYC.Terrain;
   const water = T ? T.waterLevel : 0;
@@ -229,7 +248,9 @@ function buildLandmarks(scene) {
     const cs = Math.cos(a), sn = Math.sin(a);
     // buildings.js / controllers.js OBB convention: local = R_y(-theta)(p - c), theta = -a (three.js rotation.y)
     const ex = (Math.abs(cs) * w + Math.abs(sn) * d) * 0.5, ez = (Math.abs(sn) * w + Math.abs(cs) * d) * 0.5;
-    colliders.push({ minX: cx - ex, maxX: cx + ex, minZ: cz - ez, maxZ: cz + ez, minY: f.y + y0, maxY: f.y + y1, obb: { cx, cz, hx: w * 0.5, hz: d * 0.5, cs: Math.cos(-a), sn: Math.sin(-a) } });
+    colliders.push({ minX: cx - ex, maxX: cx + ex, minZ: cz - ez, maxZ: cz + ez, minY: f.y + y0, maxY: f.y + y1,
+      rideIgnore: true, // navigation legacy only; precise EUC contacts come from the drawn parts
+      obb: { cx, cz, hx: w * 0.5, hz: d * 0.5, cs: Math.cos(-a), sn: Math.sin(-a) } });
   }
   function fitToSite(obj, s, f, name) {
     obj.position.set(f.cx, f.y, f.cz);
@@ -271,7 +292,7 @@ function buildLandmarks(scene) {
         const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cz = (Math.min(...zs) + Math.max(...zs)) / 2;
         const rx = (Math.max(...xs) - Math.min(...xs)) / 2, rz = (Math.max(...zs) - Math.min(...zs)) / 2;
         if (part.roof === 'dome') {
-          P.add(matOf(part, true), new THREE.SphereGeometry(1, 24, 10, 0, Math.PI * 2, 0, Math.PI / 2), P.at(cx, wallTop, cz, 0, rx, roofH, rz));
+          P.add(matOf(part, true), new THREE.SphereGeometry(1, 24, 10, 0, Math.PI * 2, 0, Math.PI / 2), P.at(cx, wallTop, cz, 0, rx, roofH, rz), null, { sides: { maxSlices: 24 } });
         } else if (part.roof === 'pyramidal') {
           const pos = [];
           for (let i = 0; i < rings[0].length; i++) {
@@ -284,7 +305,7 @@ function buildLandmarks(scene) {
           const g = new THREE.BufferGeometry();
           g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
           g.computeVertexNormals();
-          P.add(matOf(part, true), g);
+          P.add(matOf(part, true), g, null, null, { sides: { maxSlices: 24 } });
         } else {
           const ob = orientedBox(rings[0].flat());
           const shape = new THREE.Shape([new THREE.Vector2(-ob.wid / 2, 0), new THREE.Vector2(ob.wid / 2, 0), new THREE.Vector2(0, roofH)]);
@@ -292,7 +313,7 @@ function buildLandmarks(scene) {
           g.translate(0, 0, -ob.len / 2);
           g.rotateY(Math.PI / 2 - ob.ang);
           g.translate(ob.cx, wallTop, ob.cz);
-          P.add(matOf(part, true), g);
+          P.add(matOf(part, true), g, null, null, { sides: { maxSlices: 24 } });
         }
       }
       top = Math.max(top, part.h);
@@ -301,7 +322,7 @@ function buildLandmarks(scene) {
   }
   const extrudeParts = (P, s, f, matOf) => renderParts(P, s, f, matOf);
 
-  // ===== Sutro Tower (docs/landmarks/sutro-tower.md): OSM's building parts: three legs in nine bands of red and white,
+  // ===== Sutro Tower (provenance/landmarks/sutro-tower.md): OSM's building parts: three legs in nine bands of red and white,
   // five crossarm levels, three top masts; lattice drawn as solid members =====
   model('Sutro Tower', (P, s, f) => {
     const top = extrudeParts(P, s, f, (p) => (/^#e9e9df$/i.test(p.colour) ? mats.white : p.colour ? mats.orange : mats.steelGrey));
@@ -318,7 +339,7 @@ function buildLandmarks(scene) {
   }, { yaw: 0, centre: 'site' });
 
   // Square frustum (4-sided, turned so its sides run along x and z) of widths w0 -> w1 from y0 to y1
-  const frustum = (P, mat, x, z, y0, y1, w0, w1, paint) => P.add(mat, new THREE.CylinderGeometry(w1 / Math.SQRT2, w0 / Math.SQRT2, y1 - y0, 4, 1), P.at(x, (y0 + y1) / 2, z, Math.PI / 4), paint);
+  const frustum = (P, mat, x, z, y0, y1, w0, w1, paint) => P.add(mat, new THREE.CylinderGeometry(w1 / Math.SQRT2, w0 / Math.SQRT2, y1 - y0, 4, 1), P.at(x, (y0 + y1) / 2, z, Math.PI / 4), paint, { sides: { maxSlices: 32 } });
   // A loft of rounded squares: [y, width, corner radius] levels, n points per corner arc; closed top
   function roundedLoft(P, mat, levels, n = 6) {
     const ring = (w, r) => {
@@ -345,11 +366,11 @@ function buildLandmarks(scene) {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     g.computeVertexNormals();
-    P.add(mat, g);
+    P.add(mat, g, null, null, { sides: { maxSlices: 32 } });
     return ring;
   }
 
-  // ===== Transamerica Pyramid (docs/landmarks/transamerica-pyramid.md): a square pyramid 53 m at the base (OSM 54 m) to
+  // ===== Transamerica Pyramid (provenance/landmarks/transamerica-pyramid.md): a square pyramid 53 m at the base (OSM 54 m) to
   // the 48th floor at 212 m, 15 m across there (OSM's top part), the aluminium spire to 260 m; the wings (east: lifts,
   // west: stairs) as vertical faces 14 m out from the axis, 10.7 m wide (OSM's 27.9 x 10.7 m part), from where the
   // pyramid's face falls behind them to their gable at 215 m (OSM); a 4-storey base (Wikipedia) behind a colonnade
@@ -377,13 +398,13 @@ function buildLandmarks(scene) {
     for (const wx of [1, -1]) {
       const [axis, sg] = nearestAxis(f, wx, 0);
       const mid = sg * (WING_OUT + W1 / 2) / 2, depth = WING_OUT - W1 / 2;
-      if (axis === 'x') { P.box(quartz, mid, yW, 0, depth, WING_TOP - yW, WING_W); P.add(quartz, new THREE.CylinderGeometry(0.01, WING_W / 2, 6, 3, 1), P.at(sg * (WING_OUT - depth / 2), WING_TOP, 0, 0, depth / WING_W * 1.6, 1, 1)); }
+      if (axis === 'x') { P.box(quartz, mid, yW, 0, depth, WING_TOP - yW, WING_W); P.add(quartz, new THREE.CylinderGeometry(0.01, WING_W / 2, 6, 3, 1), P.at(sg * (WING_OUT - depth / 2), WING_TOP, 0, 0, depth / WING_W * 1.6, 1, 1), null, { sides: { maxSlices: 12 } }); }
       else { P.box(quartz, 0, yW, mid, WING_W, WING_TOP - yW, depth); }
     }
     for (const [y0, y1, w] of [[0, 60, W0], [60, 120, half(60) * 2], [120, 180, half(120) * 2], [180, TIP, half(180) * 2]]) collide(0, 0, w, w, y0, y1);
   });
 
-  // ===== Salesforce Tower (docs/landmarks/salesforce-tower.md): square in plan with rounded corners (54 m, OSM's
+  // ===== Salesforce Tower (provenance/landmarks/salesforce-tower.md): square in plan with rounded corners (54 m, OSM's
   // outline), tapering softly in its top third to the roof at 296 m, the crown to 326 m: glass and white aluminium fins.
   // ESTIMATES: the corner radius (9 m), the widths at the roof (41 m) and the crown top (33 m), the taper's start (196 m),
   // 30 fins round the crown =====
@@ -406,7 +427,7 @@ function buildLandmarks(scene) {
     collide(0, 0, 44, 44, 196, TIP);
   });
 
-  // ===== Ferry Building (docs/landmarks/ferry-building.md): the hall as OSM outlines it (16.1 m), the clock tower from
+  // ===== Ferry Building (provenance/landmarks/ferry-building.md): the hall as OSM outlines it (16.1 m), the clock tower from
   // OSM's stages (16 m square shaft to 43.5 m, the belfry stages and the cupola to 70 m, the pole to 83 m), four 6.7 m
   // clock dials (Wikipedia), 22 arches a side along the nave (Wikipedia). ESTIMATES: the dials' centre height (36 m), the
   // stone colour, the arches' size =====
@@ -438,7 +459,7 @@ function buildLandmarks(scene) {
         if (!Number.isFinite(v)) continue;
         const sg = Math.sign(v), x = px - uz * (v + sg * 0.05), z = pz + ux * (v + sg * 0.05), ry = -ob.ang;
         P.box(mats.glassDark, x, 0.6, z, 4.2, 6.2, 0.3, ry);
-        P.add(mats.glassDark, new THREE.CylinderGeometry(2.1, 2.1, 0.3, 12, 1, false, 0, Math.PI), P.at(x, 6.8, z, ry, 1, 1, 1, Math.PI / 2));
+        P.add(mats.glassDark, new THREE.CylinderGeometry(2.1, 2.1, 0.3, 12, 1, false, 0, Math.PI), P.at(x, 6.8, z, ry, 1, 1, 1, Math.PI / 2), null, { sides: { maxSlices: 12 } });
       }
     }
     // clock dials on the shaft
@@ -449,15 +470,15 @@ function buildLandmarks(scene) {
       const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cz = (Math.min(...zs) + Math.max(...zs)) / 2, hw = (Math.max(...xs) - Math.min(...xs)) / 2 + 0.15;
       for (const [dx, dz, ry] of [[1, 0, Math.PI / 2], [-1, 0, -Math.PI / 2], [0, 1, 0], [0, -1, Math.PI]]) {
         P.add(dialMat, new THREE.CircleGeometry(3.35, 32), P.at(cx + dx * hw, 36, cz + dz * hw, ry));
-        P.add(mats.roofDark, UNIT_BOX, P.at(cx + dx * (hw + 0.05), 36.8, cz + dz * (hw + 0.05), ry, 0.25, 2.2, 0.1));
-        P.add(mats.roofDark, UNIT_BOX, P.at(cx + dx * (hw + 0.05), 36, cz + dz * (hw + 0.05), ry + 0, 2.6, 0.25, 0.1));
+        P.add(mats.roofDark, UNIT_BOX, P.at(cx + dx * (hw + 0.05), 36.8, cz + dz * (hw + 0.05), ry, 0.25, 2.2, 0.1), null, { sides: { maxSlices: 1 } });
+        P.add(mats.roofDark, UNIT_BOX, P.at(cx + dx * (hw + 0.05), 36, cz + dz * (hw + 0.05), ry + 0, 2.6, 0.25, 0.1), null, { sides: { maxSlices: 1 } });
       }
       collide(cx, cz, hw * 2, hw * 2, 0, 70);
     }
     collide(ob.cx, ob.cz, ob.len, ob.wid, 0, 16.1, ob.ang);
   }, { yaw: 0, centre: 'site' });
 
-  // ===== Coit Tower (docs/landmarks/coit-tower.md): OSM's parts (the base terrace and rotunda, the 11 m shaft to 50 m,
+  // ===== Coit Tower (provenance/landmarks/coit-tower.md): OSM's parts (the base terrace and rotunda, the 11 m shaft to 50 m,
   // the 9 m top to 64 m), unpainted concrete (#E0E0E0), red tile roofs on the rotunda (OSM roof:colour); the fluting as
   // ribs round the shaft and the arcade of the observation level under the top (ESTIMATE: 16 flutes, 8 arches at 50-58 m) =====
   model('Coit Tower', (P, s, f) => {
@@ -485,7 +506,7 @@ function buildLandmarks(scene) {
     collide(0, 0, 22, 22, 0, 12);
   }, { yaw: 0, centre: 'site' });
 
-  // ===== City Hall (docs/landmarks/city-hall.md): OSM's 19 parts as drawn (the two-block base to 30 m, the central
+  // ===== City Hall (provenance/landmarks/city-hall.md): OSM's 19 parts as drawn (the two-block base to 30 m, the central
   // block, the drum stages, the dome 60-75 m, the lantern and its gilded finial to 93 m; OSM colours); granite walls with
   // windows; a colonnade round the drum (ESTIMATE: 32 columns on the 46-56 m stage) =====
   const granite = paintMat(0xe3e3de, 0xb9b8b0, 3, 0.4, { floorHeight: 6.0, windowWidth: 2.6 });
@@ -507,7 +528,7 @@ function buildLandmarks(scene) {
     collide(ob.cx, ob.cz, ob.len, ob.wid, 0, 30, ob.ang);
   }, { yaw: 0, centre: 'site' });
 
-  // ===== Palace of Fine Arts (docs/landmarks/palace-of-fine-arts.md): OSM's 37 parts as drawn (the rotunda's drum and
+  // ===== Palace of Fine Arts (provenance/landmarks/palace-of-fine-arts.md): OSM's 37 parts as drawn (the rotunda's drum and
   // dome to 51 m, its 36 m piers, the colonnades round the lagoon at 12-17 m); warm stone (ESTIMATE: colour); the dome
   // terracotta red (ESTIMATE, from photographs: not in the opened sources) =====
   const pfaStone = std(0xcbb79a, 0.85, 0.0), pfaDome = std(0xa8664a, 0.7, 0.05);
@@ -538,7 +559,7 @@ function buildLandmarks(scene) {
     return { cover: false };
   }, { yaw: 0, centre: 'site' });
 
-  // ===== Oracle Park (docs/landmarks/oracle-park.md): the field as OSM maps it (home plate on its west side, centre
+  // ===== Oracle Park (provenance/landmarks/oracle-park.md): the field as OSM maps it (home plate on its west side, centre
   // field 119 m east-south-east, right field along McCovey Cove to the south, left field to the bay); the stands as a ring sector
   // round home plate behind a brick wall, the 24 ft (7.3 m) brick wall in right field (Wikipedia), centre field 119 m
   // (Wikipedia), the two 122 ft (37 m) clock towers (SABR), the Coca-Cola bottle (24 m, Wikipedia) and the glove (8 x
@@ -594,7 +615,7 @@ function buildLandmarks(scene) {
     g.computeVertexNormals();
     const nrm = g.attributes.normal;
     for (let k = 0; k < nrm.count; k++) if (nrm.getY(k) < 0) nrm.setXYZ(k, -nrm.getX(k), -nrm.getY(k), -nrm.getZ(k));
-    P.add(seats, g);
+    P.add(seats, g, null, null, { doubleSided: true });
     // the field: OSM's pitch in grass, the infield dirt and its grass square (a 90 ft = 27.4 m diamond)
     P.prism(grass, field, 0.1, 0.3);
     P.add(clay, new THREE.CircleGeometry(29, 24, -Math.PI / 4, Math.PI / 2).rotateX(-Math.PI / 2), P.at(0, 0.32, 0));
@@ -603,14 +624,14 @@ function buildLandmarks(scene) {
     for (const a of [Math.PI - 0.9, -Math.PI + 0.9]) {
       const r = ray(out, a) + 2, x = Math.cos(a) * r, z = Math.sin(a) * r;
       P.box(brick, x, 0, z, 9, 34, 9, -a);
-      P.add(mats.copperGreen, new THREE.ConeGeometry(6.5, 5, 4), P.at(x, 36.5, z, Math.PI / 4 - a));
+      P.add(mats.copperGreen, new THREE.ConeGeometry(6.5, 5, 4), P.at(x, 36.5, z, Math.PI / 4 - a), null, { sides: { maxSlices: 12 } });
       collide(x, z, 9, 9, 0, 37, -a);
     }
     // the Coca-Cola bottle and the glove behind left field (-z)
     const lf = -(Math.PI / 4 + 0.12), rb = Math.min(ray(out, lf) - 8, ray(field, lf) + 22);
     const bx = Math.cos(lf) * rb, bz = Math.sin(lf) * rb;
     P.lathe(std(0xc8102e, 0.4, 0.1), [[0, 0], [3.2, 0], [3.4, 6], [3.2, 12], [1.6, 17], [1.2, 22], [1.3, 24], [0, 24]], bx, 8, bz, 20);
-    P.add(std(0x8a5a32, 0.8, 0.0), new THREE.SphereGeometry(1, 16, 12), P.at(bx + 10, 12, bz + 6, 0, 4.9, 4, 3));
+    P.add(std(0x8a5a32, 0.8, 0.0), new THREE.SphereGeometry(1, 16, 12), P.at(bx + 10, 12, bz + 6, 0, 4.9, 4, 3), null, { sides: { maxSlices: 16 } });
     // light towers on the grandstand's back (ESTIMATE: six, 60 m; the count is not in the sources)
     for (const a of [Math.PI / 2 + 0.25, Math.PI * 0.75, Math.PI - 0.25, -Math.PI + 0.25, -Math.PI * 0.75, -Math.PI / 2 - 0.25]) {
       const r = ray(out, a) - 3, x = Math.cos(a) * r, z = Math.sin(a) * r;
@@ -636,7 +657,7 @@ function buildLandmarks(scene) {
     return top;
   }
   const concreteWarm = paintMat(0xc9c1b0, 0x9e9686, 1, 0.25, { floorHeight: 11, windowWidth: 3.2, windowRatioX: 0.3, windowRatioY: 0.7 });
-  // ===== Grace Cathedral (docs/landmarks/grace-cathedral.md): OSM's parts (the body to 28 m, the two towers to 53 m,
+  // ===== Grace Cathedral (provenance/landmarks/grace-cathedral.md): OSM's parts (the body to 28 m, the two towers to 53 m,
   // the flèche to 75 m); ferroconcrete; ESTIMATES: the nave's pitched roof (9 m), the flèche's spire from 48 m, the towers'
   // pinnacles =====
   model('Grace Cathedral', (P, s, f) => {
@@ -666,7 +687,7 @@ function buildLandmarks(scene) {
     collide(ob.cx, ob.cz, ob.len, ob.wid, 0, 37, ob.ang);
   }, { yaw: 0, centre: 'site' });
 
-  // ===== Chase Center (docs/landmarks/chase-center.md): OSM's outline (a ~155 m drum) to its 38.1 m height; white
+  // ===== Chase Center (provenance/landmarks/chase-center.md): OSM's outline (a ~155 m drum) to its 38.1 m height; white
   // aluminium panels over a glass base (Architect's Newspaper via the notes); ESTIMATES: the glass base (to 9 m), the
   // three set-back tiers =====
   const panelWhite = std(0xeef0ee, 0.45, 0.35);
@@ -681,7 +702,7 @@ function buildLandmarks(scene) {
     collide(0, 0, Math.max(...xs) - Math.min(...xs), Math.max(...xs) - Math.min(...xs), 0, H);
   }, { yaw: 0, centre: 'site' });
 
-  // ===== Conservatory of Flowers (docs/landmarks/conservatory-of-flowers.md): 73 m long (OSM 75 x 35), white-painted
+  // ===== Conservatory of Flowers (provenance/landmarks/conservatory-of-flowers.md): 73 m long (OSM 75 x 35), white-painted
   // wood and glass, the octagonal central pavilion with its dome to 18 m (Wikipedia), arched wings; ESTIMATES: the
   // pavilion's size (16 m across), the wings' 7 m vaults, the white frames =====
   const glassPale = std(0xc8d8d8, 0.15, 0.6), frameWhiteM = std(0xf4f4ef, 0.5, 0.05);
@@ -690,19 +711,19 @@ function buildLandmarks(scene) {
     P.box(frameWhiteM, 0, 0, 0, L - 2, 1.2, W * 0.42);
     for (const sd of [-1, 1]) {
       // the wings: glass vaults along +x either side of the pavilion
-      P.add(glassPale, new THREE.CylinderGeometry(4.5, 4.5, L / 2 - 9, 16, 1, false, 0, Math.PI), P.at(sd * (L / 4 + 4), 4.5, 0, 0, 1, 1, 1, 0, Math.PI / 2));
+      P.add(glassPale, new THREE.CylinderGeometry(4.5, 4.5, L / 2 - 9, 16, 1, false, 0, Math.PI), P.at(sd * (L / 4 + 4), 4.5, 0, 0, 1, 1, 1, 0, Math.PI / 2), null, { sides: { maxSlices: 20 } });
       P.box(glassPale, sd * (L / 4 + 4), 1.2, 0, L / 2 - 9, 3.3, 9);
       for (let x = 9; x < L / 2 - 1; x += 3) P.add(frameWhiteM, new THREE.TorusGeometry(4.55, 0.12, 4, 12, Math.PI), P.at(sd * x, 4.5, 0, Math.PI / 2));
       P.box(glassPale, sd * (L / 2 - 4), 1.2, 0, 6, 6, W * 0.8);
     }
     P.cyl(glassPale, 0, 0, 0, 8, 8, 10, 8);
-    P.add(glassPale, new THREE.SphereGeometry(8, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), P.at(0, 10, 0, 0, 1, 1, 1));
-    P.add(frameWhiteM, new THREE.CylinderGeometry(1.4, 1.6, 2, 8), P.at(0, 18 - 1, 0));
+    P.add(glassPale, new THREE.SphereGeometry(8, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), P.at(0, 10, 0, 0, 1, 1, 1), null, { sides: { maxSlices: 24 } });
+    P.add(frameWhiteM, new THREE.CylinderGeometry(1.4, 1.6, 2, 8), P.at(0, 18 - 1, 0), null, { sides: { maxSlices: 8 } });
     for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2; P.box(frameWhiteM, Math.cos(a) * 8, 0, Math.sin(a) * 8, 0.4, 10, 0.4); }
     collide(0, 0, L, W * 0.5, 0, 18);
   });
 
-  // ===== de Young Museum (docs/landmarks/de-young-museum.md): OSM's outline (the relation with its courtyards) at 13 m
+  // ===== de Young Museum (provenance/landmarks/de-young-museum.md): OSM's outline (the relation with its courtyards) at 13 m
   // and the Hamon Tower's stacked slices to 51 m (OSM; Wikipedia gives 44 m), perforated copper =====
   const copper = std(0x8c5d3c, 0.55, 0.6);
   model('de Young Museum', (P, s, f) => {
@@ -712,7 +733,7 @@ function buildLandmarks(scene) {
     return { cover: false };
   }, { yaw: 0, centre: 'site' });
 
-  // ===== Fort Point (docs/landmarks/fort-point.md): OSM's outline with its parade ground, 3 levels and 15 m (OSM),
+  // ===== Fort Point (provenance/landmarks/fort-point.md): OSM's outline with its parade ground, 3 levels and 15 m (OSM),
   // brick (OSM building:material) with the casemates' openings =====
   const fortBrick = paintMat(0x9a5b45, 0x6b4a3c, 0, 0.1, { floorHeight: 5, windowWidth: 3.2, windowRatioX: 0.35, windowRatioY: 0.55 });
   model('Fort Point', (P, s, f) => {
@@ -735,7 +756,7 @@ function buildLandmarks(scene) {
       collide((Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...zs) + Math.max(...zs)) / 2, Math.max(...xs) - Math.min(...xs), Math.max(...zs) - Math.min(...zs), y0, y0 + 1 + h);
     }
   }
-  // ===== Alcatraz (docs/landmarks/alcatraz.md): the island is the region ground; its OSM buildings to their heights
+  // ===== Alcatraz (provenance/landmarks/alcatraz.md): the island is the region ground; its OSM buildings to their heights
   // (the cellhouse, untagged, 3 storeys: 13.5 m ESTIMATE; others untagged 9 m ESTIMATE), the lighthouse (26 m, OSM) with
   // its lantern, the 94 ft (28.7 m, NPS) water tower on legs =====
   const prisonConc = paintMat(0xd4cfc2, 0x8f8a7e, 1, 0.15, { floorHeight: 4.5, windowWidth: 2.0 });
@@ -762,7 +783,7 @@ function buildLandmarks(scene) {
     return { cover: false };
   }, { yaw: 0, centre: 'site' });
 
-  // ===== Painted Ladies (docs/landmarks/painted-ladies.md): the seven OSM houses on Steiner St with their heights,
+  // ===== Painted Ladies (provenance/landmarks/painted-ladies.md): the seven OSM houses on Steiner St with their heights,
   // colours and gabled roofs (OSM), wood siding; bay windows on the street fronts (ESTIMATE: one 2-storey bay each) =====
   const siding = paintMat(0xd8c8a8, 0xf2efe8, 2, 0.35, { floorHeight: 3.6, windowWidth: 1.6 });
   model('Painted Ladies', (P, s, f) => {
@@ -782,7 +803,7 @@ function buildLandmarks(scene) {
     return { cover: false };
   }, { yaw: 0, centre: 'site' });
 
-  // ===== Mission Dolores (docs/landmarks/mission-dolores.md): the old adobe mission (OSM, 8 m) and the basilica (OSM,
+  // ===== Mission Dolores (provenance/landmarks/mission-dolores.md): the old adobe mission (OSM, 8 m) and the basilica (OSM,
   // 14 m): white walls, red tile gabled roofs (ESTIMATE: roof pitches) =====
   const adobe = std(0xf1ece0, 0.9, 0.0);
   for (const name of ['Old Mission Dolores', 'Mission Dolores Basilica']) {
@@ -794,7 +815,7 @@ function buildLandmarks(scene) {
     }, { yaw: 0, centre: 'site' });
   }
 
-  // ===== Salesforce Transit Center and Park (docs/landmarks/salesforce-park.md): the centre (opened 2018, after the
+  // ===== Salesforce Transit Center and Park (provenance/landmarks/salesforce-park.md): the centre (opened 2018, after the
   // DataSF footprints' lidar) from OSM's outline to its OSM height (30 m), the park on its roof: OSM's outline, a lawn
   // and trees (ESTIMATES: the park level at the OSM height, the white skin, tree count and size) =====
   const skinWhite = paintMat(0xe9ebe8, 0xcfd3d2, 3, 0.2, { floorHeight: 7.5, windowWidth: 1.4, windowRatioX: 0.6, windowRatioY: 0.75 });
@@ -859,18 +880,29 @@ function buildLandmarks(scene) {
     P.prism(mats.grass, r, y, y + 0.4);
     const xs = r.map((p) => p[0]), zs = r.map((p) => p[1]);
     let n = 0;
+    const plantings = [];
     for (let x = Math.min(...xs) + 6; x < Math.max(...xs) - 6 && n < 120; x += 14) {
       for (let z = Math.min(...zs) + 6; z < Math.max(...zs) - 6; z += 14) {
         if (!pointInFlatRing(r.flat(), x, z) || ((x * 7 + z * 13) & 3) === 0) continue;
-        P.cyl(mats.dirt, x, y, z, 0.25, 0.2, 3, 5);
-        P.add(mats.grass, new THREE.IcosahedronGeometry(2.4, 0), P.at(x, y + 4.5, z));
+        // The original trunk's contact body (0.25 -> 0.2 m, 3 m), now drawn by the species tree standing in it
+        P.body(mats.dirt, new THREE.CylinderGeometry(0.2, 0.25, 3, 5, 1, false), P.at(x, y + 1.5, z), { sides: { sliceHeight: 0.5, maxSlices: 16 } });
+        plantings.push([x, y, z]);
         n++;
       }
+    }
+    // As street-tree field sites (trees.js: the downtown trees' species, levels of detail, shadows and wind). London
+    // plane at 0.8 (a 0.24 m trunk) or ficus at 1 (0.26 m), enclosing the trunk body above; turn, species and size
+    // are deterministic from the position (ESTIMATES). `body: false`: the trunk body is the one registered here.
+    for (const [x, py, z] of plantings) {
+      const [wx, wz] = toWorld(f, x, z), r = Math.abs(Math.sin(wx * 12.9898 + wz * 78.233) * 43758.5453) % 1;
+      const ficus = r < 1 / 3;
+      landmarkTreeSites.push({ x: wx, y: f.y + py + 0.4, z: wz, scale: (ficus ? 1 : 0.8) * (0.95 + r * 0.1), species: ficus ? 3 : 0,
+        yaw: r * 17.3 % (Math.PI * 2), tier: 0, body: false });
     }
     return { cover: false };
   }, { yaw: 0, centre: 'site' });
 
-  // ===== Ghirardelli Square's sign (docs/landmarks/ghirardelli-square.md): GHIRARDELLI, 46 x 5.8 m (19 x 152 ft: Color
+  // ===== Ghirardelli Square's sign (provenance/landmarks/ghirardelli-square.md): GHIRARDELLI, 46 x 5.8 m (19 x 152 ft: Color
   // Kinetics, Funcheap; Sartle gives 25 x 165 ft), facing the waterfront (north), on the highest roof of the square
   // (data/buildings; ESTIMATE: which roof); white lit letters =====
   model('Ghirardelli Square', (P, s, f) => {
@@ -894,7 +926,7 @@ function buildLandmarks(scene) {
     return { cover: false };
   }, { yaw: 0, centre: 'site' });
 
-  // ===== The Powell & Market cable car turntable (docs/landmarks/cable-car-turntable.md): a redwood-faced revolving
+  // ===== The Powell & Market cable car turntable (provenance/landmarks/cable-car-turntable.md): a redwood-faced revolving
   // platform at OSM's node, pushed round by hand. ESTIMATE: its diameter (8.5 m, room for a car: OSM's 5.1 m outline is
   // not a sourced figure); the rails across it =====
   const redwood = std(0x7a4a32, 0.8, 0.0);
@@ -907,7 +939,7 @@ function buildLandmarks(scene) {
   }, { yaw: 0, centre: 'site' });
 
   // ---------------------------------------------------------------------------------------------------------------
-  // Lombard Street's crooked block (P5.5, docs/landmarks/lombard-street.md): red brick paving (OSM surface=bricks)
+  // Lombard Street's crooked block (P5.5, provenance/landmarks/lombard-street.md): red brick paving (OSM surface=bricks)
   // along the switchbacks the road graph drives (PLAN P3-6), terraced flower beds in the rest of its 10 m between the
   // curbs, steps down both sidewalks. ESTIMATES: the paved width (5.6 m), the beds' terraces (1 m cells, 0.25 m proud),
   // the flowers' colours, the steps (0.6 m treads)
@@ -943,7 +975,7 @@ function buildLandmarks(scene) {
       }
       return d;
     };
-    const P = createParts();
+    const P = createParts({ surfaceOf: (mat) => mat === brickMat ? 'brick' : 'pavement' });
     const brickMat = std(0x93503c, 0.92, 0.0);
     brickMat.polygonOffset = true; brickMat.polygonOffsetFactor = -2; brickMat.polygonOffsetUnits = -2;
     // paving: a ribbon 5.6 m wide along each link, 1 m stations, 5 cm over the ground
@@ -972,7 +1004,7 @@ function buildLandmarks(scene) {
       // normals up whichever way the strip was wound
       const nrm = g.attributes.normal;
       for (let k = 0; k < nrm.count; k++) if (nrm.getY(k) < 0) nrm.setXYZ(k, -nrm.getX(k), -nrm.getY(k), -nrm.getZ(k));
-      P.add(brickMat, g);
+      P.add(brickMat, g, null, null, { doubleSided: true, replacesTerrain: true, layered: false });
     }
     // flower beds: 1 m cells between the curbs (corridor / 2 off the axis) farther than the paving from the road
     const beds = [];
@@ -990,6 +1022,8 @@ function buildLandmarks(scene) {
       m4.compose(new THREE.Vector3(x, y + 0.05, z), new THREE.Quaternion().setFromAxisAngle(UP, -Math.atan2(uz, ux)), new THREE.Vector3(1.02, 0.6, 1.02));
       bedMesh.setMatrixAt(i, m4);
       bedMesh.setColorAt(i, col.setHex(flowers[Math.floor(Math.abs(Math.sin(x * 12.99 + z * 78.23) * 43758.5) % flowers.length)]));
+      window.NYC.RideGeometry?.addBox({ x, y: y + 0.05, z }, { x: 0.51, y: 0.3, z: 0.51 }, -Math.atan2(uz, ux),
+        { surface: 'grass', top: true });
     });
     bedMesh.count = beds.length;
     bedMesh.name = 'landmark:lombard-beds';
@@ -1002,7 +1036,7 @@ function buildLandmarks(scene) {
         steps.push([x, T.heightAt(x, z) + 0.12, z]);
       }
     }
-    for (const [x, y, z] of steps) P.add(mats.concrete, UNIT_BOX, P.at(x, y - 0.25, z, -Math.atan2(uz, ux), 0.62, 0.5, Math.max(1.2, side - 1.4)));
+    for (const [x, y, z] of steps) P.box(mats.concrete, x, y - 0.5, z, 0.62, 0.5, Math.max(1.2, side - 1.4), -Math.atan2(uz, ux));
     const g = new THREE.Group();
     g.name = 'landmark:lombard';
     const st = P.build(g, 'landmark:lombard', { shadow: false });
@@ -1022,7 +1056,8 @@ function buildLandmarks(scene) {
     }
     const f = frameOf(s, m.frame);
     place = f;
-    const P = createParts();
+    const P = createParts({ frame: f, surfaceOf: (mat) => mat === mats.grass || mat === grass ? 'grass' :
+      mat === mats.dirt || mat === clay ? 'dirt' : mat === redwood ? 'wood' : mat === brick ? 'brick' : 'pavement' });
     const res = m.build(P, s, f) || {};
     const obj = new THREE.Group();
     const st = P.build(obj, `landmark:${s.slug}`);

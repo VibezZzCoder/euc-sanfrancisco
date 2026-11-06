@@ -1,22 +1,38 @@
-# Notice
+# SF Spin-off: EUC Thrills — notice
 
-Slop San Francisco is derived from [slop-newyork](https://github.com/mrdoob/slop-newyork) by mrdoob,
-imported at commit `0049a49`, used under the [MIT License](LICENSE). The original copyright notice is retained.
-The San Francisco adaptation and contributions are by Kamil ([@unable0_](https://x.com/unable0_)), also under MIT.
+An owner-maintained EUC Thrills city destination by **VibezZzCoder**, in Early Access / Work in Progress.
+Visual refinement and broader device testing continue; physical phone and foldable acceptance is not complete.
 
-Three.js is a separate dependency, loaded from the pinned CDN URL in `index.html`, under its own
-[MIT license](https://github.com/mrdoob/three.js/blob/dev/LICENSE). Offline tool dependencies retain their own licenses.
-The project’s MIT license applies to software; it does not relicense the geographic datasets below.
+## Software origins
 
-## Data
+- [Slop New York](https://github.com/mrdoob/slop-newyork), © 2026 Mr.doob, MIT.
+- [Slop San Francisco](https://github.com/unable12/slop-sanfrancisco), San Francisco adaptation/contributions by
+  **Kamil ([@unable0_](https://x.com/unable0_))**, MIT. Imported SF source:
+  `bdd5d37ed5f5cbb93402e677044f49e498b267e2`; its notice identifies the original NYC import as `0049a49`.
+  Both copyright notices remain in [LICENSE](LICENSE).
+- [EUC Thrills](https://github.com/VibezZzCoder/EUC-thrills), © 2026 VibezZzCoder. Code MIT under
+  [js/euc/LICENSE](js/euc/LICENSE). Original assets, attribution and identity/audio exceptions:
+  [NOTICE-EUC-THRILLS.md](NOTICE-EUC-THRILLS.md). EUC integration also derives from the owner's NYC destination;
+  [provenance](provenance/README.md) records the exact donor snapshots and local adaptations.
+- Three.js is locally vendored under [its MIT license](vendor/three/LICENSE), with pin/file hashes in
+  [vendor/MANIFEST.json](vendor/MANIFEST.json). Inter/Overpass WOFF2 fonts retain their respective SIL OFL notices
+  in `fonts/`. Offline geography-tool dependencies retain their own licenses and lockfile.
 
-- City and County of San Francisco open data (DataSF): Public Domain Dedication and License (PDDL) / CC0.
-- USGS 3D Elevation Program: US government work.
-- © OpenStreetMap contributors, available under the Open Database License (ODbL 1.0).
-  The generated `js/sf-geodata.js` and landmark anchors in `js/sf-places.js` contain geometry derived from OpenStreetMap and are provided under ODbL 1.0.
-  Source URLs, transformation tools and provenance are documented in `docs/data-sources.md`; retain these notices when redistributing the derived data.
-- DataSF Analysis Neighborhoods (`j2bu-swwd`): the 41 official analysis polygons in `js/sf-places.js`; credited to City and County of San Francisco / DataSF.
+The project's software MIT license does not relicense geographic databases, fonts or identity-bearing content.
 
-OSM-derived regional coastline, island and ferry-route geometry also retains ODbL terms. The regional export
-combines sources; use the provenance and transformation notes in [data sources](docs/data-sources.md) rather
-than treating all generated assets as MIT-licensed code.
+## San Francisco data
+
+- **City and County of San Francisco / DataSF:** Public Domain Dedication and License (PDDL); Land Use CC0.
+- **USGS 3D Elevation Program:** public-domain US government work; source elevations are metres NAVD88.
+- **© [OpenStreetMap contributors](https://www.openstreetmap.org/copyright)**, under the
+  [Open Database License (ODbL 1.0)](https://opendatacommons.org/licenses/odbl/1-0/).
+  OSM-derived geometry in `js/sf-geodata.js`, landmark anchors in `js/sf-places.js`, and OSM-derived regional
+  coastline/island/ferry-route data retain ODbL terms. The generated derivative database remains available under
+  ODbL; the combination of sources does not make all data MIT. Keep OSM attribution discoverable in-game.
+- **DataSF Analysis Neighborhoods (`j2bu-swwd`):** the 41 official analysis polygons in `js/sf-places.js`, credited
+  to City and County of San Francisco / DataSF.
+
+Retain the [source/dataset inventory](provenance/data-sources.md), [formats and transformations](provenance/formats.md),
+[landmark references](provenance/landmarks/INDEX.md), generated embedded provenance and geographic tools when curating
+public source. Runtime assets are already included; downloading/regenerating geography is not part of previewing.
+See [LICENSING.md](LICENSING.md) for the complete material/license map.

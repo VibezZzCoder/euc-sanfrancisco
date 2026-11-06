@@ -16,16 +16,19 @@
 const { THREE } = window.NYC;
 const {
   Fn,
+  If,
   float,
   int,
   vec2,
   vec3,
+  vec4,
   color,
   attribute,
   instanceIndex,
   attributeArray,
   normalLocal,
   varying,
+  vertexStage,
   cross,
   normalize,
   sin,
@@ -748,7 +751,7 @@ const qrot = (q, v) => v.add(cross(q.xyz, cross(q.xyz, v).add(v.mul(q.w))).mul(2
 
 /**
  * Material for one crowd mesh. `pose` is its storage buffer (STRIDE vec4s per instance). The vertex stage morphs the
- * bind pose (girth, female, hair) and skins it with two bones; the fragment stage dresses the person from their seed:
+ * bind pose (girth, female, hair), skins it with two bones and resolves seed-based palettes; the fragment stage adds
  * skin tone, hair & hairline, eyes, brows & mouth, a tailored jacket (lapels, shirt V) or casual coat (zip, hem,
  * collar), cuffs, trousers, sneakers or leather shoes with soles & laces.
  */
@@ -778,115 +781,134 @@ function createPersonMaterial(pose) {
     return mix(qrot(qa, p).mul(ta.w).add(ta.xyz), qrot(qb, p).mul(tb.w).add(tb.xyz), w);
   })();
 
-  const vInfo = varying(info, 'vPersonInfo');
-  const isPart = (partId, id) => step(abs(partId.sub(id)), 0.25);
-  const lane = (salt) => fract(sin(vInfo.x.add(salt).mul(12.9898)).mul(43758.5453));
-  const partOf = () => attribute('skin', 'vec4').w;
+  // NYC @9c4cfc9, originally mrdoob/slop-newyork@1fe128d (MIT, © 2026 Mr.doob).
+  // Both SF LODs keep all fragment detail. Resolve palettes/styles per vertex, then
+  // keep those constants flat: hashing smooth seeds caused the repaired speckle.
+  const partId = attribute('skin', 'vec4').w;
+  const posAttr = attribute('position', 'vec3');
+  const isPart = (id) => step(abs(partId.sub(id)), 0.25);
+  const isLeg = isPart(PART.LEG);
+  const isShoe = isPart(PART.SHOE);
+  const isArm = isPart(PART.ARM);
+  const isHand = isPart(PART.HAND);
+  const isHead = isPart(PART.HEAD);
+  const isHair = step(PART.HAIR - 0.5, partId);
+  const female = info.y;
+  const lane = (salt) => fract(sin(info.x.add(salt).mul(12.9898)).mul(43758.5453));
+  const skinCol = pickColorFromPalette(SKIN_COLORS, lane(17.0));
+  const hairCol = pickColorFromPalette(HAIR_COLORS, lane(3.0));
+  const coatCol = mix(pickColorFromPalette(COAT_COLORS, lane(29.0)), pickColorFromPalette(COAT_COLORS_F, lane(29.0)), female);
+  const shirtCol = pickColorFromPalette(SHIRT_COLORS, lane(71.0));
+  const legsCol = mix(pickColorFromPalette(LEG_COLORS, lane(47.0)), pickColorFromPalette(LEG_COLORS_F, lane(47.0)), female);
+  const bald = step(lane(41.0), 0.08).mul(float(1.0).sub(female));
+  const tailored = step(0.42, lane(89.0));
+  const hemY = mix(mix(0.955, 1.0, lane(61.0)), mix(0.88, 1.0, lane(61.0)), female);
+  const sneaker = step(0.4, lane(5.0));
+  const upperCol = mix(
+    mix(color(0x201e1c), color(0x4a3524), lane(23.0)),
+    mix(color(0x252b32), color(0xc8c3b8), step(0.55, lane(31.0))),
+    sneaker
+  );
+  const soleCol = mix(color(0x191816), color(0xd5d1c8), sneaker);
+  const cuffCol = mix(coatCol.mul(0.72), shirtCol, tailored);
+  // Inclusive leather threshold is intentionally not 1 - sneaker at exactly 0.4.
+  const roughness = mix(
+    mix(mix(float(0.86), float(0.55), max(isHand, isHead)), float(0.74), isHair),
+    float(0.38), isShoe.mul(step(lane(5.0), 0.4))
+  );
+  const flat = (node, name) => varying(vertexStage(node), name).setInterpolation('flat');
+  // Each loft has a constant part id across its triangles; pack its useful palettes.
+  const vPartA = flat(vec4(
+    mix(mix(mix(mix(coatCol, legsCol, isLeg), upperCol, isShoe), skinCol, max(isHand, isHead)), hairCol, isHair),
+    mix(mix(tailored, sneaker, isShoe), bald, max(isHead, isHair))
+  ), 'vPersonPartA');
+  const vPartB = flat(vec4(
+    mix(mix(mix(mix(shirtCol, soleCol, isShoe), cuffCol, isArm), hairCol, isHead), skinCol, isHair), hemY
+  ), 'vPersonPartB');
+  // Retain both torso endpoint colours; no position-based palette switch across a triangle.
+  const vPartC = flat(vec4(legsCol, partId), 'vPersonPartC');
+  const vSkin = flat(vec4(skinCol, roughness), 'vPersonSkin');
+  const vLocal = varying(vertexStage(vec3(
+    mix(posAttr.x, attribute('extra', 'vec3').z, isArm), posAttr.y, posAttr.z
+  )), 'vPersonLocal');
 
   mat.colorNode = Fn(() => {
-    const partId = partOf();
-    const female = vInfo.y;
-    const q = attribute('position', 'vec3').toVar();
-    const along = attribute('extra', 'vec3').z;
+    const pId = vPartC.w;
+    const colA = vPartA.xyz;
+    const colB = vPartB.xyz;
+    const param0 = vPartA.w;
+    const q = vLocal;
+    const outCol = vec3(colA).toVar();
 
-    const skinCol = pickColorFromPalette(SKIN_COLORS, lane(17.0)).toVar();
-    const hairCol = pickColorFromPalette(HAIR_COLORS, lane(3.0)).toVar();
-    const coatCol = mix(pickColorFromPalette(COAT_COLORS, lane(29.0)), pickColorFromPalette(COAT_COLORS_F, lane(29.0)), female).toVar();
-    const shirtCol = pickColorFromPalette(SHIRT_COLORS, lane(71.0)).toVar();
-    const legsCol = mix(pickColorFromPalette(LEG_COLORS, lane(47.0)), pickColorFromPalette(LEG_COLORS_F, lane(47.0)), female);
-
-    // Head: skin, hairline (none for the bald), eyes, brows, lips
-    const hd = normalize(vec2(q.x, q.z.add(0.01)));
-    const bald = step(lane(41.0), 0.08).mul(float(1.0).sub(female));
-    const hairline = hd.y.mul(0.055).add(1.62).sub(hd.x.mul(hd.x).sub(hd.y.mul(hd.y)).mul(0.005)).add(bald.mul(0.3));
-    const hairMask = smoothstep(hairline.sub(0.004), hairline.add(0.004), q.y);
-    const front = smoothstep(0.06, 0.08, q.z);
-    const eyeX = abs(abs(q.x).sub(0.031));
-    const eyes = smoothstep(0.011, 0.006, eyeX).mul(smoothstep(0.0055, 0.002, abs(q.y.sub(1.627)))).mul(front);
-    const brows = smoothstep(0.016, 0.01, eyeX).mul(smoothstep(0.0035, 0.0012, abs(q.y.sub(1.646)))).mul(front);
-    const mouth = smoothstep(0.022, 0.014, abs(q.x)).mul(smoothstep(0.0045, 0.0015, abs(q.y.sub(1.549)))).mul(front);
-    const faceCol = mix(
-      skinCol.mul(float(1.0).sub(eyes.mul(0.7)).sub(brows.mul(0.45))),
-      skinCol.mul(color(0xb06a5c)).mul(1.15),
-      mouth.mul(0.7)
-    );
-    const headCol = mix(faceCol, hairCol, hairMask);
-    const hairStrands = hairCol.mul(sin(q.x.mul(170.0).add(q.z.mul(130.0))).mul(0.06).add(0.97));
-    const hairPartCol = mix(hairStrands, skinCol, bald.mul(step(q.y, 1.755)));
-
-    // Torso: collar & neck, tailored jacket (lapels, shirt V) or casual coat (zip, collar band), hem, trousers below
-    const tailored = step(0.42, lane(89.0));
-    const hemY = mix(mix(0.955, 1.0, lane(61.0)), mix(0.88, 1.0, lane(61.0)), female);
-    const chestFront = smoothstep(0.035, 0.075, q.z);
-    const opening = q.y.sub(1.33).mul(0.42);
-    const shirtV = smoothstep(1.33, 1.35, q.y).mul(smoothstep(0.004, 0.0, abs(q.x).sub(opening))).mul(chestFront).mul(tailored);
-    const lapel = smoothstep(0.024, 0.009, abs(abs(q.x).sub(opening)))
-      .mul(smoothstep(1.32, 1.37, q.y))
-      .mul(chestFront)
-      .mul(tailored)
-      .mul(float(1.0).sub(shirtV));
-    const zip = smoothstep(0.006, 0.0025, abs(q.x)).mul(chestFront).mul(float(1.0).sub(tailored));
-    const collarBand = smoothstep(1.455, 1.48, q.y).mul(float(1.0).sub(tailored));
-    const neckLine = mix(1.5, 1.49, tailored);
-    const neck = smoothstep(neckLine.sub(0.004), neckLine.add(0.004), q.y);
-    const hem = smoothstep(hemY.sub(0.004), hemY.add(0.004), q.y);
-    const hemShade = smoothstep(hemY.add(0.035), hemY, q.y).mul(0.12);
-    const jacketCol = mix(
-      coatCol.mul(float(1.0).sub(lapel.mul(0.25)).sub(zip.mul(0.4)).sub(collarBand.mul(0.15)).sub(hemShade)),
-      shirtCol,
-      shirtV
-    );
-    const torsoCol = mix(mix(legsCol, jacketCol, hem), skinCol, neck);
-
-    // Sleeves: cuffs (shirt cuff under a tailored jacket)
-    const cuff = smoothstep(0.93, 0.96, along);
-    const sleeveCol = mix(coatCol, mix(coatCol.mul(0.72), shirtCol, tailored), cuff);
-
-    // Trousers: subtle front crease
-    const crease = smoothstep(0.004, 0.0, abs(abs(q.x).sub(HIP_X))).mul(step(0.0, q.z)).mul(0.08);
-    const trouserCol = legsCol.mul(float(1.0).sub(crease));
-
-    // Shoes: sneakers or leather, soles, laces over the instep
-    const sneaker = step(0.4, lane(5.0));
-    const leatherCol = mix(color(0x201e1c), color(0x4a3524), lane(23.0));
-    const sneakerCol = mix(color(0x252b32), color(0xc8c3b8), step(0.55, lane(31.0)));
-    const upperCol = mix(leatherCol, sneakerCol, sneaker);
-    const sole = smoothstep(0.024, 0.016, q.y);
-    const soleCol = mix(color(0x191816), color(0xd5d1c8), sneaker);
-    const laceCoord = q.z.mul(80.0);
-    const laces = smoothstep(0.6, 0.75, fract(laceCoord))
-      .mul(step(abs(abs(q.x).sub(HIP_X)), 0.016))
-      .mul(step(0.0, q.z))
-      .mul(step(q.z, 0.09))
-      .mul(step(0.075, q.y))
-      .mul(sneaker);
-    const shoeCol = mix(mix(upperCol, soleCol, sole), color(0xb8b4aa), laces.mul(0.6));
-
-    return mix(
-      mix(
-        mix(
-          mix(
-            mix(mix(torsoCol, trouserCol, isPart(partId, PART.LEG)), shoeCol, isPart(partId, PART.SHOE)),
-            sleeveCol,
-            isPart(partId, PART.ARM)
-          ),
-          skinCol,
-          isPart(partId, PART.HAND)
-        ),
-        headCol,
-        isPart(partId, PART.HEAD)
-      ),
-      hairPartCol,
-      step(PART.HAIR - 0.5, partId)
-    );
+    If(pId.lessThan(0.5), () => {
+      // Torso: collar & neck, jacket or casual coat, hem, trousers below
+      const tailored = param0;
+      const hemY = vPartB.w;
+      const chestFront = smoothstep(0.035, 0.075, q.z);
+      const opening = q.y.sub(1.33).mul(0.42);
+      const shirtV = smoothstep(1.33, 1.35, q.y).mul(smoothstep(0.004, 0.0, abs(q.x).sub(opening))).mul(chestFront).mul(tailored);
+      const lapel = smoothstep(0.024, 0.009, abs(abs(q.x).sub(opening)))
+        .mul(smoothstep(1.32, 1.37, q.y))
+        .mul(chestFront)
+        .mul(tailored)
+        .mul(float(1.0).sub(shirtV));
+      const zip = smoothstep(0.006, 0.0025, abs(q.x)).mul(chestFront).mul(float(1.0).sub(tailored));
+      const collarBand = smoothstep(1.455, 1.48, q.y).mul(float(1.0).sub(tailored));
+      const neckLine = mix(1.5, 1.49, tailored);
+      const neck = smoothstep(neckLine.sub(0.004), neckLine.add(0.004), q.y);
+      const hem = smoothstep(hemY.sub(0.004), hemY.add(0.004), q.y);
+      const hemShade = smoothstep(hemY.add(0.035), hemY, q.y).mul(0.12);
+      const jacketCol = mix(
+        colA.mul(float(1.0).sub(lapel.mul(0.25)).sub(zip.mul(0.4)).sub(collarBand.mul(0.15)).sub(hemShade)),
+        colB,
+        shirtV
+      );
+      outCol.assign(mix(mix(vPartC.xyz, jacketCol, hem), vSkin.xyz, neck));
+    })
+      .ElseIf(pId.lessThan(1.5), () => {
+        const crease = smoothstep(0.004, 0.0, abs(abs(q.x).sub(HIP_X))).mul(step(0.0, q.z)).mul(0.08);
+        outCol.assign(colA.mul(float(1.0).sub(crease)));
+      })
+      .ElseIf(pId.lessThan(2.5), () => {
+        // Shoes: sneakers or leather, soles, laces over the instep
+        const sole = smoothstep(0.024, 0.016, q.y);
+        const laces = smoothstep(0.6, 0.75, fract(q.z.mul(80.0)))
+          .mul(step(abs(abs(q.x).sub(HIP_X)), 0.016))
+          .mul(step(0.0, q.z))
+          .mul(step(q.z, 0.09))
+          .mul(step(0.075, q.y))
+          .mul(param0);
+        outCol.assign(mix(mix(colA, colB, sole), color(0xb8b4aa), laces.mul(0.6)));
+      })
+      .ElseIf(pId.lessThan(3.5), () => {
+        // Sleeves: q.x carries the original along coordinate for the cuff.
+        outCol.assign(mix(colA, colB, smoothstep(0.93, 0.96, q.x)));
+      })
+      .ElseIf(pId.greaterThan(5.5), () => {
+        const hairStrands = colA.mul(sin(q.x.mul(170.0).add(q.z.mul(130.0))).mul(0.06).add(0.97));
+        outCol.assign(mix(hairStrands, colB, param0.mul(step(q.y, 1.755))));
+      })
+      .ElseIf(pId.greaterThan(4.5), () => {
+        // Head: skin, hairline (none for the bald), eyes, brows, lips
+        const hd = normalize(vec2(q.x, q.z.add(0.01)));
+        const hairline = hd.y.mul(0.055).add(1.62).sub(hd.x.mul(hd.x).sub(hd.y.mul(hd.y)).mul(0.005)).add(param0.mul(0.3));
+        const hairMask = smoothstep(hairline.sub(0.004), hairline.add(0.004), q.y);
+        const front = smoothstep(0.06, 0.08, q.z);
+        const eyeX = abs(abs(q.x).sub(0.031));
+        const eyes = smoothstep(0.011, 0.006, eyeX).mul(smoothstep(0.0055, 0.002, abs(q.y.sub(1.627)))).mul(front);
+        const brows = smoothstep(0.016, 0.01, eyeX).mul(smoothstep(0.0035, 0.0012, abs(q.y.sub(1.646)))).mul(front);
+        const mouth = smoothstep(0.022, 0.014, abs(q.x)).mul(smoothstep(0.0045, 0.0015, abs(q.y.sub(1.549)))).mul(front);
+        const faceCol = mix(
+          colA.mul(float(1.0).sub(eyes.mul(0.7)).sub(brows.mul(0.45))),
+          colA.mul(color(0xb06a5c)).mul(1.15),
+          mouth.mul(0.7)
+        );
+        outCol.assign(mix(faceCol, colB, hairMask));
+      });
+    return outCol;
   })();
 
-  mat.roughnessNode = Fn(() => {
-    const partId = partOf();
-    const skin = max(isPart(partId, PART.HAND), isPart(partId, PART.HEAD));
-    const leather = isPart(partId, PART.SHOE).mul(step(lane(5.0), 0.4));
-    return mix(mix(mix(float(0.86), float(0.55), skin), float(0.74), step(PART.HAIR - 0.5, partId)), float(0.38), leather);
-  })();
+  mat.roughnessNode = vSkin.w;
 
   return mat;
 }
@@ -901,15 +923,18 @@ class PersonCrowd {
    */
   constructor(maxCount, { farDistance = 34, castShadow = true } = {}) {
     this.farDistance = farDistance;
+    this.updates = 0;
     this.lods = [1, 0].map((detail) => {
-      const pose = attributeArray(maxCount * STRIDE, 'vec4').toReadOnly();
+      // NYC @cf56976: indexed WebGL2 reads use e27dfa9's lazy PBO texture;
+      // WebGPU retains native storage. Setup may replace pose.value.array with padded storage.
+      const pose = attributeArray(maxCount * STRIDE, 'vec4').setPBO(true).toReadOnly();
       const mesh = new THREE.Mesh(buildPersonGeometry(detail), createPersonMaterial(pose));
       mesh.name = detail ? 'PeopleNear' : 'PeopleFar';
-      mesh.count = 1; // one (degenerate) person until the first frame, so the pipelines compile up front
+      mesh.count = 1; // one degenerate person through warm-up, including the shadow pipelines
       mesh.frustumCulled = false;
       mesh.castShadow = castShadow;
       mesh.receiveShadow = true;
-      return { pose, mesh, count: 0, max: maxCount };
+      return { pose, mesh, count: 0, max: maxCount, hasZero: true };
     });
     this.meshes = this.lods.map((l) => l.mesh);
   }
@@ -926,13 +951,32 @@ class PersonCrowd {
   }
 
   end() {
+    // Match traffic's two-update warm-up window; afterwards empty LODs draw/upload nothing.
+    const hideEmpty = ++this.updates > 2;
     for (const l of this.lods) {
+      if (l.count === 0) {
+        if (!hideEmpty && !l.hasZero) {
+          const attr = l.pose.value;
+          attr.array.fill(0, 0, STRIDE * 4);
+          attr.clearUpdateRanges();
+          attr.addUpdateRange(0, STRIDE * 4);
+          attr.needsUpdate = true;
+          if (attr.pbo) attr.pbo.needsUpdate = true;
+          l.hasZero = true;
+        }
+        l.mesh.count = hideEmpty ? 0 : 1;
+        l.mesh.visible = !hideEmpty;
+        continue;
+      }
+      l.hasZero = false;
       l.mesh.count = l.count;
-      if (l.count === 0) continue;
+      l.mesh.visible = true;
       const attr = l.pose.value;
       attr.clearUpdateRanges();
       attr.addUpdateRange(0, l.count * STRIDE * 4);
       attr.needsUpdate = true;
+      // CPU buffer writes do not advance the fallback texture/source versions automatically.
+      if (attr.pbo) attr.pbo.needsUpdate = true;
     }
   }
 }
@@ -963,6 +1007,18 @@ const smooth = (e0, e1, x) => {
   return t * t * (3 - 2 * t);
 };
 const lerp = (a, b, t) => a + (b - a) * t;
+
+// Same-dt gait easing adapted from NYC 9c4cfc9, itself based on upstream 1fe128d.
+// Keep SF's original constants and division arithmetic; never skip a person's update.
+let easeDt = -1;
+let easeValues;
+function gaitEase(dt) {
+  if (dt !== easeDt) {
+    easeDt = dt;
+    easeValues = [0.1, 0.22, 0.3, 0.04, 0.12, 0.045].map(t => 1 - Math.exp(-dt / t));
+  }
+  return easeValues;
+}
 
 const _q = new THREE.Quaternion();
 const _q2 = new THREE.Quaternion();
@@ -1104,11 +1160,15 @@ class PersonRig {
       return;
     }
     dt = Math.min(Math.max(dt, 1e-4), 0.1);
+    // Index rather than destructure the double array: avoid per-person iterator/boxing
+    // churn. Copy all coefficients before ground callbacks can re-enter another rig.
+    const easing = gaitEase(dt);
+    const kv = easing[0], gaitEaseValue = easing[1], runEase = easing[2];
+    const airEase = easing[3], swayEase = easing[4], pelvisEase = easing[5];
     const s = this.s;
     this.time += dt;
 
     // Body velocity (smoothed) and heading
-    const kv = 1 - Math.exp(-dt / 0.1);
     this.vx += ((x - this.x) / dt - this.vx) * kv;
     this.vz += ((z - this.z) / dt - this.vz) * kv;
     this.x = x;
@@ -1120,13 +1180,13 @@ class PersonRig {
     const cosY = Math.cos(this.yaw);
     const fwdSpeed = this.vx * sinY + this.vz * cosY;
 
-    this.gait += (Math.min(1, speed / 0.9) - this.gait) * (1 - Math.exp(-dt / 0.22));
-    this.run += (smooth(2.3, 3.6, speed) - this.run) * (1 - Math.exp(-dt / 0.3));
+    this.gait += (Math.min(1, speed / 0.9) - this.gait) * gaitEaseValue;
+    this.run += (smooth(2.3, 3.6, speed) - this.run) * runEase;
     const run = this.run;
     const duty = lerp(GAIT.dutyWalk, GAIT.dutyRun - 0.07 * smooth(4.5, 8, speed), run);
 
     // Airborne (jumping): legs tuck under the body, feet land wherever they come down
-    this.air += (air - this.air) * (1 - Math.exp(-dt / 0.04));
+    this.air += (air - this.air) * airEase;
     if (air > 0.03) {
       for (const foot of this.feet) {
         this.restPoint(foot, x, z, this.yaw, _v);
@@ -1271,7 +1331,7 @@ class PersonRig {
     const latR = (right.ax - x) * cosY - (right.az - z) * sinY;
     const cSum = left.contact + right.contact;
     const swayTarget = cSum > 0.01 ? ((left.contact * latL + right.contact * latR) / cSum) * 0.42 * g * (1 - run * 0.6) : 0;
-    this.sway += (swayTarget - this.sway) * (1 - Math.exp(-dt / 0.12));
+    this.sway += (swayTarget - this.sway) * swayEase;
 
     this.pelvisYaw = Math.max(-0.13, Math.min(0.13, -0.13 * spreadF * g));
     this.pelvisRoll = 0.045 * g * (left.contact - right.contact) * (1 - run * 0.5);
@@ -1285,7 +1345,9 @@ class PersonRig {
     const compress = run * s * (0.075 * Math.max(left.stance || 0, right.stance || 0) - 0.015);
     let target = groundAvg + ANKLE_H * s + this.legLength * bend + (PELVIS_Y - HIP_Y) * s - compress;
     const reach = this.legLength * 0.997;
-    const hard = [Infinity, Infinity];
+    // Two local limits retain the original left/right Math.min order without a
+    // fresh double array for every pedestrian, including those outside the view.
+    let hardLeft = Infinity, hardRight = Infinity;
     for (let i = 0; i < 2; i++) {
       const foot = this.feet[i];
       this.hipOffset(i, _v);
@@ -1293,11 +1355,14 @@ class PersonRig {
       const hz = z - sinY * this.sway + _v.z;
       const d = Math.hypot(foot.ax - hx, foot.az - hz);
       const top = foot.ay + Math.sqrt(Math.max(0, reach * reach - d * d)) - _v.y;
-      if (foot.contact > 0.97) hard[i] = top;
+      if (foot.contact > 0.97) {
+        if (i === 0) hardLeft = top;
+        else hardRight = top;
+      }
       target = Math.min(target, top + (1 - foot.contact) * lerp(0.35, 1.5, run));
     }
-    this.pelvisY += (target - this.pelvisY) * (1 - Math.exp(-dt / 0.045));
-    this.pelvisY = Math.min(this.pelvisY, hard[0], hard[1]);
+    this.pelvisY += (target - this.pelvisY) * pelvisEase;
+    this.pelvisY = Math.min(this.pelvisY, hardLeft, hardRight);
     if (updatePose) this.solve();
   }
 

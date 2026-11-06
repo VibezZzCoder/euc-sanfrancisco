@@ -7,14 +7,14 @@
 // at the end of the run, starts again at its beginning. Cable cars hold the cable's constant speed (CABLE_SPEED)
 // between stops. Bodies stand on the terrain (curb islands and rail medians: CURB_H higher) or on a bridge deck
 // (GradeSeparation.floorAt), pitched between their bogies.
-// Liveries (docs/landmarks/muni.md): Muni Metro silver with a red stripe; cable cars maroon with light-blue trim and
-// cream panels; the F line's streetcars in a few two-tone schemes standing for its historic cars (a style choice).
+// Generic operator liveries retain metallic light rail, maroon/cream cable cars and two-tone historic streetcars.
 // Cars and pedestrians don't see the rail vehicles yet (a known gap, P4 gallery).
 
 const { THREE } = window.NYC;
 const { mergeGeometries } = window.NYC.Addons;
 const { Fn, attribute, color, mix, step, float, vec3, smoothstep } = window.NYC.TSL;
 const { blockAt, cityUniforms, CURB_H } = window.NYC;
+const { createSfDynamicBodyIndex, sfVehicleShape, writeSfVehicleBody } = window.NYC;
 
 const CABLE_SPEED = 15 / 3.6; // m/s: the cable's speed (PLAN P4.6: 15 km/h-equivalent)
 const KINDS = {
@@ -162,7 +162,7 @@ function buildSFTransit(scene) {
     const K = KINDS[run.kind];
     const n = Math.max(1, Math.round(run.len / K.spacing));
     for (let k = 0; k < n; k++) {
-      const v = { run, K, s: (run.len * (k + rand() * 0.5)) / n, v: K.v, dwell: 0, nextStop: 0, x: 0, y: 0, z: 0, yaw: 0, pitch: 0 };
+      const v = { run, K, s: (run.len * (k + rand() * 0.5)) / n, v: K.v, dwell: 0, nextStop: 0, x: 0, y: 0, z: 0, yaw: 0, pitch: 0, dynamicBody: {}, wrapped: false };
       v.nextStop = run.stops.findIndex((st) => st > v.s + 1);
       run.vehicles.push(v);
       vehicles.push(v);
@@ -173,6 +173,9 @@ function buildSFTransit(scene) {
   // Meshes: one instanced mesh per kind, liveries per instance
   const material = createRailVehicleMaterial();
   const geos = { streetcar: buildStreetcarGeometry(), lightrail: buildLightRailGeometry(), cablecar: buildCableCarGeometry() };
+  const profiles = {};
+  for (const kind of Object.keys(KINDS)) profiles[kind] = sfVehicleShape(geos[kind]);
+  const bodyIndex = createSfDynamicBodyIndex();
   const meshes = {};
   const col = new THREE.Color();
   for (const kind of Object.keys(KINDS)) {
@@ -183,7 +186,7 @@ function buildSFTransit(scene) {
     list.forEach((v, i) => {
       let pair;
       if (kind === 'streetcar') pair = STREETCAR_LIVERIES[i % STREETCAR_LIVERIES.length];
-      else if (kind === 'lightrail') pair = [0xc3c8cd, 0xbe1e2d];
+      else if (kind === 'lightrail') pair = [0xc3c8cd, 0x286477];
       else pair = [0x7b1e2a, i % 4 === 3 ? 0x8fb8d8 : 0xece2c6];
       col.setHex(pair[0]).toArray(A, i * 3);
       col.setHex(pair[1]).toArray(B, i * 3);
@@ -220,6 +223,7 @@ function buildSFTransit(scene) {
       for (let i = 0; i < vs.length; i++) {
         const v = vs[i];
         const K = v.K;
+        v.wrapped = false;
         if (v.dwell > 0) { v.dwell -= dt; continue; }
         // the vehicle ahead on the run (the last one follows the first round the loop's restart)
         const lead = vs.length > 1 ? vs[(i + 1) % vs.length] : null;
@@ -240,14 +244,24 @@ function buildSFTransit(scene) {
         }
         if (v.s >= run.len) {
           v.s -= run.len;
+          v.wrapped = true;
           v.nextStop = run.stops.findIndex((st) => st > v.s + 1);
         }
       }
       vs.sort((a, b) => a.s - b.s);
     }
+    bodyIndex.begin();
+    for (const v of vehicles) {
+      const px = v.x, pz = v.z;
+      place(v);
+      // A route restart is a discontinuous stream placement, not an all-city velocity impulse.
+      v.velocityX = dt > 0 && !v.wrapped ? (v.x - px) / dt : Math.sin(v.yaw) * v.v;
+      v.velocityZ = dt > 0 && !v.wrapped ? (v.z - pz) / dt : Math.cos(v.yaw) * v.v;
+      bodyIndex.add(writeSfVehicleBody(v.dynamicBody, profiles[v.run.kind], v.x, v.y, v.z, v.yaw, v.pitch, 0, v.velocityX, v.velocityZ));
+    }
+    bodyIndex.commit();
     for (const { mesh, list } of Object.values(meshes)) {
       list.forEach((v, i) => {
-        place(v);
         dummy.position.set(v.x, v.y, v.z);
         dummy.rotation.set(v.pitch, v.yaw, 0, 'YXZ');
         dummy.updateMatrix();
@@ -258,7 +272,8 @@ function buildSFTransit(scene) {
   }
   update(0);
   console.info(`[details] transit: ${runs.length} runs, ${vehicles.length} vehicles (${Object.entries(meshes).map(([k, m]) => `${m.list.length} ${k}`).join(', ')})`);
-  return { group, update, runs, vehicles };
+  return { group, update, runs, vehicles, dynamicBodiesNear: bodyIndex.dynamicBodiesNear,
+    bodyVersion: bodyIndex.bodyVersion, bodyQueryStats: bodyIndex.stats };
 }
 
 Object.assign(window.NYC, { buildSFTransit });

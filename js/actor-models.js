@@ -14,9 +14,7 @@ const {
   vec3,
   color,
   attribute,
-  uv,
   sin,
-  cos,
   abs,
   fract,
   min,
@@ -34,7 +32,6 @@ const {
 const { mergeGeometries, mergeVertices } = window.NYC.Addons;
 
 const _vector = new THREE.Vector3();
-const _down = new THREE.Vector3(0, -1, 0);
 
 // ============================================================================
 // 1. LOFT GEOMETRY (Ported from three/addons/geometries/LoftGeometry.js)
@@ -308,8 +305,7 @@ const BODY_SPECS = {
     rails: true
   }
 };
-// San Francisco's robotaxi (a Waymo-style white crossover with a roof lidar dome and perimeter sensor pods) takes the
-// place of New York's yellow cab: the player's car and the 'taxi' class of the traffic
+// Generic autonomous city fleet: white crossovers with roof lidar and perimeter sensors. No operator branding.
 BODY_SPECS.robotaxi = Object.assign({}, BODY_SPECS.sedan, { name: 'robotaxi', sign: false, sensors: true, chrome: false });
 BODY_SPECS.taxi = BODY_SPECS.robotaxi;
 // San Francisco's delivery & shuttle vans (P4.6): the SUV's chassis under a tall, long roof, no cladding or roof rails
@@ -494,20 +490,19 @@ function bodyHalfProfile(s, detail, spec = {}) {
   const n1 = spec.lowerRound || BODY_LOWER_ROUND;
   const n2 = spec.upperRound || BODY_UPPER_ROUND;
   const right = [];
-  const low = detail ? (spec.hero ? [0,.15,.3,.45,.6,.75,.87,1] : [0, 0.32, 0.64, 1]) : [0, 1];
+  const low = detail ? [0, 0.32, 0.64, 1] : [0, 1];
   const up = detail ? spec.upperSamples || [0.38, 0.72, 1] : [1];
-  const top = detail ? (spec.hero ? [.9,.76,.6,.4,.2] : [0.66, 0.33]) : [0.5];
+  const top = detail ? [0.66, 0.33] : [0.5];
   for (const a of low) {
     const th = (a * Math.PI) / 2;
-    right.push([s.xB + (s.W - s.xB) * Math.pow(Math.sin(th), 2 / n1) - (spec.hero ? .025 * Math.sin(th * 2) ** 2 : 0), s.yS - (s.yS - s.yB) * Math.pow(Math.cos(th), 2 / n1)]);
+    right.push([s.xB + (s.W - s.xB) * Math.pow(Math.sin(th), 2 / n1), s.yS - (s.yS - s.yB) * Math.pow(Math.cos(th), 2 / n1)]);
   }
   for (const a of up) {
     const th = (a * Math.PI) / 2;
     right.push([s.xE + (s.W - s.xE) * Math.pow(Math.cos(th), 2 / n2), s.yS + (s.yE - s.yS) * Math.pow(Math.sin(th), 2 / n2)]);
   }
   for (const f of top) {
-    const hoodCrease = spec.hero ? .014 * Math.exp(-(((f-.76)/.12)**2)) * Math.max(0,Math.min(1,(s.z-1)*3)) : 0;
-    right.push([s.xE*f,s.yE+(s.yT-s.yE)*(1-f*f)+hoodCrease]);
+    right.push([s.xE * f, s.yE + (s.yT - s.yE) * (1 - f * f)]);
   }
   return right;
 }
@@ -525,7 +520,7 @@ function bodyStations(spec, detail) {
     add(spec.zRear + tailLen * (1 - u));
   }
   const archR = spec.wheelRadius + spec.archGap;
-  const k = detail ? (spec.hero ? 24 : 8) : 4;
+  const k = detail ? 8 : 4;
   for (const axle of [spec.wheelZ, -spec.wheelZ]) {
     for (let i = 0; i <= k; i++) add(axle + archR * Math.cos((i / k) * Math.PI));
     add(axle + archR + 0.006);
@@ -599,7 +594,7 @@ function carBodyHalfWidthAt(spec, z, y) {
   const pts = [];
   for (let i = 0; i <= 16; i++) {
     const th = ((i / 16) * Math.PI) / 2;
-    pts.push([s.xB + (s.W - s.xB) * Math.pow(Math.sin(th), 2 / n1) - (spec.hero ? .025 * Math.sin(th * 2) ** 2 : 0), s.yS - (s.yS - s.yB) * Math.pow(Math.cos(th), 2 / n1)]);
+    pts.push([s.xB + (s.W - s.xB) * Math.pow(Math.sin(th), 2 / n1), s.yS - (s.yS - s.yB) * Math.pow(Math.cos(th), 2 / n1)]);
   }
   for (let i = 1; i <= 16; i++) {
     const th = ((i / 16) * Math.PI) / 2;
@@ -613,40 +608,6 @@ function carBodyHalfWidthAt(spec, z, y) {
     }
   }
   return s.xE;
-}
-
-/**
- * A thin grid patch lying `offset` m off the body side (side = +1: +x) over z0..z1, y0..y1. UVs read from the
- * front of the car to the back on both sides (u = 0 at the front on the +x side, at the back on the -x side).
- */
-function buildCarSidePatch(spec, side, z0, z1, y0, y1, offset = 0.003, nz = 10, ny = 6) {
-  const positions = [];
-  const uvs = [];
-  const indices = [];
-  for (let j = 0; j <= ny; j++) {
-    const v = j / ny;
-    const y = lerp(y0, y1, v);
-    for (let i = 0; i <= nz; i++) {
-      const u = i / nz;
-      const z = side > 0 ? lerp(z1, z0, u) : lerp(z0, z1, u);
-      positions.push(side * (carBodyHalfWidthAt(spec, z, y) + offset), y, z);
-      uvs.push(u, v);
-      if (i < nz && j < ny) {
-        const a = j * (nz + 1) + i;
-        const b = a + 1;
-        const c = a + nz + 1;
-        const d = c + 1;
-        if (side > 0) indices.push(a, b, c, b, d, c);
-        else indices.push(a, c, b, b, c, d);
-      }
-    }
-  }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  g.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-  g.setIndex(indices);
-  g.computeVertexNormals();
-  return g;
 }
 
 function roundedRectShape(hw, hh, r) {
@@ -678,7 +639,7 @@ function roundedBox(hw, hh, depth, r, bevel = 0.012) {
 
 /**
  * Builds a single wheel assembly (LatheGeometry tyre + recessed alloy lip + dished hub)
- * centered at the origin (for steerable/spinning player wheels) or translated to (x, r, z).
+ * centered at the origin (for steerable/spinning traffic wheels) or translated to (x, r, z).
  */
 function buildWheelParts(spec, side, translateToAxle = false, z = 0) {
   const r = spec.wheelRadius;
@@ -983,11 +944,54 @@ const coverage = (d) => {
 };
 
 const _carMaterialCache = new Map();
+const _carWheelMaterialCache = new Map();
+
+// Dedicated-wheel graph pattern: NYC @9c4cfc9, originally mrdoob/slop-newyork@9cabaeb
+// (MIT, © 2026 Mr.doob). SF keeps its own five-ray alloys, valve, hub and tread,
+// roughness/metalness and default environment response, not NYC's newer wheel styles.
+// Only for buildSteerableWheelGeo's centred TYRE/ALLOY geometry; body/proxy wheels
+// still need createLoftedCarMaterial's axle coordinates and full part vocabulary.
+function createCarWheelMaterial(wheelRadius = BODY_SPECS.sedan.wheelRadius) {
+  if (_carWheelMaterialCache.has(wheelRadius)) return _carWheelMaterialCache.get(wheelRadius);
+  const p = attribute('position', 'vec3');
+  const partId = attribute('partId', 'float');
+  const isTyre = step(abs(partId.sub(CAR_PARTS.TYRE)), 0.25);
+  const isAlloy = step(abs(partId.sub(CAR_PARTS.ALLOY)), 0.25);
+  const wheelR = float(wheelRadius);
+  const wheelVec = vec2(p.z, p.y);
+  const wheelDist = length(wheelVec);
+  const wDir = wheelVec.div(max(wheelDist, 0.0001));
+  let spokes = float(0.0);
+  for (let k = 0; k < 5; k++) {
+    const ang = (k * Math.PI * 2) / 5;
+    const cs = Math.cos(ang);
+    const sn = Math.sin(ang);
+    const alongSpoke = wDir.x.mul(cs).add(wDir.y.mul(sn));
+    const perp = abs(wDir.x.mul(sn).sub(wDir.y.mul(cs))).mul(wheelDist);
+    spokes = max(spokes, smoothstep(0.034, 0.018, perp).mul(step(0.0, alongSpoke)));
+  }
+  const rimRing = smoothstep(wheelR.mul(0.56), wheelR.mul(0.6), wheelDist);
+  const centerHub = smoothstep(0.068, 0.042, wheelDist);
+  const centerCap = smoothstep(0.03, 0.018, wheelDist);
+  const valveDot = smoothstep(0.028, 0.014, length(wheelVec.sub(vec2(0.0, wheelR.mul(-0.48)))));
+  const alloyMetal = clamp(max(max(spokes, valveDot), max(rimRing, centerHub)).sub(centerCap.mul(0.85)), 0.0, 1.0);
+  const alloyCol = mix(color(0x0b0e12), color(0xd8e0e8), alloyMetal);
+  const treadZone = smoothstep(wheelR.mul(0.74), wheelR.mul(0.83), wheelDist);
+  const tyreBase = smoothstep(wheelR.mul(0.85), wheelR.mul(0.94), wheelDist).mul(0.22).add(0.78);
+  const tyreCol = color(0x16181b).mul(tyreBase.add(spokes.mul(treadZone).mul(0.24)));
+  const alloySpokes = max(spokes, rimRing).mul(isAlloy);
+  const mat = new THREE.MeshStandardNodeMaterial();
+  mat.colorNode = mix(alloyCol, tyreCol, isTyre);
+  mat.roughnessNode = mix(float(0.26), float(0.82), max(isTyre, isAlloy.sub(alloySpokes)));
+  mat.metalnessNode = mix(mix(float(0.34), float(0.86), alloySpokes), float(0.04), isTyre);
+  _carWheelMaterialCache.set(wheelRadius, mat);
+  return mat;
+}
 
 /**
  * Creates the TSL material for lofted vehicles.
  * Instanced traffic reads the per-instance `paintColor` (vec3) and `carState` (vec4: brake, left (+x) & right (-x)
- * turn signal, livery: 1 = NYPD) attributes; with a fixed `fixedColorHex` (the player's taxi, wheels) the state is the
+ * turn signal, livery: 1 = NYPD) attributes; with a fixed `fixedColorHex` (the traffic wheels) the state is the
  * `material.userData.carState` uniform instead.
  * Every mask is built once and shared by the colour, roughness, metalness & emissive graphs (TSL turns nodes used
  * more than once into temporaries), so the fragment shader evaluates each SDF a single time.
@@ -1116,7 +1120,7 @@ function createLoftedCarMaterial(spec, fixedColorHex = null) {
   const plates = max(plateFront, plateRear);
   const cladding =
     spec.cladding > 0
-      ? max(smoothstep(spec.cladding + 0.01, spec.cladding - 0.01, p.y), smoothstep(archR + (spec.hero ? 0.028 : 0.075), archR + (spec.hero ? 0.018 : 0.06), wheelDist))
+      ? max(smoothstep(spec.cladding + 0.01, spec.cladding - 0.01, p.y), smoothstep(archR + 0.075, archR + 0.06, wheelDist))
         .mul(isBody)
         .mul(one.sub(lamp))
         .mul(one.sub(plates))
@@ -1147,7 +1151,7 @@ function createLoftedCarMaterial(spec, fixedColorHex = null) {
 
   // ---- Colour ---------------------------------------------------------------------------------------------------
   // Liveries: the police cruiser (state.w 1; San Francisco, P4.6: a generic black-and-white, white doors with dark
-  // lettering on a black body; SFPD's own current scheme is not verified, docs/landmarks/muni.md); the taxi's door
+  // lettering on a black body; SFPD's own current scheme is not verified, provenance/landmarks/muni.md); the taxi's door
   // badges and medallion number
   const isNYPD = step(0.5, state.w).mul(isSide).mul(isBody);
   const doorMid = (spec.doors[0] + spec.doors[1]) / 2;
@@ -1249,11 +1253,11 @@ function createLoftedCarMaterial(spec, fixedColorHex = null) {
   const turn = color(0xff9a14).mul(max(turnFront, turnRear).mul(blink).mul(2.2));
   const sign = color(0xffe28a).mul(signFace.mul(one.sub(signGlyph.mul(0.9))).mul(1.65));
 
-  const mat = spec.hero ? new THREE.MeshPhysicalNodeMaterial({clearcoat:.55,clearcoatRoughness:.22}) : new THREE.MeshStandardNodeMaterial();
+  const mat = new THREE.MeshStandardNodeMaterial();
   if (fixed) mat.userData.carState = stateUniform;
   mat.colorNode = col;
   mat.roughnessNode = rough;
-  mat.metalnessNode = spec.hero ? mix(metal, float(.12), one.sub(max(glass, max(lamp, max(isTyre, isAlloy))))) : metal;
+  mat.metalnessNode = metal;
   mat.emissiveNode = headlamps.add(tail).add(stop).add(turn).add(sign);
 
   _carMaterialCache.set(cacheKey, mat);
@@ -1262,31 +1266,9 @@ function createLoftedCarMaterial(spec, fixedColorHex = null) {
 
 
 // ============================================================================
-// 3. TUBE SECTIONS ALONG A POLYLINE (the helicopter's skids; the people are built in pedestrians.js)
+// 3. LOFTED CITY BUS GEOMETRY & TSL MATERIAL
 // ============================================================================
-function ring(center, rx, rz, segments = 6, phase = 0) {
-  return Array.from({ length: segments }, (_, i) => {
-    const a = (i / segments) * Math.PI * 2 + phase;
-    return new THREE.Vector3(center.x + Math.cos(a) * rx, center.y, center.z + Math.sin(a) * rz);
-  });
-}
-
-function limbSections(joints, segments = 6, phase = 0) {
-  const rotation = new THREE.Quaternion();
-  return joints.map(([center, rx, rz], i) => {
-    const before = joints[Math.max(0, i - 1)][0];
-    const after = joints[Math.min(joints.length - 1, i + 1)][0];
-    rotation.setFromUnitVectors(_down, after.clone().sub(before).normalize());
-    return ring(new THREE.Vector3(), rx, rz, segments, phase).map((p) =>
-      p.applyQuaternion(rotation).add(center)
-    );
-  });
-}
-
-// ============================================================================
-// 4. LOFTED MTA BUS GEOMETRY & TSL MATERIAL
-// ============================================================================
-// A 40-ft low-floor MTA bus lofted with the car body machinery: rounded plan-view corners, a raked windshield, a
+// A 40-ft low-floor city bus lofted with the car body machinery: rounded plan-view corners, a raked windshield, a
 // tight roof radius and arches over the wheels; bumpers, the folded front bike rack, stalk mirrors and the roof AC &
 // battery pods are separate pieces of the same mesh (partId). Windows, doors, livery & lamps are painted by
 // createLoftedBusMaterial(); destination signs are textured panels (buildBusSignGeometry).
@@ -1470,11 +1452,11 @@ function createBusWheelMaterial() {
 let _busLoftedMat = null;
 
 /**
- * Creates the TSL procedural material for the city buses (Muni in San Francisco, P4.6):
+ * Creates the TSL procedural material for generic city buses:
  * - Wraparound split windshield with gasket & centre post, destination sign band above it; rear window & engine
  *   louvres on the rear face
  * - Continuous side window band with mullions, the driver's window, glazed curb-side front & rear doors
- * - Muni livery: silver with a red stripe & pinstripe below the windows and a dark skirt (docs/landmarks/muni.md)
+ * - Generic livery: silver with a teal stripe & pinstripe below the windows and a dark skirt
  * - Headlamps, turn signals (per-instance `busState`: brake, left (+x), right (-x)), tail / brake light columns,
  *   white plates; black trims & light-grey roof pods
  */
@@ -1526,13 +1508,13 @@ function createLoftedBusMaterial() {
   const glass = clamp(max(max(frontGlass, rearGlass), max(max(sideBand.mul(mullion), driverWin), max(d0.glass, d1.glass))), 0.0, 1.0);
   const seal = clamp(max(max(frontSeal, rearSeal), max(max(sideSeal, signBand), doorFrame)), 0.0, 1.0);
 
-  // Muni livery (P4.6, docs/landmarks/muni.md): silver with red striping; the stripe's place and width are this
+  // Generic city livery: silver with teal striping; the stripe's place and width are this
   // model's, not measured
   const shadeY = smoothstep(0.34, 1.2, p.y).mul(0.2).add(0.8);
   const redStripe = smoothstep(0.93, 0.95, p.y).mul(smoothstep(1.12, 1.1, p.y));
   const pinStripe = smoothstep(0.86, 0.87, p.y).mul(smoothstep(0.895, 0.885, p.y));
   const skirt = smoothstep(0.53, 0.5, p.y);
-  const livery = mix(mix(mix(color(0xc3c8cd), color(0xbe1e2d), redStripe), color(0xbe1e2d), pinStripe), color(0x2a2e33), skirt).mul(shadeY);
+  const livery = mix(mix(mix(color(0xc3c8cd), color(0x286477), redStripe), color(0x286477), pinStripe), color(0x2a2e33), skirt).mul(shadeY);
 
   // Lamps: twin round headlamps & amber turn signals in black pods; red tail / brake light columns, amber turn &
   // white reverse lamps at the rear corners; plates
@@ -1579,424 +1561,5 @@ function createLoftedBusMaterial() {
   return mat;
 }
 
-// ============================================================================
-// 5. 3D LOFTED MANHATTAN SIGHTSEEING HELICOPTER GEOMETRY & TSL MATERIAL
-// ============================================================================
-const HELI_PARTS = {
-  FUSELAGE: 0,
-  COWLING: 1,
-  FIN: 2,
-  SKID: 3,
-  ROTOR: 4,
-  EXHAUST: 5
-};
-
-/**
- * Helper to create a 12-point symmetric helicopter fuselage cross-section
- * with flattened belly floor, rounded lower chines, wide panoramic cabin flanks,
- * tumblehome upper glass/shoulder, and crowned roof/tailboom.
- */
-function heliFuselageSection(z, halfW, botY, topY, bellyFlat = 0.68, shoulderRatio = 0.52) {
-  const h = Math.max(0.08, topY - botY);
-  const chineY = botY + h * 0.16;
-  const shoulderY = botY + h * shoulderRatio;
-  const eaveY = botY + h * 0.86;
-
-  const right = [
-    new THREE.Vector3(halfW * bellyFlat * 0.55, botY, z),
-    new THREE.Vector3(halfW * 0.92, chineY, z),
-    new THREE.Vector3(halfW, shoulderY, z),
-    new THREE.Vector3(halfW * 0.88, eaveY, z),
-    new THREE.Vector3(halfW * 0.46, topY - h * 0.03, z),
-    new THREE.Vector3(0.0, topY, z)
-  ];
-  const left = right
-    .slice(0, 5)
-    .reverse()
-    .map((p) => new THREE.Vector3(-p.x, p.y, p.z));
-  const bottomCenter = [new THREE.Vector3(0.0, botY, z)];
-  return [...bottomCenter, ...right, ...left].reverse();
-}
-
-/**
- * Helper to create an 8-point symmetric airfoil / cowling cross-section.
- */
-function heliAirfoilSection(xCenter, yCenter, zCenter, halfThickX, halfHeightY, chordZ) {
-  // Airfoil lying along Z (for vertical fin) or X (for horizontal stabilizer)
-  return [
-    new THREE.Vector3(xCenter, yCenter, zCenter + chordZ * 0.5),
-    new THREE.Vector3(xCenter + halfThickX, yCenter, zCenter + chordZ * 0.18),
-    new THREE.Vector3(xCenter + halfThickX * 0.65, yCenter, zCenter - chordZ * 0.25),
-    new THREE.Vector3(xCenter, yCenter, zCenter - chordZ * 0.5),
-    new THREE.Vector3(xCenter - halfThickX * 0.65, yCenter, zCenter - chordZ * 0.25),
-    new THREE.Vector3(xCenter - halfThickX, yCenter, zCenter + chordZ * 0.18)
-  ];
-}
-
-function buildHelicopterBodyGeometry() {
-  const parts = [];
-
-  // 1. Continuous 3D Lofted Monocoque Fuselage-to-Tailboom (15 stations from z = +2.82 nose to z = -5.85 tail)
-  // [z, halfW, botY, topY, bellyFlat, shoulderRatio]
-  const fuselageProfile = [
-    [2.82, 0.16, 0.88, 1.02, 0.50, 0.50], // Aerodynamic nose tip
-    [2.62, 0.54, 0.72, 1.18, 0.62, 0.48], // Lower nose chin window
-    [2.20, 0.88, 0.58, 1.48, 0.72, 0.46], // Lower windshield base
-    [1.55, 1.10, 0.52, 1.86, 0.78, 0.44], // Front pilot cabin & wide panoramic windscreen
-    [0.75, 1.16, 0.50, 2.02, 0.80, 0.45], // Main sightseeing passenger cabin (widest section)
-    [-0.15, 1.14, 0.50, 2.02, 0.80, 0.46], // Rear passenger cabin
-    [-0.95, 1.02, 0.54, 1.96, 0.74, 0.50], // Cabin-to-cowling transition
-    [-1.65, 0.74, 0.72, 1.84, 0.62, 0.54], // Rear baggage & tapered clamshell bay
-    [-2.35, 0.42, 1.12, 1.74, 0.45, 0.55], // Forward tailboom root
-    [-3.25, 0.31, 1.24, 1.72, 0.40, 0.55], // Mid tailboom
-    [-4.35, 0.24, 1.32, 1.70, 0.38, 0.55], // Stabilizer station
-    [-5.35, 0.18, 1.38, 1.68, 0.36, 0.55], // Rear tailboom before fin
-    [-5.85, 0.12, 1.43, 1.65, 0.35, 0.55]  // Tailboom tip cap
-  ];
-
-  const fuselageSections = fuselageProfile.map((s) => heliFuselageSection(...s));
-  parts.push(part(new LoftGeometry(fuselageSections, { capStart: true, capEnd: true }), HELI_PARTS.FUSELAGE));
-
-  // 2. Sculpted Twin-Turbine Upper Engine Cowling & Mast Doghouse (lofted from z = +0.55 to -2.25)
-  const cowlingProfile = [
-    [0.55, 0.32, 1.94, 2.12, 0.85, 0.45],
-    [0.10, 0.56, 1.96, 2.38, 0.85, 0.48],
-    [-0.55, 0.62, 1.94, 2.44, 0.85, 0.50],
-    [-1.25, 0.56, 1.88, 2.36, 0.82, 0.50],
-    [-1.85, 0.38, 1.76, 2.10, 0.78, 0.50],
-    [-2.28, 0.20, 1.68, 1.82, 0.70, 0.50]
-  ];
-  const cowlingSections = cowlingProfile.map((s) => heliFuselageSection(...s));
-  parts.push(part(new LoftGeometry(cowlingSections, { capStart: true, capEnd: true }), HELI_PARTS.COWLING));
-
-  // Twin Canted Turbine Exhaust Nozzles tucked cleanly into rear of engine cowling
-  for (const side of [-1, 1]) {
-    const exhaust = new THREE.CylinderGeometry(0.10, 0.125, 0.34, 14)
-      .rotateX(Math.PI * 0.46)
-      .rotateY(side * 0.10)
-      .translate(side * 0.24, 2.08, -1.72);
-    parts.push(part(exhaust, HELI_PARTS.EXHAUST));
-  }
-
-  // 3. 3D Lofted Swept Vertical Tail Fin (Airfoil cross-sections sweeping from z = -5.15 to -6.15)
-  // Upper swept fin + lower ventral tail bumper fin
-  const vFinProfile = [
-    [-0.02, 0.88, -5.28, 0.05, 0.0, 0.44], // Ventral tail fin tip
-    [0.0,   1.48, -5.25, 0.12, 0.0, 0.88], // Tailboom junction root
-    [0.0,   1.95, -5.52, 0.10, 0.0, 0.76], // Mid swept vertical fin
-    [0.0,   2.48, -5.82, 0.08, 0.0, 0.60], // Upper swept vertical fin
-    [0.0,   2.82, -6.04, 0.05, 0.0, 0.42]  // Top anti-collision beacon tip
-  ];
-  const vFinSections = vFinProfile.map(([x, y, z, hx, hy, cz]) =>
-    heliAirfoilSection(x, y, z, hx, hy, cz).reverse()
-  );
-  parts.push(part(new LoftGeometry(vFinSections, { capStart: true, capEnd: true }), HELI_PARTS.FIN));
-
-  // 4. 3D Lofted Horizontal Stabilizer Wing + Angled Endplate Winglets at z = -4.25
-  const hStabSections = [-1.08, -0.55, 0.0, 0.55, 1.08].map((x) => {
-    const taper = 1.0 - Math.abs(x) * 0.24;
-    const chord = 0.46 * taper;
-    const thick = 0.045 * taper;
-    const y = 1.54;
-    const z = -4.22 - Math.abs(x) * 0.12;
-    return [
-      new THREE.Vector3(x, y, z + chord * 0.5),
-      new THREE.Vector3(x, y + thick, z + chord * 0.15),
-      new THREE.Vector3(x, y + thick * 0.6, z - chord * 0.25),
-      new THREE.Vector3(x, y, z - chord * 0.5),
-      new THREE.Vector3(x, y - thick * 0.6, z - chord * 0.25),
-      new THREE.Vector3(x, y - thick, z + chord * 0.15)
-    ];
-  });
-  parts.push(part(new LoftGeometry(hStabSections, { capStart: true, capEnd: true }), HELI_PARTS.FIN));
-
-  // Endplate Winglets on Horizontal Stabilizer tips
-  for (const side of [-1, 1]) {
-    const wx = side * 1.08;
-    const wz = -4.35;
-    const winglet = [
-      [-0.22, 0.028, 0.30],
-      [0.0,   0.036, 0.38],
-      [0.26,  0.024, 0.26]
-    ].map(([dy, hx, cz]) =>
-      heliAirfoilSection(wx + side * Math.abs(dy) * 0.12, 1.54 + dy, wz - Math.abs(dy) * 0.15, hx, 0, cz).reverse()
-    );
-    parts.push(part(new LoftGeometry(winglet, { capStart: true, capEnd: true }), HELI_PARTS.FIN));
-  }
-
-  // 5. Tubular Landing Skids (LoftGeometry curved skids with upturned front runners + arched cross-tubes + steps)
-  for (const side of [-1, 1]) {
-    const sx = side * 1.12;
-    // Skid runner tube from upturned front tip (z = +2.15, y = 0.28) along ground (y = 0.07) to rear tip (z = -1.75)
-    const skidJoints = [
-      [new THREE.Vector3(sx, 0.28, 2.15), 0.036, 0.036],
-      [new THREE.Vector3(sx, 0.12, 1.88), 0.045, 0.045],
-      [new THREE.Vector3(sx, 0.07, 1.45), 0.048, 0.048],
-      [new THREE.Vector3(sx, 0.07, 0.0),  0.048, 0.048],
-      [new THREE.Vector3(sx, 0.07, -1.45), 0.048, 0.048],
-      [new THREE.Vector3(sx, 0.12, -1.75), 0.038, 0.038]
-    ];
-    const skidSections = skidJoints.map(([c, rx, ry]) =>
-      Array.from({ length: 8 }, (_, k) => {
-        const a = (k / 8) * Math.PI * 2;
-        return new THREE.Vector3(c.x + Math.cos(a) * rx, c.y + Math.sin(a) * ry, c.z);
-      }).reverse()
-    );
-    parts.push(part(new LoftGeometry(skidSections, { capStart: true, capEnd: true }), HELI_PARTS.SKID));
-
-    // Passenger boarding step plate
-    const stepBar = new THREE.BoxGeometry(0.14, 0.03, 0.88).translate(side * 1.02, 0.28, 0.42);
-    parts.push(part(stepBar, HELI_PARTS.SKID));
-  }
-
-  // Front & Rear Arched Skid Cross-Tubes hugging the fuselage belly
-  for (const cz of [1.05, -0.82]) {
-    const crossPoints = [
-      [new THREE.Vector3(-1.12, 0.09, cz), 0.042, 0.042],
-      [new THREE.Vector3(-0.92, 0.42, cz), 0.044, 0.044],
-      [new THREE.Vector3(-0.62, 0.56, cz), 0.046, 0.046],
-      [new THREE.Vector3(0.62,  0.56, cz), 0.046, 0.046],
-      [new THREE.Vector3(0.92,  0.42, cz), 0.044, 0.044],
-      [new THREE.Vector3(1.12,  0.09, cz), 0.042, 0.042]
-    ];
-    const crossSections = limbSections(crossPoints, 8);
-    parts.push(part(new LoftGeometry(crossSections, { capStart: true, capEnd: true }), HELI_PARTS.SKID));
-  }
-
-  // Wire-strike cutter & pitot tube on nose
-  const pitot = new THREE.CylinderGeometry(0.015, 0.025, 0.35, 6)
-    .rotateX(Math.PI * 0.5)
-    .translate(0, 0.88, 2.88);
-  parts.push(part(pitot, HELI_PARTS.SKID));
-
-  return mergeGeometries(parts);
-}
-
-/**
- * Builds the 4-Bladed Main Rotor Hub, Swashplate, and Tapered Airfoil Rotor Blades.
- */
-function buildHelicopterMainRotorGeometry() {
-  const parts = [];
-
-  // Rotor mast, swashplate collar & aerodynamic hub dome
-  const mast = new THREE.CylinderGeometry(0.11, 0.14, 0.52, 14).translate(0, -0.18, 0);
-  const swash = new THREE.CylinderGeometry(0.24, 0.26, 0.08, 16).translate(0, -0.12, 0);
-  const hubCap = new THREE.SphereGeometry(0.28, 16, 10)
-    .scale(1.0, 0.42, 1.0)
-    .translate(0, 0.04, 0);
-  parts.push(
-    part(mast, HELI_PARTS.SKID),
-    part(swash, HELI_PARTS.EXHAUST),
-    part(hubCap, HELI_PARTS.ROTOR)
-  );
-
-  // 4 Tapered Airfoil Main Rotor Blades with pitch cuff grips
-  for (let b = 0; b < 4; b++) {
-    const angle = (b * Math.PI) / 2;
-    const cuff = new THREE.BoxGeometry(0.65, 0.045, 0.14)
-      .translate(0.52, 0, 0)
-      .rotateY(angle);
-    const blade = new THREE.BoxGeometry(4.45, 0.024, 0.26)
-      .rotateX(0.08) // Realistic collective blade pitch
-      .translate(2.68, 0, 0)
-      .rotateY(angle);
-    parts.push(part(cuff, HELI_PARTS.SKID), part(blade, HELI_PARTS.ROTOR));
-  }
-
-  return mergeGeometries(parts);
-}
-
-/**
- * Builds the 4-Bladed Tail Rotor Assembly.
- */
-function buildHelicopterTailRotorGeometry() {
-  const parts = [];
-  const hub = new THREE.CylinderGeometry(0.09, 0.09, 0.18, 12)
-    .rotateZ(Math.PI * 0.5);
-  parts.push(part(hub, HELI_PARTS.EXHAUST));
-
-  for (let b = 0; b < 4; b++) {
-    const angle = (b * Math.PI) / 2;
-    const blade = new THREE.BoxGeometry(0.022, 0.76, 0.13)
-      .translate(0, 0.42, 0)
-      .rotateX(angle);
-    parts.push(part(blade, HELI_PARTS.ROTOR));
-  }
-  return mergeGeometries(parts);
-}
-
-let _heliLoftedMat = null;
-
-/**
- * Creates the TSL procedural material for the 3D Lofted Sightseeing Helicopter:
- * - Renders wrap-around panoramic windscreen, chin bubble windows, sightseeing cabin side windows,
- *   and overhead skylight glass using anti-aliased `roundedRect` SDFs with rubber seals & frame pillars.
- * - Renders a sleek flush executive NYC Sightseeing livery (Pearl Aviation White upper cabin,
- *   Deep Midnight Navy belly/tailboom, and a sweeping Metallic Gold & Crimson accent stripe).
- * - Renders slatted turbine air intakes on the engine cowling and high-visibility yellow tips on rotor blades.
- */
-function createLoftedHelicopterMaterial() {
-  if (_heliLoftedMat) return _heliLoftedMat;
-
-  const mat = new THREE.MeshStandardNodeMaterial();
-
-  const evaluateHeliSurface = Fn(() => {
-    const partId = attribute('partId', 'float');
-    const isCowling = step(abs(partId.sub(HELI_PARTS.COWLING)), 0.25);
-    const isFin = step(abs(partId.sub(HELI_PARTS.FIN)), 0.25);
-    const isSkid = step(abs(partId.sub(HELI_PARTS.SKID)), 0.25);
-    const isRotor = step(abs(partId.sub(HELI_PARTS.ROTOR)), 0.25);
-    const isExhaust = step(abs(partId.sub(HELI_PARTS.EXHAUST)), 0.25);
-    const isFuselage = step(abs(partId.sub(HELI_PARTS.FUSELAGE)), 0.25);
-
-    const p = attribute('position', 'vec3').toVar();
-    const n = attribute('normal', 'vec3').toVar();
-
-    // 1. Panoramic Wrap-Around Cockpit Windscreen & Sightseeing Side Cabin Windows (on Fuselage)
-    // Front windscreen: z in [0.95, 2.52], y in [0.98, 1.88], split by narrow center post at x = 0
-    const frontGlassOuter = roundedRect(vec2(p.z.sub(1.74), p.y.sub(1.42)), vec2(0.76, 0.42), 0.14)
-      .mul(step(0.65, p.z));
-    const centerPost = smoothstep(0.022, 0.036, abs(p.x));
-    const aPillar = smoothstep(0.028, 0.044, abs(p.z.sub(1.06)));
-    const bPillar = smoothstep(0.026, 0.042, abs(p.z.sub(0.08)));
-
-    // Lower nose chin bubble windows (for pilot downward visibility)
-    const chinWindow = roundedRect(vec2(abs(p.x).sub(0.28), p.y.sub(0.84)), vec2(0.19, 0.11), 0.04)
-      .mul(smoothstep(1.95, 2.15, p.z))
-      .mul(smoothstep(2.68, 2.52, p.z));
-
-    // Wide panoramic passenger sightseeing side windows: z in [-0.78, 1.02], y in [1.02, 1.74]
-    const sideWindow = roundedRect(vec2(p.z.sub(0.12), p.y.sub(1.38)), vec2(0.88, 0.34), 0.10)
-      .mul(step(0.45, abs(n.x)));
-
-    // Overhead cockpit eyebrow skylight windows
-    const skylight = roundedRect(vec2(abs(p.x).sub(0.32), p.z.sub(1.25)), vec2(0.20, 0.38), 0.06)
-      .mul(step(1.72, p.y));
-
-    const rawWindowMask = max(
-      max(frontGlassOuter.mul(centerPost), sideWindow),
-      max(chinWindow, skylight)
-    )
-      .mul(aPillar)
-      .mul(bPillar)
-      .mul(isFuselage)
-      .toVar();
-
-    // Rubber window weatherstripping seal around glass panes
-    const rawSealMask = max(
-      roundedRect(vec2(p.z.sub(1.74), p.y.sub(1.42)), vec2(0.80, 0.46), 0.15).mul(step(0.60, p.z)),
-      roundedRect(vec2(p.z.sub(0.12), p.y.sub(1.38)), vec2(0.92, 0.38), 0.12).mul(step(0.40, abs(n.x)))
-    )
-      .mul(isFuselage)
-      .toVar();
-
-    // 2. Flush Executive NYC Sightseeing Livery (Aviation White + Midnight Navy + Sweeping Gold Ribbon)
-    const navyCurveY = float(1.00).add(p.z.mul(-0.085));
-    const edgeW = max(fwidth(p.y), 0.008);
-    const isLowerNavy = smoothstep(navyCurveY.add(edgeW), navyCurveY.sub(edgeW), p.y);
-    const goldStripeDist = abs(p.y.sub(navyCurveY.add(0.065)));
-    const isGoldStripe = smoothstep(0.055, 0.038, goldStripeDist);
-    const redPinDist = abs(p.y.sub(navyCurveY.add(0.145)));
-    const isRedPin = smoothstep(0.022, 0.012, redPinDist);
-
-    // Cabin door panel seams & handles
-    const doorSeam1 = smoothstep(0.012, 0.004, abs(p.z.sub(1.06)));
-    const doorSeam2 = smoothstep(0.012, 0.004, abs(p.z.sub(0.08)));
-    const doorSeam3 = smoothstep(0.012, 0.004, abs(p.z.sub(-0.82)));
-    const doorHandle = roundedRect(vec2(p.z.sub(0.24), p.y.sub(0.94)), vec2(0.065, 0.014), 0.006);
-    const panelLines = max(max(doorSeam1, max(doorSeam2, doorSeam3)), doorHandle)
-      .mul(step(0.55, abs(n.x)))
-      .mul(smoothstep(0.55, 0.62, p.y))
-      .mul(smoothstep(1.75, 1.65, p.y));
-
-    const whitePaint = color(0xf4f7fb);
-    const navyPaint = color(0x132c58);
-    const goldPaint = color(0xffbe28);
-    const redPaint = color(0xd8222b);
-
-    const baseLivery = mix(
-      mix(mix(whitePaint, navyPaint, isLowerNavy), goldPaint, isGoldStripe),
-      redPaint,
-      isRedPin
-    ).mul(float(1.0).sub(panelLines.mul(0.45)));
-
-    const glassCol = mix(color(0x102234), color(0x1e3c58), clamp(n.y.mul(0.5).add(0.5), 0.0, 1.0));
-    const fuselageCol = mix(mix(baseLivery, color(0x14181e), rawSealMask), glassCol, rawWindowMask);
-
-    // 3. Engine Cowling: Aviation White with Dark Slatted Turbine Intake Grille
-    const intakeGrille = roundedRect(vec2(p.z.sub(-0.45), p.y.sub(2.18)), vec2(0.52, 0.13), 0.04)
-      .mul(step(0.35, abs(n.x)));
-    const louverSlats = step(0.45, fract(p.y.mul(55.0))).mul(0.4).add(0.35);
-    const cowlingCol = mix(
-      mix(whitePaint, goldPaint, smoothstep(2.02, 1.97, p.y)),
-      color(0x181c22).mul(louverSlats),
-      intakeGrille
-    );
-
-    // 4. Swept Tail Fin & Stabilizer: Deep Navy with Gold Tip Accent
-    const finGoldBand = smoothstep(2.42, 2.45, p.y).mul(smoothstep(2.62, 2.59, p.y));
-    const finCol = mix(navyPaint, goldPaint, finGoldBand);
-
-    // 5. Rotor Blades: Matte Anthracite Carbon with High-Visibility Yellow Safety Tips
-    const radialDist = length(vec2(p.x, p.z));
-    const isBladeTip = smoothstep(4.35, 4.42, radialDist).add(
-      smoothstep(0.65, 0.68, abs(p.y)).mul(step(radialDist, 0.35))
-    );
-    const rotorCol = mix(color(0x1e232a), goldPaint, clamp(isBladeTip, 0.0, 1.0));
-
-    const skidCol = color(0x22272e);
-    const exhaustBore = step(0.65, n.z.negate());
-    const exhaustCol = mix(color(0x484f58), color(0x101318), exhaustBore);
-
-    return mix(
-      mix(
-        mix(
-          mix(
-            mix(fuselageCol, cowlingCol, isCowling),
-            finCol,
-            isFin
-          ),
-          skidCol,
-          isSkid
-        ),
-        rotorCol,
-        isRotor
-      ),
-      exhaustCol,
-      isExhaust
-    );
-  });
-
-  mat.colorNode = evaluateHeliSurface();
-
-  mat.roughnessNode = Fn(() => {
-    const partId = attribute('partId', 'float');
-    const isFuselage = step(abs(partId.sub(HELI_PARTS.FUSELAGE)), 0.25);
-    const isSkid = step(abs(partId.sub(HELI_PARTS.SKID)), 0.25);
-    const isRotor = step(abs(partId.sub(HELI_PARTS.ROTOR)), 0.25);
-    const p = attribute('position', 'vec3');
-    const n = attribute('normal', 'vec3');
-    const frontGlass = roundedRect(vec2(p.z.sub(1.74), p.y.sub(1.42)), vec2(0.76, 0.42), 0.14).mul(step(0.65, p.z));
-    const sideGlass = roundedRect(vec2(p.z.sub(0.12), p.y.sub(1.38)), vec2(0.88, 0.34), 0.10).mul(step(0.45, abs(n.x)));
-    const isGlass = max(frontGlass, sideGlass).mul(isFuselage);
-    return mix(mix(float(0.20), float(0.05), isGlass), float(0.55), max(isSkid, isRotor));
-  })();
-
-  mat.metalnessNode = Fn(() => {
-    const partId = attribute('partId', 'float');
-    const isFuselage = step(abs(partId.sub(HELI_PARTS.FUSELAGE)), 0.25);
-    const isExhaust = step(abs(partId.sub(HELI_PARTS.EXHAUST)), 0.25);
-    const p = attribute('position', 'vec3');
-    const n = attribute('normal', 'vec3');
-    const frontGlass = roundedRect(vec2(p.z.sub(1.74), p.y.sub(1.42)), vec2(0.76, 0.42), 0.14).mul(step(0.65, p.z));
-    const sideGlass = roundedRect(vec2(p.z.sub(0.12), p.y.sub(1.38)), vec2(0.88, 0.34), 0.10).mul(step(0.45, abs(n.x)));
-    const isGlass = max(frontGlass, sideGlass).mul(isFuselage);
-    return mix(mix(float(0.35), float(0.88), isGlass), float(0.82), isExhaust);
-  })();
-
-  _heliLoftedMat = mat;
-  return mat;
-}
-
-Object.assign(window.NYC, { CAR_PARTS, BODY_SPECS, carLayout, carBodyHalfWidthAt, buildCarSidePatch, buildSteerableWheelGeo, buildCarGeometry, buildCarProxyGeometry, createLoftedCarMaterial, buildLightbarGeometry, createLightbarMaterial, BUS_SPEC, buildLoftedBusBodyGeometry, buildBusSignGeometry, buildBusWheelGeo, createBusWheelMaterial, createLoftedBusMaterial, buildHelicopterBodyGeometry, buildHelicopterMainRotorGeometry, buildHelicopterTailRotorGeometry, createLoftedHelicopterMaterial });
+Object.assign(window.NYC, { CAR_PARTS, BODY_SPECS, carLayout, carBodyHalfWidthAt, buildSteerableWheelGeo, buildCarGeometry, buildCarProxyGeometry, createCarWheelMaterial, createLoftedCarMaterial, buildLightbarGeometry, createLightbarMaterial, BUS_SPEC, buildLoftedBusBodyGeometry, buildBusSignGeometry, buildBusWheelGeo, createBusWheelMaterial, createLoftedBusMaterial });
 })();

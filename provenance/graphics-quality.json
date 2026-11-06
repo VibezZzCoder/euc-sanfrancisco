@@ -1,0 +1,20 @@
+{
+  "sourceProject": "https://github.com/VibezZzCoder/euc-nyc",
+  "localDonorRevision": "4a88f172d4c1725d52e64ae4442d76a1ca6eede9",
+  "license": "MIT — Copyright 2026 VibezZzCoder",
+  "purpose": "Selective High/Medium/Low effects, ownership, preference and UI adaptation; not a source/vendor/roster pin upgrade.",
+  "hashMeaning": "SHA-256 of inspected donor files before SF adaptation; not current SF output hashes or public Git-object availability.",
+  "donorFiles": {
+    "js/graphics-quality.js": "fdd608a4aa325e5d73f8174f4cea94626853dc084bdee0c020c8333ed4c62321",
+    "js/main.js": "a29672f26df6d18c9058170738be369aaca8e063a9a9f1f2675563b184e9c09f",
+    "js/post-processing.js": "b290ae28b072e18c017e9dda971d313ddcc1919b07f3e04c293d4ecf37f5ddeb",
+    "css/style.css": "54533e0f7548ea825bde142b0eb1dd137004fb67369a26822bbc43c9d4053926",
+    "index.html": "5a1e68227e1dc94eab4aa82306d8c0d71bc01ae1a0cebc79a24eadbd69eed21b"
+  },
+  "adaptations": [
+    "Use SF-namespaced quality storage and existing SF input/listener/teardown owners.",
+    "Keep SF depth-based aerial/marine fog, tone mapping and grading in every graph.",
+    "Retain SF measured FPS markup, terrain, actor/collision/lifecycle systems and all destinations.",
+    "Adapt compact settings around SF fog/toolbar controls and existing signs/trick/touch layouts."
+  ]
+}

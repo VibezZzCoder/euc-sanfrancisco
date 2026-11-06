@@ -1,7 +1,7 @@
 // tools/geo-terrain.mjs — bakes the USGS 1 m lidar DEM (data/raw/dem/*.tif, NAD83 / UTM 10N, NAVD88 metres) into the
 // world-frame height field the game uses: a 2 m grid over the box (+ margin), 2 x 2 box-filtered, lightly smoothed,
 // quantised to uint16. The bay is hydro-flattened in the DEM: its constant surface is measured as the water level.
-// Output: data/terrain-<box>.bin (format: docs/formats.md) + docs/reports/terrain-<box>.md
+// Output: data/terrain-<box>.bin (format: provenance/formats.md) + docs/reports/terrain-<box>.md
 //
 // usage: node tools/geo-terrain.mjs [box]          (box from tools/boxes.json, default "slice")
 import fs from 'node:fs';

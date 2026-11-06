@@ -1,135 +1,70 @@
-(function () {
-// js/controllers.js
-// Sculpted, non-blocky GTA 6-style 3D models, animations, and physics controllers
-// for Third-Person Navigation:
-// 1. Person (Skinned Pedestrian: planted-footstep IK walk/run/jump, see pedestrians.js)
-// 2. Car (Aerodynamic Sculpted NYC Medallion Yellow Taxi with Sloped Windshield & Clearcoat)
-// 3. Cyclist (Sculpted Road Cyclist with Drop-Bar Frame & Aero Helmet)
-// 4. Helicopter (Manhattan Sightseeing Twin-Turbine Chopper)
+import { getCity, getSfSpawn, isTypingInField } from './city-api.js';
+import { SfTerrainSampler } from './sf-terrain-sampler.js';
+import { createEucEntity } from './euc-rider.js';
 
-const { THREE } = window.NYC;
-const { ISLAND_BOUNDS, LANDMARK_SITES, getIslandBoundsAtZ, isTypingInField, blockAt, streetZ } = window.NYC;
-// Spawn on 5th Ave at 37th St, facing south down the avenue toward the Empire State Building (34th St)
-const SPAWN_Z = streetZ(37);
-const {
-  cityUniforms,
-  createCarPaintMaterial,
-  createContactShadowMaterial
-} = window.NYC;
-const {
-  BODY_SPECS,
-  buildCarGeometry,
-  buildSteerableWheelGeo,
-  createLoftedCarMaterial,
-  buildHelicopterBodyGeometry,
-  buildHelicopterMainRotorGeometry,
-  buildHelicopterTailRotorGeometry,
-  createLoftedHelicopterMaterial
-} = window.NYC;
-const { PersonCrowd, PersonRig } = window.NYC;
-const { HEADLIGHTS, createVehicleHeadlight, placeVehicleHeadlight } = window.NYC;
-// Walking surface for the player's pedestrian (its rig samples it around its feet)
-const personGround = (controllers, x, z) => controllers.getGroundHeight(x, z, 'person');
-// The ground (js/terrain.js, metres NAVD88) once the terrain is loaded, else the flat y = 0 world; the bay. Where a
-// road leaves the ground (grade-separation.js) the active entity's height (`level`, set every update) says whether it
-// is in the tunnel or on the hill above, on the bridge or under it
-const level = { y: null };
-const deckY = (x, z) => {
-  const G = window.NYC.GradeSeparation;
-  return G && level.y !== null ? G.floorAt(x, z, level.y) : null;
-};
-const terrainY = (x, z) => {
-  const T = window.NYC.Terrain;
-  if (!(T && T.loaded)) return 0;
-  const d = deckY(x, z);
-  return d !== null ? d : T.groundAt(x, z);
-};
-const inBay = (x, z) => {
-  const T = window.NYC.Terrain;
-  return !!(T && T.loaded) && T.heightAt(x, z) <= T.waterLevel + 0.05 && deckY(x, z) === null;
-};
-// Terrain pose of the car & the bike: critically damped towards the ground's pitch & roll (time constant TERRAIN_TAU)
-const TERRAIN_TAU = 0.1;
-const CAR_AXLES = { wheelbase: 2.8, track: 1.6 };
-const BIKE_WHEELBASE = 1.05;
-const GRAVITY = 9.81;
-const CAR_GRADE = 0.6; // share of gravity along the slope the car feels (P2.6)
-const BIKE_GRADE_UP = 0.9; // ... and the bike going uphill
-const HELI_CEILING = 380;
-const STEP_DOWN = 0.4;
-// Colliders are ignored more than this far below the building's lowest ground (minY): tunnels run under buildings, but a
-// road a little below a building's terrace must still bump into it (PLAN.md P2-8)
-const BELOW_COLLIDER = 3;
-function dampTowards(state, key, target, dt) {
-  const w = 1 / TERRAIN_TAU;
-  const v = key + 'Vel';
-  const vel = state[v] || 0;
-  state[v] = vel + (w * w * (target - state[key]) - 2 * w * vel) * dt;
-  state[key] += state[v] * dt;
-}
+// js/controllers.js — the player: one electric unicycle (EUC Thrills' controller and rider, see euc-rider.js).
+// This module owns input blending (keyboard, touch, gamepad), teleports, and the city queries other systems share
+// (ground height, colliders near a point). The EUC controller owns the rider's motion.
 
-// The player's car carries a California plate (P4.6): white, the state's name in red across the top, dark blue
-// characters (a made-up number)
-function createCALicensePlateTexture() {
-  const c = document.createElement('canvas');
-  c.width = 256;
-  c.height = 128;
-  const ctx = c.getContext('2d');
-  ctx.fillStyle = '#f4f4f0';
-  ctx.fillRect(0, 0, 256, 128);
-  ctx.fillStyle = '#c8202f';
-  ctx.font = 'italic 700 22px Georgia, serif';
-  ctx.textAlign = 'center';
-  ctx.fillText('California', 128, 30);
-  ctx.fillStyle = '#16245a';
-  ctx.font = '900 48px JetBrains Mono, monospace';
-  ctx.fillText('9SLP415', 128, 90);
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
+// Actions the rider reads as presses (edges), not levels: hop and get up
+const ONE_SHOT_ACTIONS = new Set(['up', 'reset']);
+const INPUT_ACTIONS = ['forward', 'backward', 'left', 'right', 'up', 'boost', 'reset'];
+// Checked spots a teleport offers placeAt before reporting refusal (each refusal leaves the rider untouched).
+const TELEPORT_PLACE_ATTEMPTS = 8;
+
+function interactiveTarget(target) {
+  return !!target && (target.isContentEditable
+    || ['BUTTON', 'INPUT', 'SELECT', 'TEXTAREA', 'OPTION', 'A', 'SUMMARY'].includes(target.tagName)
+    || !!target.closest?.('button, input, select, textarea, a[href], summary, audio[controls], video[controls],'
+      + ' [contenteditable]:not([contenteditable="false"]), [tabindex]:not([tabindex="-1"]),'
+      + ' [role="button"], [role="link"], [role="slider"], [role="textbox"], [role="combobox"], [role="listbox"],'
+      + ' [role="checkbox"], [role="radio"], [role="switch"], [role="menuitem"], [role="tab"]'));
 }
 
 class ThirdPersonControllerManager {
-  constructor(scene, colliders = []) {
+  // Await prepareEucRider(rider) before construction, and pass the returned appearance here.
+  constructor(scene, colliders = [], { ride = getCity().ride, rider = 'cool-rider', appearance, dynamicWorld,
+    inputEnabled = true, sampler, spawn } = {}) {
     this.scene = scene;
     this.colliders = colliders;
     this._colliderCells = null; // built on first use, see nearColliders()
-    this.activeMode = 'car'; // 'person' | 'car' | 'cyclist' | 'helicopter'
+    this.activeMode = 'euc'; // the only mode; kept as a field for the systems that read it
+    this.inputEnabled = !!inputEnabled;
+    this.eucSampler = sampler ?? new SfTerrainSampler({ city: getCity(), colliders, ride });
+    spawn ??= getSfSpawn();
 
     this.keys = {
       forward: false,
       backward: false,
       left: false,
       right: false,
-      up: false,
-      down: false,
-      boost: false
+      up: false, // hop
+      boost: false, // crouch
+      reset: false, // get up after a crash
+      hopPressed: false,
+      resetPressed: false
     };
 
     this.entities = {
-      person: this.createPersonEntity(),
-      car: this.createCarEntity(),
-      cyclist: this.createCyclistEntity(),
-      helicopter: this.createHelicopterEntity()
+      euc: createEucEntity(this.scene, this.eucSampler, { ...spawn, rider, appearance, dynamicWorld })
     };
 
-    Object.values(this.entities).forEach((ent) => {
-      if (ent.mesh) {
-        ent.mesh.traverse((child) => {
-          if (
-            child.isMesh &&
-            !child.material?.isMeshBasicNodeMaterial &&
-            child.material?.type !== 'MeshBasicNodeMaterial' &&
-            !child.material?.transparent
-          ) {
-            child.castShadow = true;
-            child.receiveShadow = true;
-          }
-        });
-      }
-    });
-
     this.bindKeyboard();
+  }
+
+  setCollisionListener(listener) {
+    this._collisionListener = typeof listener === 'function' ? listener : null;
+    this._collisionEvent ??= { a: null, b: null, kind: '', x: 0, y: 0, z: 0, nx: 0, ny: 0, nz: 0, speed: 0 };
+  }
+
+  // Reuse one synchronous event; consumers must copy retained fields. Normal points from b toward a.
+  reportCollision(a, b, kind, x, y, z, nx, ny, nz, speed) {
+    if (!this._collisionListener || speed <= 0.5) return;
+    const event = this._collisionEvent;
+    event.a = a; event.b = b; event.kind = kind;
+    event.x = x; event.y = y; event.z = z;
+    event.nx = nx; event.ny = ny; event.nz = nz; event.speed = speed;
+    this._collisionListener(event);
   }
 
   bindKeyboard() {
@@ -138,636 +73,186 @@ class ThirdPersonControllerManager {
       backward: ['KeyS', 'ArrowDown'],
       left: ['KeyA', 'ArrowLeft'],
       right: ['KeyD', 'ArrowRight'],
-      up: ['Space', 'KeyE'],
-      down: ['KeyQ', 'KeyC'],
-      boost: ['ShiftLeft', 'ShiftRight']
+      up: ['Space'],
+      boost: ['ShiftLeft', 'ShiftRight'],
+      reset: ['KeyR']
     };
     const actionsByCode = new Map(Object.entries(bindings).flatMap(([action, codes]) => codes.map((code) => [code, action])));
     this._pressedCodes = new Set();
+    this._tapped = new Map(); // action -> sources pressed since the last frame (including subframe taps)
     this._keyboardKeys = {};
     this._touchKeys = {};
+    this._gamepadKeys = {};
 
     const onKey = (e, isDown) => {
       const action = actionsByCode.get(e.code);
-      if (!action || (isDown && isTypingInField(e))) return;
+      if (!action) return;
+      // Key-up always clears, including a release over a focused native control or with modifiers held.
+      if (isDown && (this.inputEnabled === false || e.ctrlKey || e.metaKey || e.altKey || e.isComposing
+        || e.defaultPrevented || isTypingInField(e) || interactiveTarget(e.target) || interactiveTarget(document.activeElement)
+        || (e.repeat && !this._pressedCodes.has(e.code)))) return;
+      const pressed = isDown && !this._pressedCodes.has(e.code);
       if (isDown) this._pressedCodes.add(e.code);
       else this._pressedCodes.delete(e.code);
       // Releasing one binding must not cancel another key held for the same action.
       this._keyboardKeys[action] = bindings[action].some((code) => this._pressedCodes.has(code));
-      this.keys[action] = this._keyboardKeys[action] || this._touchKeys[action] || false;
+      this._blendInput(action, pressed ? 'keyboard' : null);
     };
 
-    window.addEventListener('keydown', (e) => onKey(e, true));
-    window.addEventListener('keyup', (e) => onKey(e, false));
-    window.addEventListener('blur', () => this.resetInput());
-    document.addEventListener('visibilitychange', () => {
-      if (document.hidden) this.resetInput();
-    });
+    this._inputListeners = [
+      [window, 'keydown', (e) => onKey(e, true)],
+      [window, 'keyup', (e) => onKey(e, false)],
+      [window, 'blur', () => this.resetInput()],
+      [document, 'visibilitychange', () => { if (document.hidden) this.resetInput(); }],
+    ];
+    for (const [target, type, listener] of this._inputListeners) target.addEventListener(type, listener);
+  }
+
+  _blendInput(action, pressedSource = null) {
+    const keyboard = this._keyboardKeys[action] || false;
+    const touch = this._touchKeys[action] || false;
+    const gamepad = this._gamepadKeys[action] || false;
+    const strength = Math.max(keyboard, touch, gamepad);
+    // Preserve digital button values while allowing either analog source to be strongest.
+    this.keys[action] = keyboard === true || touch === true || gamepad === true ? true : strength || false;
+    if (pressedSource && ONE_SHOT_ACTIONS.has(action)) {
+      if (!this._tapped.has(action)) this._tapped.set(action, new Set());
+      this._tapped.get(action).add(pressedSource);
+      this._syncPressEdges();
+    }
+  }
+
+  _syncPressEdges() {
+    this.keys.hopPressed = this._tapped.has('up');
+    this.keys.resetPressed = this._tapped.has('reset');
+  }
+
+  _setAnalogInput(source, action, value, name) {
+    if (this.inputEnabled === false || !INPUT_ACTIONS.includes(action)) return;
+    const was = source[action];
+    const strength = Number(value);
+    source[action] = typeof value === 'boolean' ? value : Number.isFinite(strength) ? Math.max(0, Math.min(1, strength)) : 0;
+    this._blendInput(action, !was && source[action] ? name : null);
   }
 
   setTouchInput(action, value) {
-    if (!Object.hasOwn(this.keys, action)) return;
-    this._touchKeys[action] = typeof value === 'boolean' ? value : Math.max(0, Math.min(1, Number(value) || 0));
-    this.keys[action] = this._keyboardKeys[action] || this._touchKeys[action] || false;
+    this._setAnalogInput(this._touchKeys, action, value, 'touch');
+  }
+
+  setGamepadInput(action, value) {
+    this._setAnalogInput(this._gamepadKeys, action, value, 'gamepad');
   }
 
   clearTouchInput() {
     this._touchKeys = {};
-    for (const action of Object.keys(this.keys)) this.keys[action] = this._keyboardKeys[action] || false;
+    for (const action of INPUT_ACTIONS) this._blendInput(action);
+  }
+
+  /** Viewport boundary: cancel touch taps/trick intent, retaining keyboard and pad levels/presses. */
+  cancelTouchInput() {
+    this.clearTouchInput();
+    for (const [action, sources] of this._tapped) {
+      sources.delete('touch');
+      if (!sources.size) this._tapped.delete(action);
+    }
+    this._syncPressEdges();
+    this.entities?.euc?.clearInput(this.keys);
+  }
+
+  clearGamepadInput() {
+    this._gamepadKeys = {};
+    for (const action of INPUT_ACTIONS) this._blendInput(action);
+  }
+
+  setInputEnabled(enabled) {
+    enabled = !!enabled;
+    if (this.inputEnabled === enabled) return;
+    this.inputEnabled = enabled;
+    this.resetInput();
   }
 
   resetInput() {
     this._pressedCodes.clear();
     this._keyboardKeys = {};
-    this.clearTouchInput();
-  }
-
-  setMode(mode) {
-    if (!this.entities[mode]) return;
-    this.activeMode = mode;
+    this._touchKeys = {};
+    this._gamepadKeys = {};
+    for (const action of Object.keys(this.keys)) this.keys[action] = false;
+    this._tapped?.clear();
+    this.entities?.euc?.clearInput();
   }
 
   getActiveEntity() {
-    return this.entities[this.activeMode];
+    return this.entities.euc;
   }
 
-  teleportActiveTo(x, z, heading = Math.PI) {
-    const ent = this.getActiveEntity();
+  /** Host owns the input/pause gate and atomically commits this candidate with its audio bank. */
+  prepareRider(id, options) {
+    return this.entities.euc.prepareRider(id, options);
+  }
+
+  cancelRiderPreparation() {
+    return this.entities.euc.cancelRiderPreparation();
+  }
+
+  setRider(id, options) {
+    return this.entities.euc.setRider(id, options);
+  }
+
+  /** Terminal teardown; await GPU preparation before the host disposes its renderer. */
+  dispose() {
+    this.setInputEnabled(false);
     this.resetInput();
-    level.y = null; // arrivals are on the ground
-    // No heading given: face along the nearest street
-    if (!Number.isFinite(heading)) heading = this.roadHeading(x, z, ent.heading);
-    const heli = this.activeMode === 'helicopter';
-    // the helicopter keeps its height above the ground, within its band
-    const ground0 = terrainY(ent.position.x, ent.position.z);
-    const above = heli ? Math.max(92, Math.min(380, ent.position.y - ground0)) : 0;
-    const destination = this.findTeleportPosition(x, z, heading, heli ? terrainY(x, z) + above : 0);
-    if (destination) {
-      ent.position.x = destination.x;
-      ent.position.z = destination.z;
-      ent.heading = heading;
-      ent.position.y = heli ? terrainY(destination.x, destination.z) + above : this.getGroundHeight(destination.x, destination.z, this.activeMode);
-    }
-    ent.speed = 0;
-    if (this.activeMode === 'person') {
-      ent.verticalVel = 0;
-      ent.rig.reset(ent.position.x, ent.position.z, ent.heading, personGround, this);
-      ent.crowd.begin();
-      ent.crowd.add(ent.rig, 0);
-      ent.crowd.end();
-    } else if (this.activeMode === 'car') {
-      ent.vx = ent.vz = ent.angularVel = ent.steerAngle = 0;
-      ent.pitchVel = ent.rollVel = ent.heaveY = ent.heaveVel = 0;
-      ent.chassisPivot.rotation.x = ent.chassisPivot.rotation.z = 0;
-      ent.chassisPivot.position.y = 0;
-      ent.lastCollisionSpark = null;
-      for (const wheel of ent.wheels) if (wheel.isFront) wheel.steerPivot.rotation.y = 0;
-      if (ent.carState) ent.carState.value.x = 1;
-      this.settleOnTerrain(ent, true);
-    } else if (this.activeMode === 'cyclist') {
-      ent.leanAngle = ent.leanPivot.rotation.z = 0;
-      this.settleOnTerrain(ent, true);
-    } else if (heli) {
-      ent.verticalSpeed = ent.pitchAngle = ent.rollAngle = 0;
-      ent.tiltPivot.rotation.x = ent.tiltPivot.rotation.z = 0;
-      ent.tiltPivot.position.y = 0;
-    }
-    ent.mesh.position.copy(ent.position);
-    ent.mesh.rotation.y = ent.heading;
-    return { x: ent.position.x, z: ent.position.z };
+    for (const [target, type, listener] of this._inputListeners ?? []) target.removeEventListener(type, listener);
+    this._inputListeners = [];
+    return this.entities.euc.dispose();
   }
 
-  // Recover to a nearby surface street, using the same clearance checks as teleports.
-  findRoadReset() {
-    const ent = this.getActiveEntity();
-    const candidates = [];
-    for (const road of window.NYC.ROADS || []) {
-      if (road.flags & (1 | 2 | 4 | 8 | 16)) continue;
-      for (let i = 1; i < road.pts.length; i++) {
-        const a = road.pts[i - 1], b = road.pts[i];
-        const dx = b.x - a.x, dz = b.z - a.z, length2 = dx * dx + dz * dz;
-        if (!length2) continue;
-        const t = Math.max(0, Math.min(1, ((ent.position.x - a.x) * dx + (ent.position.z - a.z) * dz) / length2));
-        const x = a.x + t * dx, z = a.z + t * dz;
-        candidates.push({ x, z, heading: Math.atan2(dx, dz) + (road.dir < 0 ? Math.PI : 0), distance: Math.hypot(x - ent.position.x, z - ent.position.z) });
-      }
+  teleportActiveTo(x, z, heading = Math.PI, referenceY = Infinity) {
+    const ent = this.entities.euc;
+    if (!Number.isFinite(heading)) heading = ent.heading;
+    let succeeded = false, attempts = 0;
+    // placeAt rechecks static support and refuses a spot a car, cable car or person occupies right now, atomically.
+    // A transiently occupied arrival is not a missing one: try the next statically checked spot nearby (bounded).
+    for (const destination of this.teleportCandidates(x, z, heading, referenceY)) {
+      succeeded = ent.placeAt(destination.x, destination.z, heading, destination.y, { requireClear: true }) === true;
+      if (succeeded || ++attempts >= TELEPORT_PLACE_ATTEMPTS) break;
     }
-    candidates.sort((a, b) => a.distance - b.distance);
-    for (const p of candidates.slice(0, 64)) {
-      const safe = this.findTeleportPosition(p.x, p.z, p.heading, this.activeMode === 'helicopter' ? terrainY(p.x, p.z) + 92 : 0);
-      // The teleport search may find a courtyard: recovery must stay on the chosen road.
-      if (safe && Math.hypot(safe.x - p.x, safe.z - p.z) < 1) return p;
-    }
+    if (succeeded) this.resetInput();
+    return { x: ent.position.x, y: ent.position.y, z: ent.position.z, succeeded };
+  }
+
+  // Search actual SF support, preserving the requested elevation/layer and geography. No island/shore clamp.
+  // Dynamic occupancy is rechecked by placeAt(requireClear) before committing placement.
+  findTeleportPosition(x, z, heading, referenceY = Infinity) {
+    for (const found of this.teleportCandidates(x, z, heading, referenceY)) return found;
     return null;
   }
 
-  // Find a fully clear arrival before moving the player. Sequential collision pushes can leave a player trapped
-  // between overlapping buildings, so test whole candidate footprints instead; retain the old position if none fits.
-  findTeleportPosition(x, z, heading, altitude) {
-    if (!Number.isFinite(x) || !Number.isFinite(z)) return null;
-    const heli = this.activeMode === 'helicopter';
-    const sinH = Math.sin(heading), cosH = Math.cos(heading);
-    const bounds = heli && window.NYC.FLIGHT_BOUNDS || ISLAND_BOUNDS;
-    const margin = heli && !window.NYC.FLIGHT_BOUNDS ? 6000 : 0;
-    const entity = this.getActiveEntity();
-    // Conservative body cylinders, including the taxi's corners, bicycle wheels and helicopter tail/rotor.
-    const body = { person: [0.48, 1.9], car: [2.4, 1.9], cyclist: [1.0, 1.9], helicopter: [6.2, 3.2] };
-    const others = Object.values(this.entities).filter(e => e !== entity).map(e => ({
-      x: e.position.x, z: e.position.z, radius: body[e.type][0],
-      bottom: e.position.y - (e.type === 'helicopter' ? 0.7 : 0), top: e.position.y + body[e.type][1]
-    }));
-    const cameraBack = Math.cos(0.09) * entity.chaseDistance;
-    const cameraUp = entity.chaseHeight + Math.sin(0.09) * entity.chaseDistance * 0.85;
-    const clampPoint = (px, pz) => {
-      pz = Math.max(bounds.minZ + (heli ? -margin : 30), Math.min(bounds.maxZ + margin, pz));
-      px = Math.max(bounds.minX - margin, Math.min(bounds.maxX + margin, px));
-      if (!heli && getIslandBoundsAtZ) {
-        const shore = getIslandBoundsAtZ(pz);
-        const west = shore.westX + 8, east = shore.eastX - 8;
-        if (west > east) return null;
-        px = Math.max(west, Math.min(east, px));
-      }
-      if (!heli && inBay(px, pz)) return null;
-      return { x: px, z: pz };
-    };
-    const clear = (p) => {
-      if (!p) return false;
-      const baseY = heli ? altitude : this.getGroundHeight(p.x, p.z, this.activeMode);
-      const y = heli ? altitude : baseY + 1;
-      // Keep other player models out of both the arrival and its default chase view. A corridor also prevents a
-      // parked car between camera and character from hiding the character even when the camera itself is outside it.
-      const viewTop = baseY + Math.max(body[entity.type][1], cameraUp);
-      for (const other of others) {
-        if (other.bottom > viewTop + 0.3 || other.top < baseY - (heli ? 0.7 : 0) - 0.3) continue;
-        const dx = other.x - p.x, dz = other.z - p.z;
-        const back = Math.max(0, Math.min(cameraBack, -dx * sinH - dz * cosH));
-        if (Math.hypot(dx + sinH * back, dz + cosH * back) < other.radius + Math.max(body[entity.type][0], 0.5) + 0.1) return false;
-      }
-      if (!this.isWorldPositionClear({x:p.x,z:p.z,y:baseY},heading,this.activeMode,.1)) return false;
-      return true;
-    };
-    const origin = clampPoint(x, z);
-    if (clear(origin)) return origin;
-    // Four-metre rings cover nearby streets and courtyards, with bounded work even for a click inside a large block.
-    const cx = origin ? origin.x : Math.max(ISLAND_BOUNDS.minX, Math.min(ISLAND_BOUNDS.maxX, x));
-    const cz = origin ? origin.z : Math.max(ISLAND_BOUNDS.minZ + 30, Math.min(ISLAND_BOUNDS.maxZ, z));
+  // Statically checked candidates, nearest first: the exact spot, then four-metre rings that cover nearby streets and
+  // courtyards, with bounded work even for a click inside a large block.
+  *teleportCandidates(x, z, heading, referenceY = Infinity) {
+    if (![x, z, heading].every(Number.isFinite) || (!Number.isFinite(referenceY) && referenceY !== Infinity)) return;
+    const target = (px, pz) => this.eucSampler.findPlacementTarget({ x: px, z: pz, headingY: heading, referenceY,
+      registeredSurfaceOnly: true });
+    const exact = target(x, z);
+    if (exact) yield exact;
     for (let distance = 4; distance <= 256; distance += 4) {
       for (let i = 0; i < 32; i++) {
         const angle = i * Math.PI / 16;
-        const p = clampPoint(cx + Math.cos(angle) * distance, cz + Math.sin(angle) * distance);
-        if (clear(p)) return p;
+        const found = target(x + Math.cos(angle) * distance, z + Math.sin(angle) * distance);
+        if (found) yield found;
       }
     }
-    return null;
   }
 
-  // =========================================================================
-  // 1. PERSON (SKINNED NYC PEDESTRIAN WITH PLANTED-FOOTSTEP IK GAIT, see pedestrians.js)
-  // =========================================================================
-  createPersonEntity() {
-    const root = new THREE.Group();
-    root.name = 'PlayerPerson';
-
-    // One skinned person, posed in world space every frame by its rig (walk, run, turn, jump)
-    const crowd = new PersonCrowd(1, { farDistance: Infinity });
-    crowd.meshes.forEach((m) => this.scene.add(m));
-    const rig = new PersonRig({ seed: 4.2, scale: 1.0, girth: 1.02, hair: 0.18, armSwing: 1.0 });
-
-    // Soft Under-Foot Contact Shadow (AO)
-    const shadowGeo = new THREE.PlaneGeometry(0.95, 0.95);
-    shadowGeo.rotateX(-Math.PI * 0.5);
-    const pedShadow = new THREE.Mesh(shadowGeo, createContactShadowMaterial());
-    pedShadow.position.y = 0.02;
-    pedShadow.renderOrder = 998;
-    root.add(pedShadow);
-
-    this.scene.add(root);
-
-    return {
-      type: 'person',
-      label: 'Pedestrian',
-      mesh: root,
-      crowd,
-      rig,
-      position: new THREE.Vector3(-11.6, ISLAND_BOUNDS.sidewalkHeight, SPAWN_Z + 12),
-      heading: 0,
-      speed: 0,
-      verticalVel: 0,
-      cameraTargetOffset: new THREE.Vector3(0, 1.55, 0),
-      chaseDistance: 4.3,
-      chaseHeight: 1.95
-    };
-  }
-
-  // =========================================================================
-  // 2. CAR (3D LOFTED WAYMO-STYLE ROBOTAXI: WHITE BODY, ROOF LIDAR DOME & PERIMETER SENSOR PODS)
-  // =========================================================================
-  createCarEntity() {
-    const root = new THREE.Group();
-    root.name = 'PlayerTaxiCar';
-
-    const chassisPivot = new THREE.Group();
-    root.add(chassisPivot);
-
-    const spec = window.NYC.createWaymoHeroSpec();
-    const taxiLoftMat = createLoftedCarMaterial(spec, 0xd2d8dd);
-
-    // 1. 3D Lofted Robotaxi Body + Curved Windscreens + Crowned Roof + Side Mirrors + Lidar Dome & Sensor Pods
-    const carBodyGeo = buildCarGeometry(spec, false);
-    const carBodyMesh = new THREE.Mesh(carBodyGeo, taxiLoftMat);
-    carBodyMesh.castShadow = true;
-    carBodyMesh.receiveShadow = true;
-    chassisPivot.add(carBodyMesh);
-
-    window.NYC.addWaymoHeroDetails(chassisPivot, spec);
-
-    // California license plates on the bumpers
-    const nyPlateTex = createCALicensePlateTexture();
-    const nyPlateMat = new THREE.MeshStandardNodeMaterial({ map: nyPlateTex, roughness: 0.28 });
-    const rearPlate = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.14, 0.02), nyPlateMat);
-    rearPlate.position.set(0, spec.plates[1], spec.zRear - 0.006);
-    chassisPivot.add(rearPlate);
-
-    const frontPlate = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.14, 0.02), nyPlateMat);
-    frontPlate.position.set(0, spec.plates[0], spec.zFront + 0.006);
-    chassisPivot.add(frontPlate);
-
-    // 3b. Brake lights, CHMSL & turn signals are lit by the taxi material from its carState uniform (see updateCar)
-    const carState = taxiLoftMat.userData.carState;
-
-    // 4. Steerable & Spinning 3D LatheGeometry Tyres + Recessed 5-Spoke Alloy Wheels
-    // The hero wheels use modeled split spokes, brake discs and lug nuts.
-
-    const wheels = [];
-    const wheelCoords = [
-      { side: -1, z: spec.wheelZ, isFront: true },
-      { side: 1, z: spec.wheelZ, isFront: true },
-      { side: -1, z: -spec.wheelZ, isFront: false },
-      { side: 1, z: -spec.wheelZ, isFront: false }
-    ];
-    for (const wc of wheelCoords) {
-      const steerPivot = new THREE.Group();
-      steerPivot.position.set(wc.side * spec.wheelX, spec.wheelRadius, wc.z);
-      const tire = window.NYC.buildWaymoHeroWheel(spec, wc.side);
-      tire.castShadow = true;
-      tire.receiveShadow = true;
-      steerPivot.add(tire);
-      root.add(steerPivot);
-      wheels.push({ steerPivot, tire, isFront: wc.isFront });
-    }
-
-    // 5. Soft Under-Car Contact Shadow (AO) + Clustered Dual LED Headlight SpotLights & Rear Brake PointLight
-    const carShadowGeo = new THREE.PlaneGeometry(2.22, 5.05);
-    carShadowGeo.rotateX(-Math.PI * 0.5);
-    const carShadow = new THREE.Mesh(carShadowGeo, createContactShadowMaterial());
-    carShadow.position.set(0, 0.02, 0.0);
-    carShadow.renderOrder = 998;
-    root.add(carShadow);
-
-    const headLights = [];
-    for (const side of [-1, 1]) {
-      const spot = createVehicleHeadlight();
-      placeVehicleHeadlight(spot, spec, side);
-      chassisPivot.add(spot, spot.target);
-      headLights.push(spot);
-    }
-
-    this.scene.add(root);
-
-    return {
-      type: 'car',
-      label: 'Waymo Robotaxi',
-      mesh: root,
-      chassisPivot,
-      carState,
-      headLights,
-      wheels,
-      position: new THREE.Vector3(3.6, 0.0, SPAWN_Z + 12),
-      heading: 0,
-      speed: 0,
-      vx: 0,
-      vz: 0,
-      angularVel: 0,
-      pitchVel: 0,
-      rollVel: 0,
-      heaveY: 0,
-      heaveVel: 0,
-      lastCollisionSpark: null,
-      steerAngle: 0,
-      wheelSpin: 0,
-      cameraTargetOffset: new THREE.Vector3(0, 0.96, 0),
-      chaseDistance: 6.9,
-      chaseHeight: 2.12
-    };
-  }
-
-  // =========================================================================
-  // 3. CYCLIST (3D LOFTED RIDER + ROAD/CITI BICYCLE)
-  // =========================================================================
-  createCyclistEntity() {
-    const root = new THREE.Group();
-    root.name = 'PlayerCyclist';
-
-    const leanPivot = new THREE.Group();
-    root.add(leanPivot);
-
-    const frameMat = createCarPaintMaterial(0x0078e8);
-    const tireMat = new THREE.MeshStandardNodeMaterial({
-      color: 0x181a1e,
-      roughness: 0.60
-    });
-    const chromeMat = new THREE.MeshStandardNodeMaterial({
-      color: 0xe0e8f0,
-      roughness: 0.16,
-      metalness: 0.78
-    });
-    const shortsMat = new THREE.MeshStandardNodeMaterial({
-      color: 0x1c2028,
-      roughness: 0.55
-    });
-    const helmetMat = new THREE.MeshStandardNodeMaterial({
-      color: 0xf4f7fb,
-      emissive: 0x181c22,
-      roughness: 0.22,
-      metalness: 0.25
-    });
-
-    const wheelTorusGeo = new THREE.TorusGeometry(0.35, 0.038, 12, 24);
-    wheelTorusGeo.rotateY(Math.PI * 0.5);
-    const rimTorusGeo = new THREE.TorusGeometry(0.31, 0.018, 8, 24);
-    rimTorusGeo.rotateY(Math.PI * 0.5);
-
-    const frontWheel = new THREE.Mesh(wheelTorusGeo, tireMat);
-    frontWheel.add(new THREE.Mesh(rimTorusGeo, chromeMat));
-    frontWheel.position.set(0, 0.38, 0.58);
-    leanPivot.add(frontWheel);
-
-    const rearWheel = new THREE.Mesh(wheelTorusGeo, tireMat);
-    rearWheel.add(new THREE.Mesh(rimTorusGeo, chromeMat));
-    rearWheel.position.set(0, 0.38, -0.58);
-    leanPivot.add(rearWheel);
-
-    // Rear red LED safety strobe on seatpost
-    const tailLed = new THREE.Mesh(
-      new THREE.SphereGeometry(0.032, 8, 8),
-      new THREE.MeshBasicNodeMaterial({ color: 0xff1e26 })
-    );
-    tailLed.position.set(0, 0.86, -0.32);
-    leanPivot.add(tailLed);
-
-    const topTube = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.72, 10), frameMat);
-    topTube.rotation.x = Math.PI * 0.46;
-    topTube.position.set(0, 0.78, 0.04);
-    leanPivot.add(topTube);
-
-    const downTube = new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.026, 0.78, 10), frameMat);
-    downTube.rotation.x = Math.PI * 0.28;
-    downTube.position.set(0, 0.58, 0.16);
-    leanPivot.add(downTube);
-
-    const seatTube = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.64, 10), frameMat);
-    seatTube.rotation.x = -0.22;
-    seatTube.position.set(0, 0.66, -0.22);
-    leanPivot.add(seatTube);
-
-    const saddle = new THREE.Mesh(new THREE.CapsuleGeometry(0.045, 0.16, 8, 10), shortsMat);
-    saddle.rotation.x = Math.PI * 0.5;
-    saddle.scale.set(1.15, 1.0, 0.55);
-    saddle.position.set(0, 0.96, -0.28);
-    leanPivot.add(saddle);
-
-    const fork = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.016, 0.68, 10), chromeMat);
-    fork.rotation.x = -0.24;
-    fork.position.set(0, 0.68, 0.48);
-    leanPivot.add(fork);
-
-    const handlebar = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.48, 10), chromeMat);
-    handlebar.rotation.z = Math.PI * 0.5;
-    handlebar.position.set(0, 0.98, 0.40);
-    leanPivot.add(handlebar);
-
-    // Pedal cranks at the bottom bracket (they turn with the pedal phase, the pedals stay level)
-    const bikeFrame = {
-      seat: new THREE.Vector3(0, 0.98, -0.28),
-      bars: new THREE.Vector3(0, 0.98, 0.4),
-      gripHalf: 0.22,
-      bracket: new THREE.Vector3(0, 0.34, -0.145),
-      crankLength: 0.17
-    };
-    const crankPivot = new THREE.Group();
-    crankPivot.position.copy(bikeFrame.bracket);
-    const crankGeo = new THREE.BoxGeometry(0.016, bikeFrame.crankLength, 0.03).translate(0, -bikeFrame.crankLength / 2, 0);
-    const pedalGeo = new THREE.BoxGeometry(0.09, 0.018, 0.07);
-    const pedals = [];
-    for (const side of [1, -1]) {
-      const arm = new THREE.Group();
-      arm.rotation.x = side > 0 ? 0 : Math.PI;
-      const crank = new THREE.Mesh(crankGeo, chromeMat);
-      crank.position.x = side * 0.065;
-      const pedal = new THREE.Mesh(pedalGeo, tireMat);
-      pedal.position.set(side * 0.1, -bikeFrame.crankLength, 0);
-      arm.add(crank, pedal);
-      crankPivot.add(arm);
-      pedals.push(pedal);
-    }
-    leanPivot.add(crankPivot);
-
-    // Skinned rider (see pedestrians.js), posed every frame with its hands on the grips and feet on the pedals; the
-    // helmet rides on its head
-    const riderCrowd = new PersonCrowd(1, { farDistance: Infinity });
-    riderCrowd.meshes.forEach((m) => this.scene.add(m));
-    const riderRig = new PersonRig({ seed: 12.8, scale: 1.0, girth: 0.97, hair: 0.1 });
-    const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.125, 14, 12), helmetMat);
-    helmet.scale.set(0.95, 0.68, 1.28);
-    this.scene.add(helmet);
-
-    const bikeShadowGeo = new THREE.PlaneGeometry(0.85, 2.25);
-    bikeShadowGeo.rotateX(-Math.PI * 0.5);
-    const bikeShadow = new THREE.Mesh(bikeShadowGeo, createContactShadowMaterial());
-    bikeShadow.position.set(0, 0.02, 0.0);
-    bikeShadow.renderOrder = 998;
-    root.add(bikeShadow);
-
-    const headLight = new THREE.SpotLight(0xf2f7ff, 0, 20, 0.34, 0.76, 1.25);
-    headLight.position.set(0, 1.32, 0.62);
-    headLight.target.position.set(0, 0.0, 7.6);
-    leanPivot.add(headLight, headLight.target);
-
-    this.scene.add(root);
-
-    return {
-      type: 'cyclist',
-      label: 'Bike Lane Cyclist',
-      mesh: root,
-      leanPivot,
-      frontWheel,
-      rearWheel,
-      crankPivot,
-      pedals,
-      bikeFrame,
-      riderCrowd,
-      riderRig,
-      helmet,
-      headLight,
-      position: new THREE.Vector3(5.2, 0.0, SPAWN_Z - 8),
-      heading: 0,
-      speed: 0,
-      leanAngle: 0,
-      pedalPhase: 0,
-      cameraTargetOffset: new THREE.Vector3(0, 1.35, 0),
-      chaseDistance: 4.8,
-      chaseHeight: 2.05
-    };
-  }
-
-  // =========================================================================
-  // 4. HELICOPTER (3D LOFTED MANHATTAN SIGHTSEEING TWIN-TURBINE CHOPPER)
-  // =========================================================================
-  createHelicopterEntity() {
-    const root = new THREE.Group();
-    root.name = 'PlayerHelicopter';
-
-    const tiltPivot = new THREE.Group();
-    root.add(tiltPivot);
-
-    const heliLoftMat = createLoftedHelicopterMaterial();
-    const blurDiscMat = new THREE.MeshBasicNodeMaterial({
-      color: 0xc8d8e8,
-      transparent: true,
-      opacity: 0.13,
-      side: THREE.DoubleSide,
-      depthWrite: false
-    });
-
-    // 1. 3D Lofted Monocoque Fuselage + Tailboom + Twin-Turbine Cowling + Swept Fin + Stabilizers + Tubular Skids
-    const heliBodyGeo = buildHelicopterBodyGeometry();
-    const heliBodyMesh = new THREE.Mesh(heliBodyGeo, heliLoftMat);
-    heliBodyMesh.castShadow = true;
-    heliBodyMesh.receiveShadow = true;
-    tiltPivot.add(heliBodyMesh);
-
-    // 2. 4-Blade Main Rotor Assembly with Swashplate, Hub Dome & Yellow Safety Blade Tips
-    const mainRotorPivot = new THREE.Group();
-    mainRotorPivot.position.set(0, 2.66, -0.35);
-    const mainRotorGeo = buildHelicopterMainRotorGeometry();
-    const mainRotorMesh = new THREE.Mesh(mainRotorGeo, heliLoftMat);
-    mainRotorMesh.castShadow = true;
-    mainRotorPivot.add(mainRotorMesh);
-
-    const blurDisc = new THREE.Mesh(new THREE.CylinderGeometry(4.85, 4.85, 0.015, 32), blurDiscMat);
-    mainRotorPivot.add(blurDisc);
-    tiltPivot.add(mainRotorPivot);
-
-    // 3. 4-Blade Tail Rotor Assembly on Swept Vertical Fin
-    const tailRotorPivot = new THREE.Group();
-    tailRotorPivot.position.set(0.18, 2.02, -5.62);
-    const tailRotorGeo = buildHelicopterTailRotorGeometry();
-    const tailRotorMesh = new THREE.Mesh(tailRotorGeo, heliLoftMat);
-    tailRotorPivot.add(tailRotorMesh);
-    tiltPivot.add(tailRotorPivot);
-
-    // 4. FAA Port (Red), Starboard (Green) & Anti-Collision Fin Beacon (Red) Navigation Strobes
-    const navRed = new THREE.Mesh(
-      new THREE.SphereGeometry(0.036, 8, 8),
-      new THREE.MeshBasicNodeMaterial({ color: 0xff2b2b })
-    );
-    navRed.position.set(-1.09, 1.54, -4.35);
-    const navGreen = new THREE.Mesh(
-      new THREE.SphereGeometry(0.036, 8, 8),
-      new THREE.MeshBasicNodeMaterial({ color: 0x22ff66 })
-    );
-    navGreen.position.set(1.09, 1.54, -4.35);
-    const navTail = new THREE.Mesh(
-      new THREE.SphereGeometry(0.042, 8, 8),
-      new THREE.MeshBasicNodeMaterial({ color: 0xff3b2b })
-    );
-    navTail.position.set(0, 2.84, -6.04);
-    tiltPivot.add(navRed, navGreen, navTail);
-
-    this.scene.add(root);
-
-    return {
-      type: 'helicopter',
-      label: 'Sightseeing Helicopter',
-      mesh: root,
-      tiltPivot,
-      mainRotorPivot,
-      tailRotorPivot,
-      position: new THREE.Vector3(-110, 96, SPAWN_Z - 60),
-      heading: 0.62,
-      speed: 0,
-      verticalSpeed: 0,
-      pitchAngle: 0,
-      rollAngle: 0,
-      cameraTargetOffset: new THREE.Vector3(0, 1.55, 0),
-      chaseDistance: 11.4,
-      chaseHeight: 3.3
-    };
-  }
-
-  // On a raised curb island (city-config.js BLOCKS: the real blocks, malls & plazas), not in a park
   isPointOnSidewalk(x, z) {
-    const b = blockAt(x, z);
+    const b = getCity().blockAt(x, z);
     return !!b && !(b.park > 0.6 && !b.median);
   }
 
-  // The terrain (the roadway), plus the curb for the pedestrian on a curb island
-  getGroundHeight(x, z, mode = 'person') {
-    const ground = terrainY(x, z);
-    if (mode === 'person' && this.isPointOnSidewalk(x, z)) return ground + ISLAND_BOUNDS.sidewalkHeight;
-    return ground;
-  }
-
-  // Heading (0 = +z) along the street nearest (x, z), the side of it closest to `prefer`
-  roadHeading(x, z, prefer = Math.PI) {
-    const near = window.NYC.nearestRoads ? window.NYC.nearestRoads(x, z, 60) : [];
-    const pts = near.length ? near[0].road.pts : null;
-    if (!pts) return prefer;
-    let best = null, bd = Infinity;
-    for (let i = 0; i + 1 < pts.length; i++) {
-      const a = pts[i], b = pts[i + 1];
-      const dx = b.x - a.x, dz = b.z - a.z, L2 = dx * dx + dz * dz || 1e-9;
-      const t = Math.max(0, Math.min(1, ((x - a.x) * dx + (z - a.z) * dz) / L2));
-      const d = Math.hypot(a.x + t * dx - x, a.z + t * dz - z);
-      if (d < bd) { bd = d; best = Math.atan2(dx, dz); }
-    }
-    const diff = Math.atan2(Math.sin(prefer - best), Math.cos(prefer - best));
-    return Math.abs(diff) > Math.PI / 2 ? best + Math.PI : best;
-  }
-
-  // Car / bike on the terrain: y between the axles, smoothed pitch (& roll for the car) towards the ground under
-  // the wheels, written to the model (rotation order YXZ: heading, then pitch, then roll). `snap` skips the smoothing.
-  settleOnTerrain(ent, snap = false, dt = 0) {
-    const sh = Math.sin(ent.heading), ch = Math.cos(ent.heading);
-    const car = ent.type === 'car';
-    const half = (car ? CAR_AXLES.wheelbase : BIKE_WHEELBASE) / 2;
-    const x = ent.position.x, z = ent.position.z;
-    const front = terrainY(x + sh * half, z + ch * half);
-    const rear = terrainY(x - sh * half, z - ch * half);
-    const pitch = Math.atan2(front - rear, half * 2);
-    let roll = 0;
-    if (car) {
-      // local +x is the car's left (it faces +z)
-      const t = CAR_AXLES.track / 2;
-      const left = terrainY(x + ch * t, z - sh * t);
-      const right = terrainY(x - ch * t, z + sh * t);
-      roll = Math.atan2(left - right, t * 2);
-    }
-    if (snap || ent.terrainPitch === undefined) {
-      ent.terrainPitch = pitch;
-      ent.terrainRoll = roll;
-      ent.terrainPitchVel = ent.terrainRollVel = 0;
-    } else {
-      dampTowards(ent, 'terrainPitch', pitch, dt);
-      dampTowards(ent, 'terrainRoll', roll, dt);
-    }
-    ent.position.y = (front + rear) / 2;
-    if (ent.mesh) {
-      ent.mesh.rotation.order = 'YXZ';
-      ent.mesh.rotation.x = -ent.terrainPitch; // nose up is a negative turn about +x
-      ent.mesh.rotation.z = car ? ent.terrainRoll : 0;
-    }
-    return pitch;
+  // City terrain before solid tops, shared with city-side systems. Teleports use the full placement sampler instead.
+  getGroundHeight(x, z, referenceY = this.entities.euc.position.y) {
+    return this.eucSampler.cityGround(x, z, this._groundProbe ??= { height: 0, surface: 'pavement' }, referenceY).height;
   }
 
   // The colliders whose bounds come within `r` of (x, z), in their original order. They never move, so they are
@@ -809,409 +294,18 @@ class ThirdPersonControllerManager {
     return out;
   }
 
-  isWorldPositionClear(pos, heading=0, mode=this.activeMode, padding=0) {
-    const G=window.NYC.WorldCollision;
-    const shape=mode==='car'?G.carShape(pos,heading,padding):G.circleShape(pos,({person:.48,cyclist:.65,helicopter:4.5}[mode]||.48)+padding);
-    const y=pos.y+(mode==='helicopter'?0:1);
-    for(const c of this.nearColliders(pos.x,pos.z,shape.reach)){
-      if(y>c.maxY+1.5||y<(c.minY??-Infinity)-BELOW_COLLIDER)continue;
-      if(G.contact(shape,c))return false;
+  update(dt) {
+    // A quick tap (a touch button, a key) can go down and up between two frames. The rider reads its one-shots (hop,
+    // get up) as edges once per frame, so such a press still counts as held for this one frame.
+    let keys = this.keys;
+    if (this._tapped?.size) {
+      keys = { ...this.keys };
+      for (const action of this._tapped.keys()) keys[action] = true;
+      this._tapped.clear();
+      this._syncPressEdges();
     }
-    return true;
-  }
-
-  resolveHorizontalCollision(pos, radius, yHeight = 1.0, carEntity = null) {
-    // Ground modes stay in the detailed core; helicopters can explore the measured region.
-    const heli = this.activeMode === 'helicopter';
-    const bounds = heli && window.NYC.FLIGHT_BOUNDS || ISLAND_BOUNDS;
-    const m = heli && !window.NYC.FLIGHT_BOUNDS ? 6000 : 0;
-    pos.x = Math.max(bounds.minX - m, Math.min(bounds.maxX + m, pos.x));
-    pos.z = Math.max(bounds.minZ + (heli ? -m : 30), Math.min(bounds.maxZ + m, pos.z));
-    // never into the bay: back to the last dry spot
-    if (!heli) {
-      if (!this._dry) this._dry = new WeakMap();
-      const dry = this._dry.get(pos);
-      if (inBay(pos.x, pos.z)) {
-        if (dry) {
-          pos.x = dry.x;
-          pos.z = dry.z;
-          if (carEntity && carEntity.speed) carEntity.speed *= 0.4;
-        }
-      } else if (dry) {
-        dry.x = pos.x;
-        dry.z = pos.z;
-      } else {
-        this._dry.set(pos, { x: pos.x, z: pos.z });
-      }
-    }
-    if (this.activeMode !== 'helicopter' && getIslandBoundsAtZ) {
-      const shore = getIslandBoundsAtZ(pos.z);
-      const minShoreX = shore.westX + 8.0;
-      const maxShoreX = shore.eastX - 8.0;
-      if (pos.x < minShoreX) {
-        pos.x = minShoreX;
-        if (carEntity && carEntity.speed) carEntity.speed *= 0.4;
-      } else if (pos.x > maxShoreX) {
-        pos.x = maxShoreX;
-        if (carEntity && carEntity.speed) carEntity.speed *= 0.4;
-      }
-    }
-
-    const G=window.NYC.WorldCollision;
-    const sinH=carEntity?Math.sin(carEntity.heading):0,cosH=carEntity?Math.cos(carEntity.heading):1;
-    // Revisit intersecting walls at corners, but keep deep-spawn recovery bounded.
-    for(let pass=0;pass<4;pass++){
-      let shape=carEntity?G.carShape(pos,carEntity.heading):G.circleShape(pos,radius),moved=false;
-      const near=this.nearColliders(pos.x,pos.z,shape.reach+1);
-      for(const c of near){
-        if(yHeight>c.maxY+1.5||yHeight<(c.minY??-Infinity)-BELOW_COLLIDER)continue;
-        const hit=G.contact(shape,c);if(!hit)continue;
-        const {nx,nz,depth,point}=hit;
-        pos.x+=nx*(depth+G.SKIN);pos.z+=nz*(depth+G.SKIN);moved=true;
-        this.lastWorldContact={...point,nx,nz,depth,collider:c};
-        this.worldContactCount=(this.worldContactCount||0)+1;
-        if(carEntity){
-          const vx=sinH*carEntity.speed+(carEntity.vx||0),vz=cosH*carEntity.speed+(carEntity.vz||0);
-          const into=-(vx*nx+vz*nz);
-          if(into>0){
-            // Inelastic wall: remove inward velocity and retain the tangent, without reversing the car.
-            const tx=vx+nx*into,tz=vz+nz*into;
-            carEntity.speed=tx*sinH+tz*cosH;
-            carEntity.vx=tx-sinH*carEntity.speed;carEntity.vz=tz-cosH*carEntity.speed;
-            if(into>2.2&&!(carEntity.collisionCooldown>0)){
-              carEntity.pitchVel=(carEntity.pitchVel||0)+(sinH*nx+cosH*nz)*Math.min(10,into)*.08;
-              carEntity.rollVel=(carEntity.rollVel||0)-(cosH*nx-sinH*nz)*Math.min(10,into)*.1;
-              carEntity.lastCollisionSpark={x:point.x,y:carEntity.position.y+.56,z:point.z,nx,nz,speed:into};
-              carEntity.collisionCooldown=.18;
-            }
-          }
-        }
-        shape=carEntity?G.carShape(pos,carEntity.heading):G.circleShape(pos,radius);
-      }
-      if(!moved)break;
-    }
-  }
-
-  // Pose the skinned characters once every entity has moved: the pedestrian's rig walks (or runs, turns, jumps) it to
-  // where it now is, planting its feet on the ground; the cyclist sits on the bike, hands on the grips, feet on the
-  // pedals, helmet on its head
-  poseCharacters(dt) {
-    const p = this.entities.person;
-    const air = p.position.y - this.getGroundHeight(p.position.x, p.position.z, 'person');
-    p.rig.update(dt, p.position.x, p.position.z, p.heading, personGround, this, air > 0.02 ? air : 0);
-    p.crowd.begin();
-    p.crowd.add(p.rig, 0);
-    p.crowd.end();
-
-    const b = this.entities.cyclist;
-    b.riderRig.ride(b.leanPivot, b.pedalPhase, b.bikeFrame);
-    b.riderCrowd.begin();
-    b.riderCrowd.add(b.riderRig, 0);
-    b.riderCrowd.end();
-    b.helmet.quaternion.copy(b.riderRig.headQuaternion);
-    b.helmet.position.set(0, 0.175, -0.012).applyQuaternion(b.helmet.quaternion).add(b.riderRig.headPosition);
-  }
-
-  update(dt, elapsed) {
-    level.y = this.getActiveEntity().position.y;
-    const heli = this.entities.helicopter;
-    heli.mainRotorPivot.rotation.y += dt * 24.0;
-    heli.tailRotorPivot.rotation.x += dt * 32.0;
-
-    if (this.activeMode === 'person') {
-      this.updatePerson(dt, elapsed);
-    } else {
-      // Keep the sidewalk pedestrian walking naturally when not actively controlled
-      const p = this.entities.person;
-      const walkSpeed = 1.48;
-      p.speed = walkSpeed;
-      p.position.x += Math.sin(p.heading) * walkSpeed * dt;
-      p.position.z += Math.cos(p.heading) * walkSpeed * dt;
-      p.position.y = this.getGroundHeight(p.position.x, p.position.z, 'person');
-      if (p.position.z < -340) p.heading = 0;
-      else if (p.position.z > 340) p.heading = Math.PI;
-    }
-
-    if (this.activeMode === 'car') {
-      this.updateCar(dt, elapsed);
-    } else if (this.activeMode === 'cyclist') {
-      this.updateCyclist(dt, elapsed);
-    } else if (this.activeMode === 'helicopter') {
-      this.updateHelicopter(dt, elapsed);
-    }
-
-    for (const key of Object.keys(this.entities)) {
-      const e = this.entities[key];
-      e.mesh.position.copy(e.position);
-      e.mesh.rotation.y = e.heading;
-    }
-
-    // Modulate clustered vehicle & bike lights by time of day (off during Midday & Golden Hour; fade in at Dusk & Night)
-    const glow = cityUniforms && cityUniforms.uInteriorGlow ? cityUniforms.uInteriorGlow.value : 0.48;
-    const beamScale = Math.min(1.28, Math.max(0.0, (glow - 0.60) * 1.45));
-    const car = this.entities.car;
-    if (car.headLights) {
-      for (const spot of car.headLights) {
-        // Accelerating does not change the headlamp output or range.
-        spot.intensity = HEADLIGHTS.intensity * beamScale;
-      }
-    }
-    const bike = this.entities.cyclist;
-    if (bike.headLight) {
-      const bikeActive = this.activeMode === 'cyclist';
-      bike.headLight.intensity = bikeActive ? 115 * beamScale : 0;
-    }
-
-    this.poseCharacters(dt);
-  }
-
-  updatePerson(dt) {
-    const p = this.entities.person;
-    const maxWalk = this.keys.boost ? 8.2 : 4.4;
-    const turnRate = 2.6;
-
-    let targetSpeed = 0;
-    if (this.keys.forward) targetSpeed = maxWalk * this.keys.forward;
-    else if (this.keys.backward) targetSpeed = -maxWalk * 0.65 * this.keys.backward;
-
-    if (this.keys.left) p.heading += turnRate * dt * this.keys.left;
-    if (this.keys.right) p.heading -= turnRate * dt * this.keys.right;
-
-    // slower uphill: the grade along the way it walks (or backs)
-    if (targetSpeed !== 0) targetSpeed *= 1 - Math.min(0.5, Math.max(0, this.gradeAlong(p, Math.sign(targetSpeed)) * 0.8));
-    p.speed += (targetSpeed - p.speed) * Math.min(1, dt * 10);
-
-    p.position.x += Math.sin(p.heading) * p.speed * dt;
-    p.position.z += Math.cos(p.heading) * p.speed * dt;
-    this.resolveHorizontalCollision(p.position, 0.48, p.position.y + 1.0);
-
-    const groundY = this.getGroundHeight(p.position.x, p.position.z, 'person');
-    if (this.keys.up && p.position.y <= groundY + 0.02) {
-      p.verticalVel = 5.2;
-    }
-    // Walking down a slope (or off a curb) the feet stay on the ground: a step down of under STEP_DOWN m while not
-    // jumping follows the ground instead of falling
-    const wasGrounded = p.verticalVel === 0;
-    p.verticalVel -= 14.5 * dt;
-    p.position.y += p.verticalVel * dt;
-    if (p.position.y < groundY || (wasGrounded && p.position.y - groundY < STEP_DOWN)) {
-      p.position.y = groundY;
-      p.verticalVel = 0;
-    }
-  }
-
-  // Rise over run of the ground along the entity's heading (dir -1: backwards), over the next metre
-  gradeAlong(ent, dir = 1) {
-    const sh = Math.sin(ent.heading) * dir, ch = Math.cos(ent.heading) * dir;
-    const x = ent.position.x, z = ent.position.z;
-    return terrainY(x + sh * 0.5, z + ch * 0.5) - terrainY(x - sh * 0.5, z - ch * 0.5);
-  }
-
-  updateCar(dt) {
-    const c = this.entities.car;
-    const assist = this.carAssist;
-    const oldHeading=c.heading;
-    c.collisionCooldown=Math.max(0,(c.collisionCooldown||0)-dt);
-    const maxSpeed = this.keys.boost ? 36.0 : 23.5;
-    const accel = this.keys.boost ? 21.0 : 14.0;
-
-    let throttle = 0;
-    if (this.keys.forward) throttle = this.keys.forward;
-    else if (this.keys.backward) throttle = -this.keys.backward;
-
-    if (assist) {
-      const delta = assist.speed - c.speed;
-      throttle = delta > .1 ? .2 : delta < -.1 ? -.3 : 0;
-      c.speed += Math.max(-3.6 * dt, Math.min(2.2 * dt, delta));
-    } else if (throttle !== 0) {
-      c.speed += throttle * accel * dt;
-      c.speed = Math.max(-maxSpeed * 0.45, Math.min(maxSpeed, c.speed));
-    } else {
-      c.speed *= Math.max(0, 1 - dt * 2.8);
-      if (Math.abs(c.speed) < 0.08) c.speed = 0;
-    }
-    // Grade: gravity along the slope (scaled down: the engine & brakes do the rest); a car left without throttle
-    // below walking pace holds on the brake instead of rolling
-    if (!assist && c.terrainPitch !== undefined && (throttle !== 0 || Math.abs(c.speed) > 1)) {
-      c.speed -= GRAVITY * Math.sin(c.terrainPitch) * CAR_GRADE * dt;
-    }
-
-    let steerInput = 0;
-    if (this.keys.left) steerInput = this.keys.left;
-    if (this.keys.right) steerInput = -this.keys.right;
-
-    c.steerAngle += ((assist ? assist.steer : steerInput * 0.52) - c.steerAngle) * Math.min(1, dt * 10);
-
-    if (Math.abs(c.speed) > 0.2) {
-      const dirSign = c.speed >= 0 ? 1 : -1;
-      const speedFactor = Math.min(1.0, Math.abs(c.speed) / 8.0);
-      c.heading += c.steerAngle * 2.4 * speedFactor * dirSign * dt;
-    }
-
-    // Integrate collision yaw spin & lateral tire slip velocity with asphalt grip damping
-    const tireGripDamp = Math.exp(-dt * 6.8);
-    c.heading += c.angularVel * dt;
-    c.angularVel *= Math.exp(-dt * 7.8);
-
-    const prevX = c.position.x;
-    const prevZ = c.position.z;
-    const finalHeading=c.heading,headingStep=finalHeading-oldHeading;
-    const travel=Math.hypot(Math.sin(finalHeading)*c.speed+c.vx,Math.cos(finalHeading)*c.speed+c.vz)*dt;
-    // Bound both translation and the arc travelled by the bumper during a turn.
-    const steps=Math.max(1,Math.ceil((travel+Math.abs(headingStep)*window.NYC.WorldCollision.CAR_REACH)/.15));
-    const contacts=this.worldContactCount||0;
-    for(let step=1;step<=steps;step++){
-      c.heading=oldHeading+headingStep*step/steps;
-      c.position.x+=(Math.sin(c.heading)*c.speed+c.vx)*dt/steps;
-      c.position.z+=(Math.cos(c.heading)*c.speed+c.vz)*dt/steps;
-      this.resolveHorizontalCollision(c.position,window.NYC.WorldCollision.CAR_REACH,c.position.y+1,c);
-    }
-    c.vx*=tireGripDamp;c.vz*=tireGripDamp;
-    if(c.rideMetrics)c.rideMetrics.worldContacts+=(this.worldContactCount||0)-contacts;
-    this.settleOnTerrain(c, false, dt);
-
-    // 3-DOF Spring-Damper Chassis Suspension (Pitch, Roll & Vertical Heave)
-    const targetPitch = -throttle * 0.026;
-    const targetRoll = -c.steerAngle * (c.speed / maxSpeed) * 0.092;
-    const springK = 68.0;
-    const dampC = 11.2;
-    c.pitchVel += ((targetPitch - c.chassisPivot.rotation.x) * springK - c.pitchVel * dampC) * dt;
-    c.rollVel += ((targetRoll - c.chassisPivot.rotation.z) * springK - c.rollVel * dampC) * dt;
-    c.chassisPivot.rotation.x = Math.max(-0.22, Math.min(0.22, c.chassisPivot.rotation.x + c.pitchVel * dt));
-    c.chassisPivot.rotation.z = Math.max(-0.26, Math.min(0.26, c.chassisPivot.rotation.z + c.rollVel * dt));
-
-    c.heaveVel += (-c.heaveY * 85.0 - c.heaveVel * 12.0) * dt;
-    c.heaveY = Math.max(-0.08, Math.min(0.14, c.heaveY + c.heaveVel * dt));
-    c.chassisPivot.position.y = c.heaveY;
-
-    if (c.carState) {
-      c.carState.value.x = throttle < 0 || Math.abs(c.speed) < 0.6 ? 1 : 0;
-    }
-
-    const forwardDist = (c.position.x - prevX) * Math.sin(c.heading) + (c.position.z - prevZ) * Math.cos(c.heading);
-    const rawWheelStep = forwardDist / 0.35;
-    const wheelStep = Math.sign(rawWheelStep) * Math.min(Math.abs(rawWheelStep), 0.48);
-    c.wheelSpin = (c.wheelSpin + wheelStep) % (Math.PI * 2);
-    for (const w of c.wheels) {
-      w.tire.rotation.x = c.wheelSpin + (w.isFront ? 0.0 : 0.55);
-      if (w.isFront) {
-        w.steerPivot.rotation.y = c.steerAngle;
-      }
-    }
-  }
-
-  updateCyclist(dt) {
-    const b = this.entities.cyclist;
-    const maxSpeed = this.keys.boost ? 19.0 : 12.8;
-    const accel = this.keys.boost ? 13.5 : 9.0;
-
-    let throttle = 0;
-    if (this.keys.forward) throttle = this.keys.forward;
-    else if (this.keys.backward) throttle = -0.6 * this.keys.backward;
-
-    if (throttle !== 0) {
-      b.speed += throttle * accel * dt;
-      b.speed = Math.max(-4.5, Math.min(maxSpeed, b.speed));
-    } else {
-      b.speed *= Math.max(0, 1 - dt * 2.4);
-      if (Math.abs(b.speed) < 0.05) b.speed = 0;
-    }
-    // Grade: legs feel the climbs more than an engine does
-    if (b.terrainPitch !== undefined && (throttle !== 0 || Math.abs(b.speed) > 1)) {
-      const k = b.terrainPitch * Math.sign(b.speed || 1) > 0 ? BIKE_GRADE_UP : CAR_GRADE;
-      b.speed -= GRAVITY * Math.sin(b.terrainPitch) * k * dt;
-    }
-
-    let turnInput = 0;
-    if (this.keys.left) turnInput = this.keys.left;
-    if (this.keys.right) turnInput = -this.keys.right;
-
-    if (Math.abs(b.speed) > 0.15) {
-      const dirSign = b.speed >= 0 ? 1 : -1;
-      b.heading += turnInput * 2.15 * dirSign * dt;
-    }
-
-    b.position.x += Math.sin(b.heading) * b.speed * dt;
-    b.position.z += Math.cos(b.heading) * b.speed * dt;
-    this.resolveHorizontalCollision(b.position, 0.65, b.position.y + 1.0);
-    this.settleOnTerrain(b, false, dt);
-
-    const targetLean = -turnInput * Math.min(1.0, Math.abs(b.speed) / 9.0) * 0.34;
-    b.leanAngle += (targetLean - b.leanAngle) * Math.min(1, dt * 9);
-    b.leanPivot.rotation.z = b.leanAngle;
-
-    const wheelDelta = (b.speed / 0.35) * dt;
-    b.frontWheel.rotation.x += wheelDelta;
-    b.rearWheel.rotation.x += wheelDelta;
-
-    // The cranks turn with the rear wheel through the gears while pedalling (~110 rpm at cruising speed) and
-    // freewheel otherwise; the rider's feet follow the pedals (see poseCharacters)
-    if (throttle > 0 && wheelDelta > 0) b.pedalPhase += wheelDelta / 3.2;
-    b.crankPivot.rotation.x = b.pedalPhase;
-    for (const pedal of b.pedals) pedal.rotation.x = -b.pedalPhase;
-  }
-
-  updateHelicopter(dt, elapsed) {
-    const h = this.entities.helicopter;
-    const maxHorizSpeed = this.keys.boost ? 52.0 : 32.0;
-    const maxVertSpeed = 16.0;
-
-    let fwdInput = 0;
-    if (this.keys.forward) fwdInput = this.keys.forward;
-    else if (this.keys.backward) fwdInput = -this.keys.backward;
-
-    let yawInput = 0;
-    if (this.keys.left) yawInput = this.keys.left;
-    if (this.keys.right) yawInput = -this.keys.right;
-
-    let vertInput = 0;
-    if (this.keys.up) vertInput = this.keys.up;
-    else if (this.keys.down) vertInput = -this.keys.down;
-
-    if (fwdInput !== 0) {
-      h.speed += fwdInput * 24.0 * dt;
-      h.speed = Math.max(-maxHorizSpeed * 0.6, Math.min(maxHorizSpeed, h.speed));
-    } else {
-      h.speed *= Math.max(0, 1 - dt * 1.8);
-    }
-
-    if (vertInput !== 0) {
-      h.verticalSpeed += vertInput * 22.0 * dt;
-      h.verticalSpeed = Math.max(-maxVertSpeed, Math.min(maxVertSpeed, h.verticalSpeed));
-    } else {
-      h.verticalSpeed *= Math.max(0, 1 - dt * 3.5);
-    }
-
-    h.heading += yawInput * 1.45 * dt;
-
-    h.position.x += Math.sin(h.heading) * h.speed * dt;
-    h.position.z += Math.cos(h.heading) * h.speed * dt;
-    h.position.y += h.verticalSpeed * dt;
-
-    // No lower than 2 m over the ground under the rotor disc, and a soft ceiling HELI_CEILING m above the ground
-    let floorY = -Infinity;
-    for (const [ox, oz] of [[0, 0], [4.5, 0], [-4.5, 0], [0, 4.5], [0, -4.5]]) floorY = Math.max(floorY, terrainY(h.position.x + ox, h.position.z + oz));
-    const ceiling = floorY + HELI_CEILING;
-    if (h.position.y > ceiling) {
-      h.position.y += (ceiling - h.position.y) * Math.min(1, dt * 2);
-      h.verticalSpeed = Math.min(h.verticalSpeed, 0);
-    }
-    if (h.position.y < floorY + 2) {
-      h.position.y = floorY + 2;
-      h.verticalSpeed = Math.max(h.verticalSpeed, 0);
-    }
-    this.resolveHorizontalCollision(h.position, 4.5, h.position.y);
-
-    const targetPitch = (h.speed / maxHorizSpeed) * 0.24;
-    const targetRoll = -yawInput * 0.28;
-    h.pitchAngle += (targetPitch - h.pitchAngle) * Math.min(1, dt * 5);
-    h.rollAngle += (targetRoll - h.rollAngle) * Math.min(1, dt * 5);
-
-    h.tiltPivot.rotation.x = h.pitchAngle;
-    h.tiltPivot.rotation.z = h.rollAngle;
-    h.tiltPivot.position.y = Math.sin(elapsed * 2.6) * 0.18;
+    this.entities.euc.update(dt, keys);
   }
 }
 
-Object.assign(window.NYC, { ThirdPersonControllerManager });
-})();
+export { ThirdPersonControllerManager };
