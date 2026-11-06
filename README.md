@@ -64,7 +64,7 @@ The title link and the pause menu's confirmed return action go back to the
 | Hop (kerbs!) | `Space` | A |
 | Charge / tuck | `Shift` | X |
 | Get up after a crash | `R` | B |
-| Camera | `V`; mouse drag orbits, wheel zooms | Y; right stick orbits |
+| Camera | `V` / `Shift+V` cycle forward / backward; mouse drag orbits, wheel zooms | Y; right stick orbits |
 | Map | `M` | Start |
 | Pause / menu | `Escape` or `P` | View / Back |
 | Rider picker | `C` | LB / RB |
@@ -74,8 +74,9 @@ The title link and the pause menu's confirmed return action go back to the
 braking; **HOP**, **CHARGE** and **GET UP** sit on the right. Drag outside the controls to orbit the camera and
 pinch to zoom. Rotating, folding or resizing releases held gestures: lift and touch again.
 
-The upper-left **Frame rate**, **3D resolution** (100/75/50%) and **Graphics** (High/Medium/Low) controls trade
-detail for speed. They change rendering only; routes, physics, traffic and the city stay the same. The speedometer
+The upper-left **3D resolution** (100/75/50%) and **Graphics** (High/Medium/Low) controls reduce rendering cost;
+**Frame rate** sets a rendering cap, with Auto following your display. They change rendering only;
+routes, physics, traffic and the city stay the same. The speedometer
 shows mph and km/h. The [player guide](PLAYER_GUIDE.md) covers every control, the map, recovery and settings.
 
 ## Known rough spots
@@ -95,7 +96,9 @@ This is an early release. Known issues include:
 ## Feedback
 
 Please report bugs and ideas through
-[GitHub Issues](https://github.com/VibezZzCoder/euc-sanfrancisco/issues). Helpful details: where you were (street
+[GitHub Issues](https://github.com/VibezZzCoder/euc-sanfrancisco/issues), also available from the pause menu's
+**Feedback / bugs** link. The pause menu's **Player guide** opens this repository's guide; both links open a new tab
+and keep SF paused. Helpful details: where you were (street
 or destination), the rider, your device, browser and graphics card, the graphics backend shown on screen if any,
 your Frame rate / 3D resolution / Graphics settings, the input device and the steps that led to the problem.
 Please say whether you used a physical phone or tablet, a foldable or a desktop browser. See also

@@ -4,8 +4,23 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>SF Spin-off: EUC Thrills</title>
-  <link rel="icon" href="data:," />
-  <meta name="description" content="Ride an electric unicycle through San Francisco's hills, streets and marine fog. A free EUC Thrills city destination." />
+  <link rel="icon" type="image/svg+xml" sizes="any" href="./assets/euc-badge.svg" />
+  <meta name="description" content="Ride an electric unicycle through San Francisco's hills, streets and marine fog. A free EUC Thrills city destination in Early Access." />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="EUC Thrills" />
+  <meta property="og:title" content="SF Spin-off: EUC Thrills — Early Access" />
+  <meta property="og:description" content="Climb the hills, cross the Golden Gate and explore a living San Francisco on an electric unicycle. Free to play; Early Access / Work in Progress." />
+  <meta property="og:url" content="https://vibezzzcoder.github.io/euc-sanfrancisco/" />
+  <meta property="og:image" content="https://vibezzzcoder.github.io/euc-sanfrancisco/screenshots/golden-gate.webp" />
+  <meta property="og:image:type" content="image/webp" />
+  <meta property="og:image:width" content="1280" />
+  <meta property="og:image:height" content="720" />
+  <meta property="og:image:alt" content="An EUC rider on the Golden Gate Bridge, with red suspension towers, bay water and hazy hills ahead." />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="SF Spin-off: EUC Thrills — Early Access" />
+  <meta name="twitter:description" content="Explore a living San Francisco on an electric unicycle. Free to play; Early Access / Work in Progress." />
+  <meta name="twitter:image" content="https://vibezzzcoder.github.io/euc-sanfrancisco/screenshots/golden-gate.webp" />
+  <meta name="twitter:image:alt" content="An EUC rider on the Golden Gate Bridge, with red suspension towers, bay water and hazy hills ahead." />
   <link rel="preload" href="./fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin />
   <link rel="preload" href="./fonts/overpass-latin.woff2" as="font" type="font/woff2" crossorigin />
   <link rel="stylesheet" href="./css/fonts.css" />
@@ -135,7 +150,7 @@
   <section id="title-overlay" class="title-overlay" aria-labelledby="title-heading" hidden>
     <div class="title-head">
       <span class="brand-badge title-badge" aria-hidden="true"><svg class="icon"><use href="#i-euc"/></svg></span>
-      <p class="title-kicker">SF Spin-off</p>
+      <p class="title-kicker">SF Spin-off · Early Access</p>
       <h1 id="title-heading" class="title-name">EUC Thrills</h1>
       <p class="title-tagline">Ride an electric unicycle through San Francisco.</p>
     </div>
@@ -182,16 +197,16 @@
   <div class="hud hud-top-right">
     <div id="hud-toolbar" class="panel toolbar">
       <div class="time-switch" role="group" aria-label="Atmosphere &amp; time of day">
-        <button id="time-golden" class="time-btn active" data-time="golden" type="button" title="Golden Hour">
+        <button id="time-golden" class="time-btn active" data-time="golden" type="button" title="Golden Hour" aria-pressed="true">
           <svg class="icon" aria-hidden="true"><use href="#i-golden"/></svg><span class="seg-label">Golden Hour</span>
         </button>
-        <button id="time-midday" class="time-btn" data-time="midday" type="button" title="Sunny Midday">
+        <button id="time-midday" class="time-btn" data-time="midday" type="button" title="Sunny Midday" aria-pressed="false">
           <svg class="icon" aria-hidden="true"><use href="#i-sun"/></svg><span class="seg-label">Midday</span>
         </button>
-        <button id="time-twilight" class="time-btn" data-time="twilight" type="button" title="Blue Hour">
+        <button id="time-twilight" class="time-btn" data-time="twilight" type="button" title="Blue Hour" aria-pressed="false">
           <svg class="icon" aria-hidden="true"><use href="#i-twilight"/></svg><span class="seg-label">Blue Hour</span>
         </button>
-        <button id="time-midnight" class="time-btn" data-time="midnight" type="button" title="Night 23:00">
+        <button id="time-midnight" class="time-btn" data-time="midnight" type="button" title="Night 23:00" aria-pressed="false">
           <svg class="icon" aria-hidden="true"><use href="#i-moon"/></svg><span class="seg-label">Night</span>
         </button>
       </div>
@@ -222,7 +237,7 @@
   <!-- Teleport Destinations (native popover: light-dismiss & Esc) -->
   <div id="teleport-popover" class="popover" popover data-side="below" data-anchor="hud-toolbar" aria-label="Teleport the active player">
     <div class="pop-title">Teleport to</div>
-    <button id="tp-ferry" class="pop-item tp-btn" data-teleport="ferry" type="button"><span class="pop-name">Ferry Building</span><span class="pop-sub">The Embarcadero · Embarcadero</span></button>
+    <button id="tp-ferry" class="pop-item tp-btn" data-teleport="ferry" type="button"><span class="pop-name">Ferry Building</span><span class="pop-sub">The Embarcadero</span></button>
     <button class="pop-item tp-btn" data-teleport="salesforce" type="button"><span class="pop-name">Salesforce Tower</span><span class="pop-sub">Financial District</span></button>
     <button class="pop-item tp-btn" data-teleport="paintedladies" type="button"><span class="pop-name">Painted Ladies</span><span class="pop-sub">Steiner St</span></button>
     <button class="pop-item tp-btn" data-teleport="twinpeaks" type="button"><span class="pop-name">Twin Peaks</span><span class="pop-sub">Twin Peaks Blvd</span></button>
@@ -262,13 +277,17 @@
 
   <dialog id="game-menu" class="game-menu" aria-labelledby="game-menu-heading" data-view="pause">
     <section data-menu-view="pause">
-      <p class="menu-kicker">SF Spin-off: EUC Thrills</p><h2 id="game-menu-heading">Paused</h2>
+      <p class="menu-kicker">SF Spin-off: EUC Thrills · Early Access</p><h2 id="game-menu-heading">Paused</h2>
       <p id="menu-audio-status" role="status"></p>
       <button id="menu-resume" class="menu-primary" type="button">Resume riding</button>
       <button id="menu-rider" class="menu-rider-entry" type="button">Change rider <span aria-hidden="true">→</span></button>
-      <p class="menu-help keyboard-prompt">W / S lean · A / D carve · Space hop · Shift crouch<br>R get up · V camera · M map · C change rider · P menu</p>
+      <p class="menu-help keyboard-prompt">W / S lean · A / D carve · Space hop · Shift crouch<br>R get up · V / Shift+V camera · M map · C change rider · P menu</p>
       <p class="menu-help gamepad-prompt">RT / LT lean · LS steer · A hop · X crouch · B get up<br>Y camera · RS orbit · Start map · View menu · LB / RB change rider<br>A activates the focused button · B goes back</p>
       <p class="menu-help touch-prompt">Use the stick to ride and steer. HOP jumps; hold CHARGE to crouch. Tap Change rider to choose another rider.</p>
+      <nav class="menu-links" aria-label="Help and feedback">
+        <a id="menu-guide" href="https://github.com/VibezZzCoder/euc-sanfrancisco/blob/main/PLAYER_GUIDE.md" target="_blank" rel="noopener noreferrer" aria-label="Player guide on GitHub (opens in a new tab)">Player guide <span aria-hidden="true">↗</span></a>
+        <a id="menu-feedback" href="https://github.com/VibezZzCoder/euc-sanfrancisco/issues" target="_blank" rel="noopener noreferrer" aria-label="Feedback and bug reports on GitHub Issues (opens in a new tab)">Feedback / bugs <span aria-hidden="true">↗</span></a>
+      </nav>
       <div class="menu-departure"><p>Leave SF and open the main game's menu.</p><button id="menu-return" type="button">Return to EUC Thrills main menu</button></div>
     </section>
     <section data-menu-view="picker" class="rider-picker" hidden aria-labelledby="rider-heading">
@@ -337,18 +356,18 @@
   <!-- Eleven rider-relative cameras, including cinematic tracking and an aerial director -->
   <div id="camera-popover" class="popover" popover data-side="above" data-anchor="hud-cluster" data-align="hud-cluster" aria-label="Multiple Camera Angles">
     <div class="pop-title">Follow</div>
-    <button id="cam-chase" class="pop-item cam-btn active" data-camera="chase" type="button"><span class="pop-name">3rd-Person Chase</span><kbd>5</kbd></button>
-    <button id="cam-action" class="pop-item cam-btn" data-camera="action" type="button"><span class="pop-name">Low-Angle Action</span><kbd>6</kbd></button>
-    <button id="cam-pov" class="pop-item cam-btn" data-camera="pov" type="button"><span class="pop-name">First-Person</span><kbd>7</kbd></button>
+    <button id="cam-chase" class="pop-item cam-btn active" data-camera="chase" type="button" aria-pressed="true"><span class="pop-name">3rd-Person Chase</span><kbd>5</kbd></button>
+    <button id="cam-action" class="pop-item cam-btn" data-camera="action" type="button" aria-pressed="false"><span class="pop-name">Low-Angle Action</span><kbd>6</kbd></button>
+    <button id="cam-pov" class="pop-item cam-btn" data-camera="pov" type="button" aria-pressed="false"><span class="pop-name">First-Person</span><kbd>7</kbd></button>
     <div class="pop-title">Cinematic · follows you</div>
-    <button id="cam-centralPark" class="pop-item cam-btn" data-camera="centralPark" type="button"><span class="pop-name">Elevated</span></button>
-    <button id="cam-fifthAve" class="pop-item cam-btn" data-camera="fifthAve" type="button"><span class="pop-name">Avenue</span><kbd>8</kbd></button>
-    <button id="cam-timesSquare" class="pop-item cam-btn" data-camera="timesSquare" type="button"><span class="pop-name">Crossroads</span><kbd>9</kbd></button>
-    <button id="cam-chryslerGCT" class="pop-item cam-btn" data-camera="chryslerGCT" type="button"><span class="pop-name">Architecture</span><kbd>0</kbd></button>
-    <button id="cam-observatory" class="pop-item cam-btn" data-camera="observatory" type="button"><span class="pop-name">Overlook</span></button>
-    <button id="cam-bryantPark" class="pop-item cam-btn" data-camera="bryantPark" type="button"><span class="pop-name">Side Tracking</span></button>
-    <button id="cam-waterfront" class="pop-item cam-btn" data-camera="waterfront" type="button"><span class="pop-name">Panorama</span></button>
-    <button id="cam-drone" class="pop-item cam-btn" data-camera="drone" type="button"><span class="pop-name">Auto-Director Aerial</span></button>
+    <button id="cam-centralPark" class="pop-item cam-btn" data-camera="centralPark" type="button" aria-pressed="false"><span class="pop-name">Elevated</span></button>
+    <button id="cam-fifthAve" class="pop-item cam-btn" data-camera="fifthAve" type="button" aria-pressed="false"><span class="pop-name">Avenue</span><kbd>8</kbd></button>
+    <button id="cam-timesSquare" class="pop-item cam-btn" data-camera="timesSquare" type="button" aria-pressed="false"><span class="pop-name">Crossroads</span><kbd>9</kbd></button>
+    <button id="cam-chryslerGCT" class="pop-item cam-btn" data-camera="chryslerGCT" type="button" aria-pressed="false"><span class="pop-name">Architecture</span><kbd>0</kbd></button>
+    <button id="cam-observatory" class="pop-item cam-btn" data-camera="observatory" type="button" aria-pressed="false"><span class="pop-name">Overlook</span></button>
+    <button id="cam-bryantPark" class="pop-item cam-btn" data-camera="bryantPark" type="button" aria-pressed="false"><span class="pop-name">Side Tracking</span></button>
+    <button id="cam-waterfront" class="pop-item cam-btn" data-camera="waterfront" type="button" aria-pressed="false"><span class="pop-name">Panorama</span></button>
+    <button id="cam-drone" class="pop-item cam-btn" data-camera="drone" type="button" aria-pressed="false"><span class="pop-name">Auto-Director Aerial</span></button>
   </div>
 
   <!-- Full-Screen Interactive San Francisco Street Map ([M]) -->

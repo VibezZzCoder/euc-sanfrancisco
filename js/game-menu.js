@@ -8,6 +8,7 @@ export function menuOwner({ failed, hidden, pageAway, booking, menu, map, title 
 }
 
 const abortError = () => new DOMException('Rider preparation cancelled', 'AbortError');
+const isMenuAction = element => element?.tagName === 'BUTTON' ? !element.disabled : element?.matches?.('a[href]');
 
 /** Owns both candidates until a synchronous commit; cancellation drains all native work. */
 export class RiderSelection {
@@ -325,12 +326,12 @@ export class GameMenu {
       return;
     }
     const target = document.activeElement;
-    const confirm = ['Enter', 'NumpadEnter', 'Space'].includes(event.code);
-    const action = target?.tagName === 'BUTTON' && !target.disabled && this.root.contains(target);
+    const confirm = ['Enter', 'NumpadEnter'].includes(event.code) || event.code === 'Space' && target?.tagName === 'BUTTON';
+    const action = isMenuAction(target) && this.root.contains(target);
     const activate = confirm && action && (down ? fresh : this.activation.get(event.code) === target);
     if (activate && down) this.activation.set(event.code, target);
     if (!down) this.activation.delete(event.code);
-    if (!activate) event.preventDefault(); // native button activation only for fresh, same-view keys
+    if (!activate) event.preventDefault(); // native button/link activation only for fresh, same-view keys
     if (fresh && this.view === 'picker' && ['ArrowDown', 'ArrowRight', 'ArrowUp', 'ArrowLeft'].includes(event.code)) {
       this.browse(['ArrowDown', 'ArrowRight'].includes(event.code) ? 1 : -1);
     }
@@ -367,14 +368,14 @@ export class GameMenu {
     if (direction && this.padNavReady) {
       this.padNavReady = false; this.root.dataset.padFocus = 'true';
       const section = this.root.querySelector(`[data-menu-view="${this.view}"]`);
-      const actions = [...section.querySelectorAll('button')].filter(button => !button.disabled && !button.hidden);
+      const actions = [...section.querySelectorAll('button, a[href]')].filter(action => isMenuAction(action) && !action.hidden);
       const index = actions.indexOf(document.activeElement);
       actions[(index + direction + actions.length) % actions.length]?.focus({ preventScroll: false });
       return;
     }
     if (edge(0)) {
       if (this.view === 'picker' && document.activeElement?.dataset.riderOption) this.prepare();
-      else if (this.root.contains(document.activeElement) && document.activeElement?.tagName === 'BUTTON') document.activeElement.click();
+      else if (this.root.contains(document.activeElement) && isMenuAction(document.activeElement)) document.activeElement.click();
     }
   }
 

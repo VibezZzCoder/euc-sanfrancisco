@@ -344,7 +344,11 @@ export async function initApp(startup) {
   }
   function selectCamera(id, snap = false, remember = true) {
     cameraSystem.setCameraPreset(id, snap);
-    cameraButtons.forEach(button => button.classList.toggle('active', button.dataset.camera === id));
+    cameraButtons.forEach(button => {
+      const selected = button.dataset.camera === cameraSystem.activePresetId;
+      button.classList.toggle('active', selected);
+      button.setAttribute('aria-pressed', String(selected));
+    });
     document.getElementById('hud-active-camera').textContent = cameraSystem.getActivePreset().name;
     if (remember) viewPreferences.setCamera(cameraSystem.getActivePreset().id);
     dirtyView = true;
@@ -355,7 +359,11 @@ export async function initApp(startup) {
   }
   function selectTime(id, remember = true) {
     lightingSystem.applyPreset(id); graphics.applyTime(lightingSystem.activePresetId);
-    timeButtons.forEach(button => button.classList.toggle('active', button.dataset.time === lightingSystem.activePresetId));
+    timeButtons.forEach(button => {
+      const selected = button.dataset.time === lightingSystem.activePresetId;
+      button.classList.toggle('active', selected);
+      button.setAttribute('aria-pressed', String(selected));
+    });
     if (remember) viewPreferences.setTime(lightingSystem.activePresetId);
     dirtyView = true;
   }

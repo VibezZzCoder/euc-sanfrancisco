@@ -1493,9 +1493,13 @@ body.title-open.game-menu-open .title-head, body.title-open.game-menu-open .titl
 .game-menu button:hover { background: #ffffff24; }
 .game-menu button.menu-primary { background: var(--taxi); color: var(--taxi-ink); }
 .game-menu button:disabled, .title-ride:disabled, #title-rider:disabled { opacity: .6; cursor: wait; }
-.game-menu button:focus-visible, .game-menu[data-pad-focus='true'] button:focus { outline: 2px solid var(--taxi); outline-offset: 2px; }
+.game-menu button:focus-visible, .game-menu a[href]:focus-visible,
+.game-menu[data-pad-focus='true'] button:focus, .game-menu[data-pad-focus='true'] a[href]:focus { outline: 2px solid var(--taxi); outline-offset: 2px; }
 .menu-kicker { color: var(--taxi); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
 .game-menu .menu-help { color: var(--text-2); font-size: 12px; }
+.menu-links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.menu-links a { display: flex; flex: 1 1 140px; align-items: center; justify-content: center; gap: 6px; min-height: 44px; padding: 9px 12px; border: 1px solid var(--glass-border); border-radius: 10px; color: var(--text); background: var(--hover); text-decoration: none; font: 600 13px/1.3 var(--font-sans); }
+.menu-links a:hover { background: #ffffff24; text-decoration: underline; }
 .menu-departure { margin-top: 22px; padding-top: 12px; border-top: 1px solid var(--divider); }
 .menu-departure p { color: var(--text-2); font-size: 12px; }
 .menu-actions { display: flex; gap: 8px; }

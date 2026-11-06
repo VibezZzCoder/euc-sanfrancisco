@@ -26,7 +26,7 @@ physical phones and foldables are not fully verified. See the README's known rou
 | `Space` | Hop; hold for the riding/trick action |
 | `Shift` | Charge / tuck |
 | `R` | Request checked get-up/recovery after a fall |
-| `V` | Cycle camera |
+| `V` / `Shift+V` | Cycle camera forward / backward |
 | `M` | Open/close map |
 | `Esc` / `P` | Pause/menu |
 | `C` | Rider picker |
@@ -86,6 +86,14 @@ connection, focus changes and dialog transitions.
   rider change should preserve the committed identity. Retry/Cancel handles recoverable preparation failures;
   **Reload SF** is the recovery path for a failed native appearance import.
 - The title link or confirmed pause-menu return opens the **EUC Thrills main menu in the same tab**.
+
+## Help and feedback
+
+The pause menu's **Player guide** and **Feedback / bugs** links open GitHub in a new tab, keeping SF paused.
+Read the [public player guide](https://github.com/VibezZzCoder/euc-sanfrancisco/blob/main/PLAYER_GUIDE.md) or send
+bug reports and ideas through [GitHub Issues](https://github.com/VibezZzCoder/euc-sanfrancisco/issues).
+Include your location, rider, device/browser, graphics backend, Frame rate / 3D resolution / Graphics settings,
+input device and steps to reproduce. These links target the first public repository release.
 
 Officer Dorkins/chase/booking is scheduled after the first release. There are no playable walking, car, bicycle,
 helicopter or robotaxi-passenger modes in this adaptation. This is a game, not real-world EUC riding instruction.
