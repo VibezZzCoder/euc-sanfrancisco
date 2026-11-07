@@ -38,7 +38,7 @@ function boxContains(b,p) {
     && Math.abs(p[1]-b.centre.y)<b.halfExtents.y-1e-5;
 }
 
-test('source Golden Gate approaches/deck are continuously supported; Bay upper/lower tower and anchorage openings stay open', () => {
+test('source Golden Gate approaches/deck and tower-bypass sidewalks remain supported and clear; Bay openings stay open', async () => {
   const {N,load}=context({Addons:{mergeGeometries}});
   load('sf-geodata'); load('city-config'); load('sf-ride-geometry');
   N.Terrain={waterLevel:-1.07,groundAt:()=>12,heightAt:()=>12};
@@ -46,7 +46,7 @@ test('source Golden Gate approaches/deck are continuously supported; Bay upper/l
   const bridge=N.buildSFBridges(new THREE.Group()),ride=N.ride,gg=bridge.routes.goldengate;
   assert.ok(bridge.colliders.every(c=>c.rideIgnore),'legacy bridge reservations must not reach native contacts');
   assert.ok(gg.stations.length>600);
-  assert.ok(Math.abs(gg.south[1]-12.05)<1e-8);assert.ok(Math.abs(gg.north[1]-12.05)<1e-8);
+  for(const p of [gg.south,gg.north])assert.ok(p[1]>=12.05&&p[1]<12.3,'bounded eased join above flat fixture terrain');
   // Test every drawn interval's midpoint as well as its joins, in both travel orders.
   for (const stations of [gg.stations,gg.stations.slice().reverse()]) for(let i=1;i<stations.length;i++) {
     const a=stations[i-1],b=stations[i];
@@ -56,6 +56,35 @@ test('source Golden Gate approaches/deck are continuously supported; Bay upper/l
     assert.ok(!ride.solids.some(s=>boxContains(s,[p[0],p[1]+1,p[2]])),'Golden Gate road is not a structural collision lid');
     const obstruction=ride.prisms.find(s=>s.minY<p[1]+1&&s.maxY>p[1]+1&&inside(s.outer,p[0],p[2]));
     assert.ok(!obstruction,`Golden Gate anchorages stay below the road: ${JSON.stringify({p,obstruction})}`);
+  }
+  // Independently follow each actual sidewalk centre, including the bends outside both OSM tower legs.
+  // Point support alone misses railings or truss members crossing the usable riding corridor.
+  const { SfTerrainSampler } = await import('../js/sf-terrain-sampler.js');
+  const sampler = new SfTerrainSampler({ city:N, colliders:bridge.colliders });
+  const [south,north] = N.GEO.bridges.goldenGate.towers.slice().sort((a,b)=>b.c[1]-a.c[1]);
+  const dx=north.c[0]-south.c[0], dz=north.c[1]-south.c[1], span=Math.hypot(dx,dz), ux=dx/span, uz=dz/span;
+  for (const side of [-1,1]) {
+    let previous;
+    for (const centre of gg.stations) {
+      const station=(centre[0]-south.c[0])*ux+(centre[2]-south.c[1])*uz;
+      const u=Math.max(0,Math.min(1,(43-Math.min(Math.abs(station),Math.abs(station-span)))/30));
+      const lateral=side*(11.55+9*u*u*(3-2*u));
+      const p=[centre[0]-uz*lateral,centre[1],centre[2]+ux*lateral];
+      const ground=sampler.sampleGround(p[0],p[2],{normal:{}},p[1]);
+      assert.ok(ground.registered&&!ground.water&&Math.abs(ground.height-p[1])<.1, `side ${side} station ${station}: supported walkway`);
+      if(previous) {
+        const x=p[0]-previous[0],z=p[2]-previous[2],length=Math.hypot(x,z);
+        const hit=sampler.raycastObstacle({x:previous[0],y:previous[1]+.6,z:previous[2]},
+          {x:x/length,y:(p[1]-previous[1])/length,z:z/length},length,.3);
+        assert.equal(hit,null,`side ${side} station ${station}: no tower, truss or guardrail across the walkway`);
+        if (station > ((gg.north[0]-south.c[0])*ux+(gg.north[2]-south.c[1])*uz)-60) {
+          const clear=sampler.isVolumeClear({x:p[0],z:p[2],headingY:Math.atan2(x,z),halfWidthMetres:.35,
+            halfLengthMetres:.35,minY:p[1]+.2,maxY:p[1]+1.7});
+          assert.ok(clear,`side ${side} station ${station}: full rider volume clears the Marin approach rail`);
+        }
+      }
+      previous=p;
+    }
   }
   const bay=bridge.routes.baybridge;
   for(const [a,b] of [[bay.westUpper,bay.islandUpper],[bay.westLower,bay.islandLower]]) {
@@ -82,12 +111,15 @@ test('committed regional DEM supplies both Golden Gate landings; actual graded a
     const b=fs.readFileSync(new URL(url,root)),n=b.readUInt32LE(4);
     return {header:JSON.parse(b.toString('utf8',8,8+n)),buf:b.buffer.slice(b.byteOffset,b.byteOffset+b.length),offset:8+n};
   });
-  N.installRegionTerrain(data);load('landmarks');load('sf-bridges');
+  N.installRegionTerrain(data);load('landmarks');
+  // Test-only access to construction functions, never a runtime test hook.
+  vm.runInContext(source('js/sf-bridges.js').replace('routes.goldengate =',
+    'window.NYC.testBridge={F,road,t0,t1}; routes.goldengate ='),c);
   const r=N.buildSFBridges(new THREE.Group()),route=r.routes.goldengate;
   for(const p of [route.south,route.north]) {
     const floor=N.sfDestinationFloorAt(p[0],p[2]);
     assert.ok(floor>N.Terrain.waterLevel+.05,'endpoint has committed dry DEM coverage');
-    assert.ok(Math.abs(p[1]-floor-.05)<1e-6,'visible approach ends 5 cm above the same triangular land profile');
+    assert.ok(p[1]>=floor+.049&&p[1]-floor<1,'short tangent-matched seam stays above the committed land profile');
   }
   let maxStep=0;
   for(let i=1;i<route.stations.length;i++) {
@@ -97,6 +129,85 @@ test('committed regional DEM supplies both Golden Gate landings; actual graded a
   }
   t.diagnostic(JSON.stringify({south:route.south,north:route.north,stations:route.stations.length,
     maxStationRise:maxStep,tops:N.ride.tops.length,boxes:N.ride.solids.length,prisms:N.ride.prisms.length}));
+  const {SfTerrainSampler}=await import('../js/sf-terrain-sampler.js');
+  const sampler=new SfTerrainSampler({city:N,colliders:r.colliders});
+  const {F,road,t0,t1}=N.testBridge;
+  // Owner regression: the old centreline passed while -5 m south had a 59 cm lip.
+  // Check the full usable width, both deck seams and the outer land-access ends.
+  let maximumJump=0;
+  for(const edge of [t0,t1]) for(const lateral of [-12,-10,-8,-5,0,5,8,10,12]) {
+    const dir=edge===t0?-1:1;
+    for(const seam of [edge,edge+dir*40]) {
+      let previous;
+      for(let k=-20;k<=20;k++) {
+        const station=seam+k*.05,p=F.at(station,lateral,road(station,lateral));
+        const g=sampler.sampleGround(p[0],p[2],{normal:{}},p[1]+.3);
+        assert.ok(!g.water&&!g.offCourse,`dry full-width seam ${edge}/${lateral}/${k}`);
+        if(previous) {
+          const jump=Math.abs(g.height-previous.height);maximumJump=Math.max(maximumJump,jump);
+          assert.ok(jump<.075,`wheel-safe seam ${edge}/${lateral}/${k}: ${jump}`);
+        }
+        previous=g;
+      }
+    }
+    const p=F.at(edge,lateral,road(edge,lateral));
+    assert.ok(p[1]>=N.sfDestinationFloorAt(p[0],p[2])+.049&&p[1]-N.sfDestinationFloorAt(p[0],p[2])<1.5,
+      'bounded full-width vertical seam fit stays above actual terrain');
+  }
+  t.diagnostic(`Full-width original/outer seam maximum 5 cm increment rise: ${maximumJump}`);
+  // Native WebGL2 failure reconstruction: matching heights had hidden a -61% to +1%
+  // grade kink. Use the last noncrashed sample, before its held right input turns the
+  // forward wheel sweep into a neighbouring slab strip. Reset reconstructs pose/speed,
+  // not the browser's hidden lean/control history; no external QA artifacts are needed.
+  const {EucController}=await import('../js/euc/simulation/EucController.js');
+  const recorded={position:{x:-6923.344268542236,y:70.78340039764556,z:-4840.694279207912},
+    headingY:0.026786079857856332,speed:4.715868626894739};
+  const actions=steer=>({throttle:0,steer,crouch:false,hop:false,hopHeld:false,swing:false,
+    reset:false,cameraCycle:false,pause:false,muteAudio:false});
+  const replayController=(terrain,position)=>{
+    const spawn={position,headingY:recorded.headingY};
+    const controller=new EucController(terrain,{spawn});
+    assert.ok(controller.reset(spawn,recorded.speed),'recorded seam replay placement admitted');
+    controller.invulnerableTimer=0;
+    return controller;
+  };
+  // Easing raises this surface: preserve the exact recorded XZ/heading/speed while
+  // placing on the new facet, rather than starting below the repaired road.
+  const spawn={...recorded.position};
+  spawn.y=sampler.sampleGround(spawn.x,spawn.z,{normal:{}},road(t1,5)).height;
+  for(const steer of [-1,0,1]) {
+    const controller=replayController(sampler,spawn);
+    for(let i=0;i<120;i++) {
+      controller.step(1/120,actions(steer));
+      assert.ok(!controller.snapshot().crashed,`Marin native seam replay steer ${steer}, tick ${i}`);
+    }
+  }
+  // Negative control: reconstruct only the pre-easing profile in a separate VM/city.
+  // Reuse decoded regional arrays read-only, but own the Terrain and ride registries;
+  // never replace or append to the current fixture's geometry or sampler indexes.
+  const before=context({Addons:{mergeGeometries}});
+  for(const f of ['sf-geodata','sf-places','city-config','sf-destinations','terrain','sf-ride-geometry'])before.load(f);
+  before.N.Terrain.load(header,new Uint16Array(bin.buffer.slice(bin.byteOffset+8+n,bin.byteOffset+bin.length)));
+  before.load('region');before.N.DATA={fullRegion:data};before.N.installRegionTerrain(data);before.load('landmarks');
+  const bridgeSource=source('js/sf-bridges.js');
+  const easing=/    const road = \(t,s=0\) => \{[\s\S]*?\n    \};(?=\n    trussDeck\(P, D, F, tEndS)/g;
+  const sections=[...bridgeSource.matchAll(easing)];
+  assert.equal(sections.length,1,'negative fixture must replace exactly the shared road easing');
+  assert.ok(sections[0][0].includes('a=edge-4,b=edge+4')&&sections[0][0].includes('fittedRoad'),
+    'negative fixture targets the eight-metre fit, not another road function');
+  vm.runInContext(bridgeSource.replace(easing,'    const road = fittedRoad;'),before.c);
+  const oldBridge=before.N.buildSFBridges(new THREE.Group());
+  const oldSampler=new SfTerrainSampler({city:before.N,colliders:oldBridge.colliders});
+  const oldGround=oldSampler.sampleGround(recorded.position.x,recorded.position.z,{normal:{}},recorded.position.y);
+  assert.equal(oldGround.support?.source,'bridge:golden-gate-road-access');
+  assert.ok(Math.abs(oldGround.height-recorded.position.y)<1e-8,'pre-easing facet reproduces recorded height');
+  const control=replayController(oldSampler,recorded.position);
+  control.step(1/120,actions(1));
+  const failed=control.snapshot();
+  assert.ok(failed.crashed&&failed.blocked,'without easing the recorded right input fails on the first native step');
+  assert.equal(failed.crashCause,'obstacle');
+  assert.ok(failed.collisionImpact>control.tuning.obstacleCrashSpeed,'negative control reproduces a crash-speed solid hit');
+  t.diagnostic('Exact precrash replay: eased -1/0/+1 steering each clears 120 ticks; no-easing control crashes on tick 1.');
 });
 
 test('regional buildings use actual base/yaw/height; tree bodies have matching visible trunks and survive culling', () => {

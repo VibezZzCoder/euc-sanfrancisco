@@ -96,6 +96,9 @@ function buildSFBridges(scene) {
     white: std(0xdcdcd6, 0.55, 0.3), // the east span
     concrete: std(0xb8b4aa, 0.85, 0.0),
     road: std(0x3d3f42, 0.9, 0.0),
+    ggWalk: std(0x898782, 0.92, 0.0),
+    ggWhite: std(0xd5d3c7, 0.9, 0.0),
+    ggYellow: std(0xd6b666, 0.9, 0.0),
     lamp: new THREE.MeshBasicNodeMaterial({ color: 0xffd9a0 })
   };
   mats.lamp.userData.noShadow = true;
@@ -112,9 +115,22 @@ function buildSFBridges(scene) {
   }
   // A bridge frame: origin o, unit axis (ux, uz), side (sx, sz) = to the axis' right; at(t, s, y) -> [x, y, z]
   const frame = (o, ux, uz) => ({ o, ux, uz, sx: -uz, sz: ux, at: (t, s, y) => [o[0] + ux * t - uz * s, y, o[1] + uz * t + ux * s], t: (p) => (p[0] - o[0]) * ux + (p[1] - o[1]) * uz, s: (p) => -(p[0] - o[0]) * uz + (p[1] - o[1]) * ux });
-  function deck(P, F, a, b, road, width, thickness, source) {
-    const corners = [F.at(a, -width / 2, road(a)), F.at(a, width / 2, road(a)),
-      F.at(b, width / 2, road(b)), F.at(b, -width / 2, road(b))];
+  function deck(P, F, a, b, road, width, thickness, source, offset = 0) {
+    // The approaches meet a hillside, not a level plane. Subdivide only the crossfall patches;
+    // a single 27 m face hides the centreline mismatch and leaves a wheel-high edge in adjacent lanes.
+    if (width > 2 && [a,b].some(t => [-width/2,width/2].some(s => Math.abs(road(t,s)-road(t)) > 1e-6))) {
+      const along=Math.ceil(b-a);
+      const edges=source==='bridge:golden-gate'?[-width/2,-9.6,9.6,width/2]:[-width/2,width/2];
+      for(let k=0;k<along;k++) for(let band=1;band<edges.length;band++) {
+        const lo=edges[band-1],hi=edges[band],n=Math.ceil(hi-lo);
+        for (let i=0;i<n;i++) deck(P,F,a+(b-a)*k/along,a+(b-a)*(k+1)/along,road,
+          (hi-lo)/n,thickness,source,lo+(hi-lo)*(i+.5)/n);
+      }
+      return;
+    }
+    const lo=offset-width/2, hi=offset+width/2;
+    const corners = [F.at(a, lo, road(a,lo)), F.at(a, hi, road(a,hi)),
+      F.at(b, hi, road(b,hi)), F.at(b, lo, road(b,lo))];
     const [p, q, r, s] = corners;
     const top = [...p, ...q, ...r, ...p, ...r, ...s];
     ride?.addTriangles(top, null, 'pavement', { layered: true, shore: true, source });
@@ -127,14 +143,15 @@ function buildSFBridges(scene) {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     geo.computeVertexNormals();
-    P.add(mats.road, geo);
-    const n = Math.max(1, Math.ceil(Math.abs(road(b) - road(a)) / 0.04));
+    P.add(source==='bridge:golden-gate'&&Math.abs(offset)>9.6?mats.ggWalk:mats.road, geo);
+    const n = Math.max(1, Math.ceil(Math.max(Math.abs(s[1]-p[1]),Math.abs(r[1]-q[1])) / 0.04));
     const mix = (a, b, u) => ({ x: a[0] + (b[0] - a[0]) * u, z: a[2] + (b[2] - a[2]) * u });
     for (let k = 0; k < n; k++) {
-      const u = k / n, v = (k + 1) / n, ya = road(a) + (road(b) - road(a)) * u, yb = road(a) + (road(b) - road(a)) * v;
+      const u = k / n, v = (k + 1) / n;
+      const heights=[p[1]+(s[1]-p[1])*u,p[1]+(s[1]-p[1])*v,q[1]+(r[1]-q[1])*u,q[1]+(r[1]-q[1])*v];
       // Preserve the actual skewed outline on curved source approaches; a yawed bounding rectangle protrudes at bends.
       ride?.addPrism([mix(p,s,u),mix(q,r,u),mix(q,r,v),mix(p,s,v)],
-        Math.min(ya,yb)-thickness-.002,Math.min(ya,yb)-.002,{support:false,layered:true,source:source+':slab'});
+        Math.min(...heights)-thickness-.002,Math.min(...heights)-.002,{support:false,layered:true,source:source+':slab'});
     }
   }
   // Cable from point to point in segments; tube of radius r
@@ -143,14 +160,142 @@ function buildSFBridges(scene) {
     for (let i = 0; i + 1 < pts.length; i++) path.add(new THREE.LineCurve3(new THREE.Vector3(...pts[i]), new THREE.Vector3(...pts[i + 1])));
     P.add(mat, new THREE.TubeGeometry(path, pts.length * 2, r, 8, false));
   }
+  // Golden Gate's sidewalks pass outside the tower legs. Widen the existing deck locally and ease the
+  // paths and outer guardrails out together; the ordinary roadway and its support remain untouched.
+  function goldenGateDeck(P, D, F, t0, t1, towerSpan, road) {
+    const half = GG.width / 2, count = Math.ceil((t1 - t0) / 4);
+    const detour = t => {
+      const d = Math.min(Math.abs(t), Math.abs(t - towerSpan));
+      const u = Math.max(0, Math.min(1, (43 - d) / 30));
+      return 9 * u * u * (3 - 2 * u);
+    };
+    const bands = { walk: [], white: [], yellow: [] };
+    function quad(out, a, b, sa0, sa1, sb0, sb1, lift = 0.012, height = road) {
+      const p = F.at(a, sa0, height(a,sa0) + lift), q = F.at(a, sa1, height(a,sa1) + lift);
+      const r = F.at(b, sb1, height(b,sb1) + lift), s = F.at(b, sb0, height(b,sb0) + lift);
+      out.push(...p, ...q, ...r, ...p, ...r, ...s);
+    }
+    const sidewalkHeight = road;
+    function thinBeam(p, q, thick, wide) {
+      // The generic bridge builder deliberately omits wire-thin members from collision. These are actual
+      // accessible guardrails, so register each drawn rail with the same bounded slope approximation.
+      P.beam(mats.orange, p, q, thick, wide);
+      const dx = q[0] - p[0], dz = q[2] - p[2], dy = q[1] - p[1];
+      const run = Math.hypot(dx, dz), len = Math.hypot(run, dy);
+      if (len < 1e-6) return;
+      const n = Math.max(1, Math.ceil(run / 24), Math.ceil(Math.min(run, Math.abs(dy)) / 0.1));
+      for (let k = 0; k < n; k++) {
+        const u = (k + 0.5) / n;
+        ride?.addBox({ x: p[0] + dx * u, y: p[1] + dy * u, z: p[2] + dz * u },
+          { x: (run < 1e-6 ? thick : wide) / 2, y: (Math.abs(dy) / n + thick * run / len) / 2,
+            z: (run / n + thick * Math.abs(dy) / len) / 2 }, Math.atan2(dx, dz),
+          { support: false, layered: true, source: 'bridge:golden-gate-rail' });
+      }
+    }
+    for (let i = 0; i < count; i++) {
+      const a = t0 + (t1 - t0) * i / count, b = t0 + (t1 - t0) * (i + 1) / count;
+      const da = detour(a), db = detour(b);
+      for (const sign of [-1, 1]) {
+        const outerA = sign * (half + da), outerB = sign * (half + db);
+        if (da > 1e-7 || db > 1e-7) {
+          // Add only the region outside the original 27 m deck. Its drawn facets are also the support.
+          const lowA = sign < 0 ? outerA : half, highA = sign < 0 ? -half : outerA;
+          const lowB = sign < 0 ? outerB : half, highB = sign < 0 ? -half : outerB;
+          const p = F.at(a, lowA, road(a)), q = F.at(a, highA, road(a));
+          const r = F.at(b, highB, road(b)), s = F.at(b, lowB, road(b));
+          const top = [...p, ...q, ...r, ...p, ...r, ...s];
+          ride?.addTriangles(top, null, 'pavement', { layered: true, shore: true, source: 'bridge:golden-gate-walkway' });
+          const pos = top.slice();
+          for (const [u, v] of [[p,q],[q,r],[r,s],[s,p]])
+            pos.push(...u, u[0],u[1]-0.6,u[2], v[0],v[1]-0.6,v[2], ...u, v[0],v[1]-0.6,v[2], ...v);
+          const geo = new THREE.BufferGeometry();
+          geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); geo.computeVertexNormals();
+          P.add(mats.road, geo);
+          const outline = [p,q,r,s].map(v => ({ x:v[0], z:v[2] }));
+          ride?.addPrism(outline, Math.min(road(a),road(b))-0.602, Math.min(road(a),road(b))-0.002,
+            { support:false, layered:true, source:'bridge:golden-gate-walkway:slab' });
+        }
+        const innerA = sign * (9.6 + da), innerB = sign * (9.6 + db);
+        const loA = sign < 0 ? outerA : innerA, hiA = sign < 0 ? innerA : outerA;
+        const loB = sign < 0 ? outerB : innerB, hiB = sign < 0 ? innerB : outerB;
+        // Crossfall decks already draw their fine sidewalk facets with the concrete material.
+        // A coarse overlay would intersect that non-planar grid, producing dark holes/z-fighting.
+        const fitted=[a,b].some(t=>[-half,half].some(s=>Math.abs(road(t,s)-road(t))>1e-6));
+        if(!fitted)quad(bands.walk, a,b, loA,hiA,loB,hiB, 0.012, sidewalkHeight);
+        for (const h of [0.25, 1.05])
+          thinBeam(F.at(a,outerA,sidewalkHeight(a,outerA)+h), F.at(b,outerB,sidewalkHeight(b,outerB)+h), 0.16, 0.16);
+        if (i % 2 === 0) {
+          const p = F.at(a,outerA,sidewalkHeight(a,outerA));
+          P.box(mats.orange, p[0],p[1],p[2], 0.16,1.13,0.16);
+        }
+        if (i % 14 === 0) {
+          const y = sidewalkHeight(a,outerA);
+          D.beam(mats.grey, F.at(a,outerA,y), F.at(a,outerA,y+7), 0.22,0.22);
+          const lamp = F.at(a,outerA-sign*0.35,y+7);
+          D.box(mats.lamp, ...lamp, 0.8,0.3,0.5);
+        }
+      }
+      // Real bridge: six lanes and a movable centre barrier. Paint gives that layout without adding a
+      // new road obstruction; the existing traffic graph and player's crossing freedom are unchanged.
+      for (const s of [-9.5, 9.5]) quad(bands.white, a,b, s-0.07,s+0.07,s-0.07,s+0.07);
+      for (const s of [-0.15, 0.15]) quad(bands.yellow, a,b, s-0.055,s+0.055,s-0.055,s+0.055);
+      if (i % 3 === 0) for (const s of [-6.33,-3.17,3.17,6.33])
+        quad(bands.white, a,b, s-0.07,s+0.07,s-0.07,s+0.07);
+    }
+    // Continue each side path onto land. The centreline endpoint can be several metres above adjacent
+    // ground, especially at Marin; a painted strip ending at the deck edge would not be a rideable exit.
+    const landSurface = [], landRoad = [];
+    for (const edge of [t0,t1]) {
+      const dir=edge===t0?-1:1;
+      for (let i=0;i<40;i++) for(let j=0;j<20;j++) {
+        const x=edge+dir*i,y=edge+dir*(i+1),lo=-9.6+19.2*j/20,hi=-9.6+19.2*(j+1)/20;
+        const top=[];
+        quad(top,Math.min(x,y),Math.max(x,y),lo,hi,lo,hi,0,road);
+        ride?.addTriangles(top,null,'pavement',{layered:true,shore:true,source:'bridge:golden-gate-road-access'});
+        landRoad.push(...top);
+      }
+    }
+    for (const edge of [t0,t1]) for (const sign of [-1,1]) {
+      const dir = edge === t0 ? -1 : 1, length = 40, n = 40;
+      const lo = sign < 0 ? -half : 9.6, hi = sign < 0 ? -9.6 : half;
+      const landingY = road;
+      for (let i=0;i<n;i++) {
+        const x=edge+dir*length*i/n, y=edge+dir*length*(i+1)/n;
+        const a=Math.min(x,y), b=Math.max(x,y);
+        // Match the varying land across the path as well as along it. One wide quad can cut through
+        // an 8 m terrain triangle even when both edges agree, leaving visible holes and uneven contact.
+        for (let j=0;j<4;j++) {
+          const left=lo+(hi-lo)*j/4, right=lo+(hi-lo)*(j+1)/4, top=[];
+          quad(top,a,b,left,right,left,right,0,landingY);
+          ride?.addTriangles(top,null,'pavement',{layered:true,shore:true,source:'bridge:golden-gate-land-access'});
+          landSurface.push(...top);
+        }
+        const outer=sign*half;
+        for(const h of [0.25,1.05])
+          thinBeam(F.at(a,outer,landingY(a,outer)+h),F.at(b,outer,landingY(b,outer)+h),0.16,0.16);
+        if(i%8===0){const p=F.at(x,outer,landingY(x,outer));P.box(mats.orange,p[0],p[1],p[2],0.16,1.13,0.16);}
+      }
+    }
+    const landingGeometry=new THREE.BufferGeometry();
+    landingGeometry.setAttribute('position',new THREE.Float32BufferAttribute(landSurface,3)); landingGeometry.computeVertexNormals();
+    P.add(mats.ggWalk,landingGeometry);
+    const roadGeometry=new THREE.BufferGeometry();
+    roadGeometry.setAttribute('position',new THREE.Float32BufferAttribute(landRoad,3)); roadGeometry.computeVertexNormals();
+    P.add(mats.road,roadGeometry);
+    for (const [key, mat] of [['walk',mats.ggWalk],['white',mats.ggWhite],['yellow',mats.ggYellow]]) {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(bands[key], 3)); geo.computeVertexNormals();
+      D.add(mat, geo);
+    }
+  }
   // A truss deck between stations t0 < t1 of frame F with roadway height road(t): chords, deck plate, side verticals and
   // diagonals every `panel` m (detail), lamps every 50 m (detail)
-  function trussDeck(P, D, F, t0, t1, road, width, depth, mat, { panel = 7.6, lamps = true } = {}) {
+  function trussDeck(P, D, F, t0, t1, road, width, depth, mat, { panel = 7.6, lamps = true, outerRail = true } = {}) {
     const n = Math.max(2, Math.ceil((t1 - t0) / 4));
     for (let i = 0; i < n; i++) {
       const a = t0 + ((t1 - t0) * i) / n, b = t0 + ((t1 - t0) * (i + 1)) / n;
       for (const s of [-width / 2, width / 2]) {
-        P.beam(mat, F.at(a, s, road(a) + 0.6), F.at(b, s, road(b) + 0.6), 1.2, 0.9); // top chord
+        if (outerRail) P.beam(mat, F.at(a, s, road(a) + 0.6), F.at(b, s, road(b) + 0.6), 1.2, 0.9); // top chord
         P.beam(mat, F.at(a, s, road(a) - depth), F.at(b, s, road(b) - depth), 1.2, 0.9); // bottom chord
       }
       deck(P, F, a, b, road, width, 0.6, width === GG.width ? 'bridge:golden-gate' : 'bridge:bay-upper');
@@ -159,8 +304,8 @@ function buildSFBridges(scene) {
     for (let t = t0; t < t1; t += panel) {
       const t2 = Math.min(t1, t + panel);
       for (const s of [-width / 2, width / 2]) {
-        D.beam(mat, F.at(t, s, road(t) - depth), F.at(t, s, road(t) + 0.6), 0.5, 0.5);
-        D.beam(mat, F.at(t, s, road(t) - depth), F.at(t2, s, road(t2) + 0.6), 0.35, 0.35);
+        D.beam(mat, F.at(t, s, road(t) - depth), F.at(t, s, road(t) + (outerRail ? 0.6 : -0.26)), 0.5, 0.5);
+        D.beam(mat, F.at(t, s, road(t) - depth), F.at(t2, s, road(t2) + (outerRail ? 0.6 : -0.26)), 0.35, 0.35);
       }
       if (lamps && Math.round(t / panel) % 7 === 0) for (const s of [-width / 2 + 0.4, width / 2 - 0.4]) {
         D.beam(mats.grey, F.at(t, s, road(t)), F.at(t, s, road(t) + 7), 0.22, 0.22);
@@ -169,9 +314,9 @@ function buildSFBridges(scene) {
     }
   }
   // suspenders from a cable y(t) down to the deck's top chord
-  function suspenders(D, F, tA, tB, cableY, road, offsets, mat) {
+  function suspenders(D, F, tA, tB, cableY, road, offsets, mat, attachment = 0.6) {
     for (let t = tA + SUSPENDER_STEP / 2; t < tB; t += SUSPENDER_STEP) {
-      const yc = cableY(t), yr = road(t) + 0.6;
+      const yc = cableY(t), yr = road(t) + attachment;
       if (yc - yr < 1.5) continue;
       for (const s of offsets) D.beam(mat, F.at(t, s, yr), F.at(t, s, yc), 0.18, 0.4);
     }
@@ -215,6 +360,12 @@ function buildSFBridges(scene) {
       }
     }
     if (legS.length !== 2) legS = [-GG.width / 2, GG.width / 2];
+    // The photographs show open X bracing below the roadway, not empty ladder frames.
+    // Keep these members below the navigable deck and tie them to the existing tower legs.
+    for (const t of [0,L]) for (const [bottom,top] of [[14,48],[53,GG.road-2]]) {
+      P.beam(mats.orange,F.at(t,legS[0],W+bottom),F.at(t,legS[1],W+top),1.1,1.1);
+      P.beam(mats.orange,F.at(t,legS[1],W+bottom),F.at(t,legS[0],W+top),1.1,1.1);
+    }
     // Deck between the source ways' ends. The main span retains the published roadway datum; both land approaches
     // now connect to committed regional DEM coverage (the original level, truncated flight-scene ends did not).
     const ts = g.decks.flatMap((d) => flatPts(d.pts)).map((p) => F.t(p));
@@ -237,38 +388,114 @@ function buildSFBridges(scene) {
     };
     const bendKnots = [...new Set([...ts, 0, L])].sort((a, b) => a - b)
       .map(t => [t, t >= 0 && t <= L ? 0 : offsetsAt(t)]);
-    const bend = t => {
+    const rawBend = t => {
       for (let i = 1; i < bendKnots.length; i++) {
         const [a, ya] = bendKnots[i - 1], [b, yb] = bendKnots[i];
         if (t <= b) return ya + (yb - ya) * (t - a) / (b - a);
       }
       return bendKnots.at(-1)[1];
     };
+    // The final source-way midpoint doubles back just before the Marin endpoint, making offset
+    // guardrails cross their own sidewalk. Ease only the last 80 m to the same endpoint, with an
+    // axis-aligned tangent where the land access continues. Do not change the shared DEM or actor graph.
+    const smoothStart = Math.max(L, t1 - 80), smoothLength = t1 - smoothStart;
+    const startBend = rawBend(smoothStart), endBend = rawBend(t1);
+    const startSlope = Math.max(-0.35,Math.min(0.35,(startBend-rawBend(smoothStart-4))/4));
+    const bend = t => {
+      if (t <= smoothStart || smoothLength < 1) return rawBend(t);
+      if (t >= t1) return endBend;
+      const u = (t-smoothStart)/smoothLength, u2=u*u, u3=u2*u;
+      return (2*u3-3*u2+1)*startBend+(u3-2*u2+u)*smoothLength*startSlope+(-2*u3+3*u2)*endBend;
+    };
     F.at = (t, s, y) => baseAt(t, s + bend(t), y);
     const landY = t => { const p = F.at(t, 0, 0); return ground(p[0], p[2]) + 0.05; };
     const southY = landY(t0), northY = landY(t1);
-    const road = t => t < 0 ? Math.max(landY(t), southY + (W + GG.road - southY) * (t - t0) / -t0)
+    const centreRoad = t => t < 0 ? Math.max(landY(t), southY + (W + GG.road - southY) * (t - t0) / -t0)
       : t > L ? Math.max(landY(t), W + GG.road + (northY - W - GG.road) * (t - L) / (t1 - L)) : W + GG.road;
-    trussDeck(P, D, F, tEndS, t1, road, GG.width, GG.depth, mats.orange);
+    const fittedRoad = (t,s=0) => {
+      const p=F.at(t,s,0);
+      if(t<t0||t>t1) return ground(p[0],p[2])+.05;
+      const distance=Math.min(t-t0,t1-t);
+      if(distance>=40) return centreRoad(t);
+      const edge=t-t0<t1-t?t0:t1,e=F.at(edge,s,0);
+      const u=1-distance/40,fade=u*u*(3-2*u);
+      return Math.max(ground(p[0],p[2])+.05,centreRoad(t)+(ground(e[0],e[2])+.05-centreRoad(edge))*fade);
+    };
+    // Matching heights alone leaves a sharp valley where downhill terrain meets the deck.
+    // The wheel's forward sweep then strikes real slab volume. Blend the last/first four
+    // metres with matching tangents, staying above the original terrain/deck profile.
+    // This is an authored bridge transition, not a change to SF's DEM or native physics.
+    const road = (t,s=0) => {
+      const edge=Math.abs(t-t0)<Math.abs(t-t1)?t0:t1,a=edge-4,b=edge+4;
+      if(t<=a||t>=b)return fittedRoad(t,s);
+      const ya=fittedRoad(a,s),yb=fittedRoad(b,s),e=.01;
+      const ma=(fittedRoad(a+e,s)-fittedRoad(a-e,s))/(2*e),mb=(fittedRoad(b+e,s)-fittedRoad(b-e,s))/(2*e);
+      const u=(t-a)/(b-a),u2=u*u,u3=u2*u;
+      const eased=(2*u3-3*u2+1)*ya+(u3-2*u2+u)*(b-a)*ma+(-2*u3+3*u2)*yb+(u3-u2)*(b-a)*mb;
+      return Math.max(fittedRoad(t,s),eased);
+    };
+    trussDeck(P, D, F, tEndS, t1, road, GG.width, GG.depth, mats.orange, { outerRail: false, lamps: false });
+    goldenGateDeck(P, D, F, tEndS, t1, L, road);
+    // Approach viaduct bents: steel trestles on concrete footings, rooted in the minimum
+    // terrain under each footprint. Estimated spacing, kept outside the suspended/fort spans.
+    const anchorS = g.supports.find((s) => s.name === 'South Anchorage'), anchorN = g.supports.find((s) => s.name === 'North Anchor');
+    const tA = anchorS ? F.t(anchorS.c) : -343, tB = anchorN ? F.t(anchorN.c) : L + 343;
+    for(const [start,end] of [[t0+25,tA-45],[tB+55,t1-20]]) for(let t=start;t<end;t+=48) {
+      const top=road(t)-GG.depth;
+      const feet=[];
+      for(const s of [-10.5,10.5]) {
+        const p=F.at(t,s,0),base=Math.min(...[-2,0,2].flatMap(dt=>[-2,0,2].map(ds=>{
+          const q=F.at(t+dt,s+ds,0);return ground(q[0],q[2]);}))) - .7;
+        if(top-base<3)continue;
+        P.box(mats.concrete,p[0],base,p[2],4,1.5,4);
+        P.beam(mats.orange,F.at(t,s,base+1),F.at(t,s,top),1.3,1.3);
+        feet.push({s,y:base+1});
+      }
+      if(feet.length===2) {
+        P.beam(mats.orange,F.at(t,-10.5,top),F.at(t,10.5,top),1,1);
+        P.beam(mats.orange,F.at(t,-10.5,feet[0].y),F.at(t,10.5,top),.65,.65);
+        P.beam(mats.orange,F.at(t,10.5,feet[1].y),F.at(t,-10.5,top),.65,.65);
+      }
+    }
+    // Fort Point's distinctive 320 ft arch: source-located, with an estimated rise below the existing
+    // deck. Its steel members are drawn and registered, leaving the fort and waterfront unobstructed.
+    const fort = window.NYC.LANDMARK_SITES?.['Fort Point'];
+    if (fort) {
+      const centre = F.t([fort.x, fort.z]), start = centre - 48.75, end = centre + 48.75;
+      if (start >= tEndS && end <= t1) {
+        const n = 20, archY = t => road(t) - GG.depth - 1 - 27 * ((t - centre) / 48.75) ** 2;
+        for (const side of [-10.5, 10.5]) for (let i = 0; i < n; i++) {
+          const a = start + (end-start)*i/n, b = start + (end-start)*(i+1)/n;
+          P.beam(mats.orange, F.at(a,side,archY(a)), F.at(b,side,archY(b)), 1.2, 1.2);
+          if (i % 2 === 0) P.beam(mats.orange, F.at(a,side,archY(a)), F.at(a,side,road(a)-GG.depth), 0.6, 0.6);
+        }
+        // Springings reach foundations instead of ending in midair above the fort's slopes.
+        for(const t of [start,end]) for(const side of [-10.5,10.5]) {
+          const p=F.at(t,side,0),base=Math.min(...[-2,2].flatMap(dt=>[-2,2].map(ds=>{
+            const q=F.at(t+dt,side+ds,0);return ground(q[0],q[2]);})))-1;
+          const top=archY(t)+1;
+          if(top>base)P.box(mats.concrete,p[0],base,p[2],4,top-base,4);
+        }
+      }
+    }
     // anchorages and pylons from their OSM outlines, from the ground (or the water) to the deck
     for (const s of g.supports) {
       const c = s.c;
       const station = F.t(c);
       const top = Math.abs(F.s(c) - bend(station)) < GG.width / 2
         ? Math.min(...flatPts(s.ring).map(p => road(F.t(p)))) - 0.62
-        : W + GG.road + (/Pylon/.test(s.name) ? 12 : 2);
-      const base = Math.max(W - 2, ground(c[0], c[1]) - 1);
+        : road(station) + (/Pylon/.test(s.name) ? 3 : 1);
+      // A centroid-only base floats on sloping land. Sink the entire source footprint.
+      const base = Math.min(ground(c[0],c[1]),...flatPts(s.ring).map(p=>ground(...p))) - 1;
       if (top - base < 2) continue;
       P.prism(mats.concrete, flatPts(s.ring), base, top);
       obb(c[0], c[1], F.ux, F.uz, 12, 12, base, top);
     }
     // cables: anchorage -> south tower -> sag -> north tower -> anchorage (over the leg tops)
-    const anchorS = g.supports.find((s) => s.name === 'South Anchorage'), anchorN = g.supports.find((s) => s.name === 'North Anchor');
-    const tA = anchorS ? F.t(anchorS.c) : -343, tB = anchorN ? F.t(anchorN.c) : L + 343;
     const saddle = W + tS.top - GG.saddleBelowTop, low = W + GG.road + GG.cableLowAboveRoad;
     const cableY = (t) => {
       if (t >= 0 && t <= L) { const u = t / L; return saddle - (saddle - low) * (1 - (2 * u - 1) ** 2); }
-      const ta = t < 0 ? tA : tB, tt = t < 0 ? 0 : L, ya = W + GG.road + 2;
+      const ta = t < 0 ? tA : tB, tt = t < 0 ? 0 : L, ya = road(ta) + 2;
       const u = (t - ta) / (tt - ta);
       return ya + (saddle - ya) * u - 6 * u * (1 - u); // side spans: a slight sag (ESTIMATE)
     };
@@ -279,7 +506,20 @@ function buildSFBridges(scene) {
       for (let k = 1; k <= 12; k++) { const t = L + ((tB - L) * k) / 12; pts.push(F.at(t, s, cableY(t))); }
       cable(P, mats.orange, pts, GG.cable / 2);
     }
-    suspenders(D, F, tA, tB, cableY, road, legS, mats.orange);
+    // Cable feet meet the deck-edge girder. The former +0.6 m attachment was left
+    // hanging when the solid road-level chord was replaced by an open guardrail.
+    suspenders(D, F, tA, tB, cableY, road, legS, mats.orange, -0.4);
+    for(const s of legS) for(let t=tA;t<tB;t+=4) {
+      const b=Math.min(tB,t+4);
+      D.beam(mats.orange,F.at(t,s,road(t)-.4),F.at(b,s,road(b)-.4),.35,.4);
+    }
+    // A visible terminal cable shoe into the abutment, entirely outside the riding width.
+    for(const t of [tA,tB]) for(const s of legS) {
+      const outside=Math.sign(s)*16.5,dir=t===tA?-1:1;
+      const foot=F.at(t+dir*6,outside,0),base=ground(foot[0],foot[2])-1,top=road(t)+.5;
+      P.box(mats.concrete,foot[0],base,foot[2],3,Math.max(1,top-base),6);
+      cable(P,mats.orange,[F.at(t,s,cableY(t)),F.at(t+dir*6,outside,top)],GG.cable/2);
+    }
     routes.goldengate = { source: 'GEO.bridges.goldenGate.decks', status: 'geometry-registered-route-pending',
       south: F.at(t0, 0, road(t0)), north: F.at(t1, 0, road(t1)),
       stations: Array.from({ length: Math.ceil((t1 - t0) / 4) + 1 }, (_, i) => {

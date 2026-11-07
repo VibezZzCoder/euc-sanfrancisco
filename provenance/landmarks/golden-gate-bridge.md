@@ -28,3 +28,18 @@
 ## Model (P5)
 Built in `js/sf-bridges.js` from OSM: both towers extruded from their building parts as drawn (legs in tapering stages, the six struts, the concrete base), anchorages and pylons from their outlines, the deck along the line through the towers between the deck ways' ends. Roadway 75 m over the water (227 m towers, 152 m above the roadway), 27 m wide, cables over the OSM leg tops. **Estimates:** an 8 m deep deck (assumes a level roadway), the cables' sag in the side spans, saddles 4 m under the tower tops, the cable 3 m over the roadway at mid span, suspenders every 15.24 m, pylons 12 m above the deck. **Simplified:** no Fort Point arch, no tower recesses or lamps on the towers. The Marin end has no ground yet (phase 6).
 > Retained upstream model/source notes; see [provenance scope](INDEX.md).
+
+## EUC fork refinement — 2026-11-07
+
+The rideable fork adds six-lane visual markings, distinct side paths, detailed orange railings and lamps. The side
+paths widen around the actual source tower legs and connect to terrain with local fitted landings. The final 80 m of
+the Marin approach is eased to the same source endpoint to prevent offset railings crossing the path; approach heights
+remain gameplay estimates. The open painted road is not a claim that the movable real-world median is modeled.
+The Fort Point arch is an original approximate construction using the 320 ft span cited in
+[fort-point.md](fort-point.md); its exact rise and support details are estimates, not survey data.
+
+The subsequent owner screenshot repair fits the full roadway width to land, extends access40 m and introduces
+short8 m vertical transition curves over the unmodified terrain. Approach trestle spacing/section, arch foundations,
+cable terminal shoes, lower-tower X bracing and pylon height adaptation are original estimates guided by the supplied
+structural diagram, seismic-retrofit illustration and bridge photograph. Those reference images are not shipped assets.
+Suspender feet connect to the visible deck-edge girder; approach foundations use footprint-wide terrain sampling.

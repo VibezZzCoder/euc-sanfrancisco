@@ -91,6 +91,16 @@ shows mph and km/h. The [player guide](PLAYER_GUIDE.md) covers every control, th
   at moderate speed and ease off before the curved faces; full throttle can carry you over a lip. See the
   [skatepark riding guide](PLAYER_GUIDE.md#skatepark-riding) and [source provenance](provenance/nyc-skateparks.json).
 
+## Golden Gate Bridge
+
+Ride the marked roadway or follow the lighter side paths around the towers. Both ends have terrain-fitted road and
+sidewalk access, with smoother vertical joins. The bridge now has connected suspension details, grounded approach
+supports, lower-tower bracing and an approximate Fort Point arch. Visit **Fort Point** for a view from below.
+
+The bridge's adapted structural details and approach heights are estimates, not a surveyed replica. Owner playtesting
+and focused WebGPU/WebGL2 riding checks cover the repaired approaches and selected sidewalk routes; complete
+automated crossings, night-specific review and physical-device performance remain broader testing work.
+
 ## Known rough spots
 
 This is an early release. Known issues include:

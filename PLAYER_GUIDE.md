@@ -86,6 +86,8 @@ The parks combine street features with curved transition lines and open bypasses
 
 ## Map, recovery and settings
 
+- At **Golden Gate Bridge**, the roadway and both lighter side paths are rideable. The paths curve around the tower legs
+  and continue onto the land at each end; allow room to steer and expect steep local terrain near the approaches.
 - Map pins identify places; they do not guarantee a safe standing position. An arrival must pass support, clearance,
   occupancy and ride-away checks. Refusal should leave your rider, camera, waypoint and saved checkpoint unchanged.
 - Get Up uses checked EUC recovery. A lack of safe space can defer/refuse placement; it should not force you into a wall
