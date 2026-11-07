@@ -48,7 +48,7 @@ const cuts = [core, ...Object.values(geodata.NYC.GEO.landmarks).filter(s => s.de
   ({ x0: d.x0, z0: d.z0, x1: d.x0 + (d.nx - 1) * d.step, z1: d.z0 + (d.nz - 1) * d.step }))];
 function factory(source, city = C, inner = core, rects = cuts, three = THREE, workspaceTypes = {}) {
   return new Function('THREE', 'C', 'innerCore', 'cutRects', 'water', 'Float64Array', 'Uint32Array',
-    section(source, normalStart, 'function buildSFRegion(scene)') +
+    section(source, normalStart, 'function buildSFRegion(') +
     section(source, '  const inRect=', '  const terrain=[];') +
     section(source, '  function geometry(', '  for(const [g,far]') + '\nreturn geometry;')(
       three, city, inner, rects, manifest.waterLevel, workspaceTypes.Float64Array || Float64Array, workspaceTypes.Uint32Array || Uint32Array);
@@ -68,8 +68,21 @@ function same(a, b) {
 
 baselineTest('regional streaming: pinned baseline, exact normals, sampler, thresholds and resource ownership remain unchanged', () => {
   assert.equal(hash(before), '84769163b43edc90e5cc2640154e62ebfe1b29b041c25b3ecf2302954b6a6907');
-  // Only the scoped regional-tree drawing and ground-edge material edits are undone (tests/helpers/).
-  const guarded = withoutGroundEdgeEdits(withoutRegionalTreeEdits(after));
+  // Undo only exact reviewed paint-hook edits, alongside the scoped tree/material edits.
+  // Never remove the whole road builder: its sampling, UVs and ownership remain guarded.
+  let guarded = withoutGroundEdgeEdits(withoutRegionalTreeEdits(after));
+  const undo = (current, original) => {
+    assert.equal(guarded.split(current).length, 2, 'unique exact paint-hook fixture');
+    guarded = guarded.replace(current, original);
+  };
+  undo('function buildSFRegion(scene, { paintIntervals = null } = {}) {', 'function buildSFRegion(scene) {');
+  undo(`      // Authored former-street pavement suppresses only its dashed paint. Source
+      // linework, ground, vehicle routes and UV distance elsewhere stay unchanged.
+      const intervals=paintIntervals?paintIntervals(ax,az,dx,dz,i*length/n,(i+1)*length/n):[[i*length/n,(i+1)*length/n]];
+      for(const [a,b]of intervals){
+      const x=ax+dx*(a+b)/2,z=az+dz*(a+b)/2;`,
+  '      const a=i*length/n,b=(i+1)*length/n,x=ax+dx*(a+b)/2,z=az+dz*(a+b)/2;');
+  undo('      }\n      }\n    }\n  }\n  const roadMeshes=[];', '      }\n    }\n  }\n  const roadMeshes=[];');
   assert.equal(guarded.slice(0, guarded.indexOf('  function geometry(')), before.slice(0, before.indexOf('  function geometry(')));
   assert.equal(guarded.slice(guarded.indexOf('  for(const [g,far]')), before.slice(before.indexOf('  for(const [g,far]')));
 });

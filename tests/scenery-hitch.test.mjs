@@ -24,7 +24,7 @@ const section = (s, start, end) => {
   return s.slice(a, b);
 };
 const normalStart = '// Specialized for this builder\'s indexed, non-normalized, non-interleaved Float32 XYZ geometry.';
-const normalHelper = section(current.region, normalStart, 'function buildSFRegion(scene)');
+const normalHelper = section(current.region, normalStart, 'function buildSFRegion(');
 // Reconstruct the historical control from its accepted checkpoint, not evolving production geometry.
 // Current output is still compared directly below; new construction work must not rewrite this oracle.
 const acceptedHistory = gitHistory(root, 'fc9826b2872320bca7f08ac19d7141d3bbc31683');
@@ -68,7 +68,7 @@ function bench(t, name, before, after, count = 1) {
     scope: 'Node CPU wall time; alternating order, two warmups, six measured blocks; no allocation counters/forced GC in windows; not browser/GPU/FPS' }));
 }
 
-baselineTest('relief: all committed raster bytes, transparent border/water and cache match; label/layer code unchanged', t => {
+baselineTest('relief: all committed raster bytes, transparent border/water and cache match; reviewed map code pinned', t => {
   function relief(source, g, counted = false) {
     let result, allocations = 0, canvases = 0;
     const document = { createElement() {
@@ -88,8 +88,12 @@ baselineTest('relief: all committed raster bytes, transparent border/water and c
   assert.deepEqual(bytes(b.result), bytes(a.result));
   for (const k of ['x', 'z', 'width', 'height']) assert.equal(a.output[k], b.output[k]);
   assert.equal(b.allocations, 0); assert.ok(a.allocations > 1e6);
-  assert.equal(current['sf-map'].slice(current['sf-map'].indexOf('\nlet LAYERS = null;')),
-    baseline['sf-map'].slice(baseline['sf-map'].indexOf('\nlet LAYERS = null;')), 'all layer contents, draw/label ordering, caches and interaction unchanged');
+  assert.equal(section(current['sf-map'], '\nlet LAYERS = null;', "// SF's authored parks;"),
+    section(baseline['sf-map'], '\nlet LAYERS = null;', 'class NYCMapSystem {'), 'layers, labels and caches before marker helpers remain exact');
+  // Reviewed 6887737 adds only skateboard markers/spacing, aliases and exact arrival forwarding
+  // after the relief code. Pin the entire suffix, rather than silently ignoring changed UI methods.
+  assert.equal(hash(current['sf-map'].slice(current['sf-map'].indexOf('\nlet LAYERS = null;'))),
+    'f1db3c37b0c92fd44bdde542fb4749ae7f97ad606977fd7e02c5e883bdafe10a', 'reviewed park map suffix');
   assert.equal(current['sf-map'].split('let RELIEF = null;')[0], baseline['sf-map'].split('let RELIEF = null;')[0]);
   t.diagnostic(JSON.stringify({ raster: [C.w, C.h], bytes: b.result.byteLength, sha256: hash(b.result), removedPerLandPixelArrays: a.allocations, newRetainedBytes: 0 }));
   bench(t, 'full committed map relief (includes image allocation, canvas stub)', () => relief(baseline['sf-map'], C), () => relief(current['sf-map'], C));
@@ -145,8 +149,19 @@ regionTest('region: every committed city tile at strides 1/2/4 and horizon tile 
     const old = geometryFactory(preNormal, g, irregular[0], irregular)(g, tile, stride, false);
     sameGeometry(a, b); sameGeometry(old, b); a.dispose(); b.dispose(); old.dispose();
   }
-  // Only the scoped regional-tree drawing edits are undone (tests/helpers/region-tree-edits.mjs).
-  const guarded = withoutRegionalTreeEdits(current.region);
+  // Undo only the exact paint-loop wrapper and scoped regional-tree drawing edits.
+  let guarded = withoutRegionalTreeEdits(current.region);
+  const undo = (current, original) => {
+    assert.equal(guarded.split(current).length, 2, 'unique exact paint-hook fixture');
+    guarded = guarded.replace(current, original);
+  };
+  undo(`      // Authored former-street pavement suppresses only its dashed paint. Source
+      // linework, ground, vehicle routes and UV distance elsewhere stay unchanged.
+      const intervals=paintIntervals?paintIntervals(ax,az,dx,dz,i*length/n,(i+1)*length/n):[[i*length/n,(i+1)*length/n]];
+      for(const [a,b]of intervals){
+      const x=ax+dx*(a+b)/2,z=az+dz*(a+b)/2;`,
+  '      const a=i*length/n,b=(i+1)*length/n,x=ax+dx*(a+b)/2,z=az+dz*(a+b)/2;');
+  undo('      }\n      }\n    }\n  }\n  const roadMeshes=[];', '      }\n    }\n  }\n  const roadMeshes=[];');
   assert.equal(guarded.slice(guarded.indexOf('  for(const [g,far]')), baseline.region.slice(baseline.region.indexOf('  for(const [g,far]')),
     'construction, near-rider8m selection, cache, city life and teardown remain source-exact');
   t.diagnostic(JSON.stringify({ committedCases: cases, syntheticCases: 3, outputSHA256: digest.digest('hex'), totalOutputBytes: totalBytes,

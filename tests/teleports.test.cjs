@@ -10,9 +10,9 @@ for (const path of ['js/sf-geodata.js', 'js/sf-places.js', 'js/city-config.js'])
 const { TELEPORT_LOCATIONS, LANDMARK_SITES, blockAt, nearestRoads, getIslandBoundsAtZ } = context.window.NYC;
 
 // Geographic seed provenance only. Checked EUC placement/route acceptance is covered separately.
-test('every teleport button has a measured geographic roadway seed', () => {
+test('every teleport button has a measured roadway seed or an explicit authored park arrival', () => {
   const buttons = [...read('index.html').matchAll(/data-teleport="([^"]+)"/g)].map((match) => match[1]);
-  assert.deepEqual(Object.keys(TELEPORT_LOCATIONS).sort(), buttons.sort());
+  assert.deepEqual([...Object.keys(TELEPORT_LOCATIONS), 'un-plaza', 'zion'].sort(), buttons.sort());
   for (const [name, point] of Object.entries(TELEPORT_LOCATIONS)) {
     assert.ok(Number.isFinite(point.heading), `${name} has a heading`);
     if (point.a && point.b) {
@@ -26,6 +26,51 @@ test('every teleport button has a measured geographic roadway seed', () => {
     assert.ok(point.x > shore.westX + 8 && point.x < shore.eastX - 8, `${name} stays on the land`);
     const nearby = nearestRoads(point.x, point.z, 20);
     assert.ok(nearby.some(({ road, dist }) => dist < road.w / 2), `${name} lands within a street's width`);
+  }
+});
+
+test('UN/Zion buttons lazily resolve actual checked authored metadata, never geographic pins as floors', async t => {
+  const { pathToFileURL } = require('node:url');
+  const url = path => pathToFileURL(join(__dirname, '..', path)).href;
+  const moduleURL = text => 'data:text/javascript;base64,' + Buffer.from(text).toString('base64');
+  const THREE = await import(url('vendor/three/build/three.webgpu.js'));
+  const { createSkateparksWorld } = await import('./helpers/sf-skateparks-world.mjs');
+  const geometryURL = moduleURL(read('js/sf-skatepark-geometry.js')
+    .replace("from 'three/webgpu'", `from '${url('vendor/three/build/three.webgpu.js')}'`)
+    .replace("from 'three/tsl'", `from '${url('vendor/three/build/three.tsl.js')}'`));
+  const { buildSFSkateparks } = await import(moduleURL(read('js/sf-skateparks.js')
+    .replace("from 'three/webgpu'", `from '${url('vendor/three/build/three.webgpu.js')}'`)
+    .replace("from './sf-skatepark-geometry.js'", `from '${geometryURL}'`)
+    .replace("from './sf-terrain-sampler.js'", `from '${url('js/sf-terrain-sampler.js')}'`)
+    .replace("from './euc-recovery.js'", `from '${url('js/euc-recovery.js')}'`)));
+  const { N } = await createSkateparksWorld({ buildNetwork: false });
+  const overlay = vm.createContext({ window: { NYC: N } });
+  vm.runInContext(read('js/sf-destinations.js'), overlay);
+  for (const id of ['un-plaza', 'zion']) {
+    assert.equal(N.TELEPORT_LOCATIONS[id].y, undefined, 'no guessed floor before construction');
+    assert.equal(N.NYC_LANDMARKS.find(p => p.id === id).arrival, undefined);
+  }
+  const scene = new THREE.Scene();
+  t.after(() => {
+    const resources = new Set();
+    scene.traverse(o => { if (o.geometry) resources.add(o.geometry); for (const m of [].concat(o.material || [])) resources.add(m); });
+    for (const r of resources) r.dispose();
+    scene.clear();
+  });
+  buildSFSkateparks(scene, N);
+  for (const id of ['un-plaza', 'zion']) {
+    const actual = N.SF_SKATEPARKS.find(p => p.id === id).arrival;
+    const toolbar = N.TELEPORT_LOCATIONS[id], map = N.NYC_LANDMARKS.find(p => p.id === id).arrival;
+    for (const key of ['x', 'y', 'z', 'heading', 'departure', 'exact']) assert.equal(toolbar[key], actual[key], `${id} toolbar ${key}`);
+    for (const key of ['x', 'y', 'z', 'heading', 'referenceY']) {
+      assert.ok(Number.isFinite(actual[key]), `${id} finite ${key}`);
+      assert.equal(map[key], actual[key], `${id} map ${key}`);
+    }
+    assert.equal(actual.exact, true);
+    assert.equal(actual.registeredSurfaceOnly, true);
+    assert.equal(actual.departure, 1.2);
+    assert.equal(map.requireClear, true);
+    assert.equal(map.requiresValidation, true, 'metadata remains a proposal, not native route acceptance');
   }
 });
 

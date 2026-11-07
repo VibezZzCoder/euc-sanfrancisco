@@ -13,7 +13,7 @@ function section(start, end) {
 const stopSource = section('  startup.onStop(async () => {', '  rendererInit = renderer.init();');
 // Includes the production scene disposal registration, ground construction, terrain registration and the next stage.
 // Removing/moving terrain registration past this boundary must fail the early-startup-failure case too.
-const groundSource = section('  const scene = new THREE.Scene();', '  const region = city.buildSFRegion(scene);');
+const groundSource = section('  const scene = new THREE.Scene();', '  const region = city.buildSFRegion(');
 
 function deferred() {
   let resolve, reject;

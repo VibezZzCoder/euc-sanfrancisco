@@ -68,7 +68,7 @@ function classList() {
   };
 }
 
-function mapHarness({ onTeleport } = {}) {
+function mapHarness({ onTeleport, landmarks = [] } = {}) {
   const elements = {};
   const document = {
     ...eventTarget(), hidden: false, activeElement: null,
@@ -145,7 +145,7 @@ function mapHarness({ onTeleport } = {}) {
     canvas.dispatch('lostpointercapture', { pointerId: id });
   };
   window.NYC = {
-    GEO: { frame: {} }, ROADS: [], BLOCKS: [], NYC_LANDMARKS: [],
+    GEO: { frame: {} }, ROADS: [], BLOCKS: [], NYC_LANDMARKS: landmarks,
     ISLAND_BOUNDS: { minX: -10000, maxX: 10000, minZ: -10000, maxZ: 10000 },
     getIslandBoundsAtZ: () => ({ westX: -10000, eastX: 10000 }),
     getLocationLabel: (x, z) => `${x}, ${z}`,
@@ -427,4 +427,112 @@ test('pointer closing restores gameplay focus and focus escape while open return
   assert.equal(h.document.activeElement, h.modal);
   h.click(h.close, { detail: 1, pointerType: 'mouse' });
   assert.equal(h.map.isFullMapOpen, false); assert.equal(h.document.activeElement, h.gameCanvas);
+});
+
+// Real destination IDs/coordinates, without loading any park geometry or preparing arrivals.
+function parkPins() {
+  const window = { NYC: { GEO: {}, NYC_LANDMARKS: [] } };
+  vm.runInNewContext(readFileSync(join(__dirname, '../js/sf-destinations.js'), 'utf8'), { window });
+  return Array.from(window.NYC.NYC_LANDMARKS).filter(pin => ['un-plaza', 'zion'].includes(pin.id));
+}
+
+function markerHarness(dpr) {
+  const calls = [];
+  const ctx = new Proxy({ canvas: { width: 800 * dpr, height: 600 * dpr } }, {
+    get(target, key) {
+      if (key in target) return target[key];
+      if (key === 'createRadialGradient') return () => ({ addColorStop() {} });
+      return (...args) => { calls.push([key, ...args]); };
+    }
+  });
+  let canvases = 0;
+  const document = { body: { classList: { contains: () => false } }, createElement() {
+    canvases++; return { getContext: () => ctx };
+  } };
+  const pins = parkPins();
+  assert.equal(pins.length, 2);
+  const ordinary = { id: 'ordinary', name: 'Ordinary landmark', x: 500, z: 0 };
+  const window = { devicePixelRatio: dpr, NYC: { GEO: {}, ROADS: [], NYC_LANDMARKS: [...pins, ordinary] } };
+  vm.runInNewContext(source, { window, document, performance: { now: () => 0 } });
+  const map = Object.create(window.NYC.NYCMapSystem.prototype);
+  const canvas = { clientWidth: 800, clientHeight: 600, width: 800 * dpr, height: 600 * dpr, offsetParent: {} };
+  const player = { position: { x: 0, z: 0 }, heading: 0 };
+  const reserved = [];
+  Object.assign(map, {
+    fullCanvas: canvas, fullCtx: ctx, fullDpr: dpr, isFullMapOpen: true,
+    viewCenterX: -2000, viewCenterZ: 1000, viewZoom: 0.1, searchHighlight: '',
+    miniCanvas: canvas, miniCtx: ctx,
+    controllerManager: { getActiveEntity: () => player },
+    cameraSystem: { currentLookAt: { clone: () => ({ sub: () => ({ x: 0, z: 1 }) }) }, currentPos: {} },
+    // Geographic drawing is unchanged; retain production marker/layout/caching paths.
+    drawWorld() {}, textWidth: (_ctx, text) => text.length * 6,
+    drawRoadLabels: (_ctx, _view, options) => { if (options.placed) reserved.push(...options.placed); },
+    drawScaleBar() {}
+  });
+  return { map, pins, ordinary, player, calls, reserved, canvases: () => canvases };
+}
+
+for (const dpr of [1, 1.5, 2]) test(`UN/Zion vector atlas markers, label clearance and static cache at DPR ${dpr}`, () => {
+  const h = markerHarness(dpr), { map, calls } = h;
+  map.renderFullMap();
+  assert.equal(calls.filter(c => c[0] === 'scale' && c[1] === 1 && c[2] === 1).length, 2);
+  assert.equal(calls.filter(c => c[0] === 'arc' && c[3] === 1.8).length, 4, 'two wheels per board');
+  for (const pin of h.pins) {
+    const x = (pin.x - map.viewCenterX) * map.viewZoom, y = (pin.z - map.viewCenterZ) * map.viewZoom;
+    assert.ok(calls.some(c => c[0] === 'translate' && c[1] === x && c[2] === y), 'draw at geographic pin');
+    assert.ok(calls.some(c => c[0] === 'fillText' && c[1] === pin.short && c[2] === x + 15 && c[3] === y + 4));
+    assert.ok(h.reserved.some(b => b[0] === x - 12 && b[1] === y - 12 && b[2] === x + 12 && b[3] === y + 12));
+  }
+  assert.ok(calls.some(c => c[0] === 'arc' && c[3] === 4.2), 'ordinary landmark remains a dot');
+  const canvases = h.canvases();
+  calls.length = 0;
+  map.renderFullMap();
+  assert.equal(calls.filter(c => c[0] === 'scale').length, 0, 'unchanged atlas reuses cached pins');
+  assert.equal(h.canvases(), canvases);
+  map.viewZoom = 0.11;
+  map.renderFullMap();
+  assert.equal(calls.filter(c => c[0] === 'scale' && c[1] === 1).length, 2, 'zoom redraw keeps CSS-pixel marker size');
+});
+
+test('radar draws the nearby park as a smaller skateboard, culls the distant park and reuses its canvas', () => {
+  const h = markerHarness(2);
+  for (const pin of h.pins) {
+    Object.assign(h.player.position, { x: pin.x, z: pin.z });
+    h.calls.length = 0;
+    h.map.renderMinimap();
+    assert.equal(h.calls.filter(c => c[0] === 'scale' && c[1] === 0.8 && c[2] === 0.8).length, 1);
+    assert.equal(h.calls.filter(c => c[0] === 'arc' && c[3] === 1.8).length, 2);
+    const canvases = h.canvases();
+    h.map.renderMinimap();
+    assert.equal(h.canvases(), canvases, 'no new canvas per radar update');
+  }
+});
+
+test('skateboard selection uses 12 CSS pixels, preserves ordinary 8px pins and checked arrival/search behavior', () => {
+  for (const pin of parkPins()) {
+    const arrival = { x: pin.x + 30, z: pin.z + 20, heading: 0.7, y: 12, exact: true, departure: 1.2 };
+    const landmark = { ...pin, arrival };
+    const ordinary = { id: 'ordinary', x: 4000, z: 5000, arrival };
+    const h = mapHarness({ landmarks: [landmark, ordinary] });
+    for (const zoom of [0.015, 0.22, 1, 3]) {
+      h.map.viewZoom = zoom;
+      assert.equal(h.map.authoredPinAt({ x: pin.x + 11.9 / zoom, z: pin.z }), landmark);
+      assert.equal(h.map.authoredPinAt({ x: pin.x + 12.1 / zoom, z: pin.z }), null);
+      assert.equal(h.map.authoredPinAt({ x: ordinary.x + 7.9 / zoom, z: ordinary.z }), ordinary);
+      assert.equal(h.map.authoredPinAt({ x: ordinary.x + 8.1 / zoom, z: ordinary.z }), null);
+    }
+    h.map.search(pin.aliases[0]);
+    assert.equal(h.map.searchResults[0], landmark);
+    assert.equal(h.teleports.length, 0, 'search frames the pin without moving the rider');
+    const teleports = [];
+    h.map.onTeleport = (...args) => { teleports.push(args); return { succeeded: true, x: arrival.x, z: arrival.z }; };
+    const point = { x: pin.x + 11 / h.map.viewZoom, z: pin.z };
+    assert.equal(h.map.teleportToPoint(point, h.map.authoredPinAt(point)), true);
+    assert.deepEqual(teleports[0].slice(0, 4), [arrival.x, arrival.z, arrival.heading, arrival.y]);
+    assert.equal(teleports[0][4].exact, true); assert.equal(teleports[0][4].departure, 1.2);
+    const accepted = h.map.waypoint;
+    h.map.onTeleport = () => ({ succeeded: false });
+    assert.equal(h.map.teleportToPoint(point, landmark), false);
+    assert.equal(h.map.waypoint, accepted);
+  }
 });

@@ -23,6 +23,7 @@ import { createPlayerState } from './player-state.js';
 import { createFrameRatePreference, createFramePacer, frameRateHealth } from './frame-rate.js';
 import { createRenderResolutionPreference, drawingBufferRatio } from './render-resolution.js';
 import { createGraphicsQualityPreference, createGraphicsQuality } from './graphics-quality.js';
+import { buildSFSkateparks, skateparkPaintIntervals } from './sf-skateparks.js';
 
 export async function initApp(startup) {
   const city = window.NYC;
@@ -41,7 +42,7 @@ export async function initApp(startup) {
   // thread, paced by how fast the earlier stages ran on this device. Shader compilation reports real batch progress.
   const STAGE_MS = { graphics: 300, lighting: 70, data: 700, ground: 340, region: 1000, landmarks: 760,
     architecture: 1280, routes: 500, details: 3200, traffic: 100, grade: 1000, curbs: 5300, transit: 1650,
-    rider: 5000, culling: 170, effects: 120, compile: 4100, firstFrame: 2100, gpu: 550 };
+    parks: 500, rider: 5000, culling: 170, effects: 120, compile: 4100, firstFrame: 2100, gpu: 550 };
   const stageNames = Object.keys(STAGE_MS);
   const totalStageMs = stageNames.reduce((sum, name) => sum + STAGE_MS[name], 0);
   const loadingStartedAt = performance.now();
@@ -148,7 +149,7 @@ export async function initApp(startup) {
   const cityGrid = city.buildSFGround(scene, { deferCurbSurfaces: true });
   ownedDisposals.push(() => cityGrid.terrain?.dispose());
   await stage('Building the regional landscape…', 'region');
-  const region = city.buildSFRegion(scene);
+  const region = city.buildSFRegion(scene, { paintIntervals: skateparkPaintIntervals });
   ownedDisposals.push(() => region.disposeTerrainCache());
   await stage('Building landmarks and bridges…', 'landmarks');
   const landmarks = city.buildLandmarks(scene);
@@ -184,6 +185,11 @@ export async function initApp(startup) {
     transit = city.buildSFTransit(scene);
     if (trafficSystem.network) city.buildRoadPaint(scene, trafficSystem.network);
   } finally { city.Terrain.patchesEnabled = patchesEnabled; }
+
+  // Fit authored surfaces to the finalized city, without changing road-network inputs,
+  // furniture, trees or pedestrian tracks. Physical construction precedes sampler handoff.
+  await stage('Building UN Plaza and Zion riding lines…', 'parks');
+  buildSFSkateparks(scene, city);
 
   await stage('Preparing the selected rider, wheel and controls…', 'rider');
   const playerState = createPlayerState({ isPlayableRider });
@@ -373,8 +379,8 @@ export async function initApp(startup) {
     for (const id of ['hud-active-mode', 'rider-button-name']) document.getElementById(id).textContent = RIDERS[entity.riderId].name;
     savePlayerState(); // createPlayerState rejects writes until Ride authorizes them
   }
-  function teleportTo(x, z, heading = Math.PI, referenceY = Infinity) {
-    const destination = controllerManager.teleportActiveTo(x, z, heading, referenceY);
+  function teleportTo(x, z, heading = Math.PI, referenceY = Infinity, policy = {}) {
+    const destination = controllerManager.teleportActiveTo(x, z, heading, referenceY, policy);
     if (!destination.succeeded) return destination;
     controllerManager.resetInput(); touchControls.reset(); gamepadControls.reset();
     cameraSystem.resetForTeleport(); selectCamera('chase', true, false);
@@ -498,7 +504,8 @@ export async function initApp(startup) {
   listen(document.getElementById('btn-open-map'), 'click', () => mapSystem.toggleFullMap(true));
   for (const button of document.querySelectorAll('[data-teleport]')) listen(button, 'click', () => {
     const destination = city.TELEPORT_LOCATIONS[button.dataset.teleport];
-    if (destination) teleportTo(destination.x, destination.z, destination.heading, destination.y ?? Infinity);
+    if (destination) teleportTo(destination.x, destination.z, destination.heading, destination.y ?? Infinity,
+      { departure: destination.exact === true ? destination.departure ?? 0 : 0, exact: destination.exact === true });
     closePopovers();
   });
   const fogSelect = document.getElementById('fog-preset');

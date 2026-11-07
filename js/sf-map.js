@@ -397,6 +397,31 @@ function drawWaypoint(ctx, x, y, r) {
 
 const overlaps = (boxes, b) => boxes.some((o) => b[0] < o[2] && b[2] > o[0] && b[1] < o[3] && b[3] > o[1]);
 
+// SF's authored parks; keep geographic pins and lazy checked arrivals owned by sf-destinations.js.
+const isSkateboardPin = landmark => landmark.id === 'un-plaza' || landmark.id === 'zion';
+
+// Vector marker/atlas/radar treatment adapted from euc-newyork js/nyc-map.js
+// @5493af02062b947d1f0d502f8b4f3e9406b73b43 (MIT; existing LICENSE notices).
+// Donor SHA-256: 1cb7895e249cc2c547ad5b71701d99ee855228bfe6d6dd38ceee3ac2e0a58dcd.
+// No emoji font dependency or per-marker arrays in the live radar path.
+function drawSkateboardPin(ctx, x, y, scale = 1) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(-0.45);
+  ctx.scale(scale, scale);
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(-8, -3); ctx.lineTo(-5, -1); ctx.lineTo(5, -1); ctx.lineTo(8, -3);
+  ctx.strokeStyle = MAP.halo; ctx.lineWidth = 7; ctx.stroke();
+  ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2.8; ctx.stroke();
+  for (let wheelX = -4; wheelX <= 4; wheelX += 8) {
+    ctx.beginPath(); ctx.arc(wheelX, 3, 1.8, 0, Math.PI * 2);
+    ctx.strokeStyle = MAP.halo; ctx.lineWidth = 2.5; ctx.stroke();
+    ctx.fillStyle = '#ffffff'; ctx.fill();
+  }
+  ctx.restore();
+}
+
 class NYCMapSystem {
   constructor({ controllerManager, cameraSystem, trafficSystem, onTeleport, onToggle }) {
     this.controllerManager = controllerManager;
@@ -814,7 +839,8 @@ class NYCMapSystem {
     this.searchResults = [];
     let roads = [];
     if (q.length > 0) {
-      this.searchResults = NYC_LANDMARKS.filter(l => (l.name || '').toLowerCase().includes(q) || (l.short || '').toLowerCase().includes(q));
+      this.searchResults = NYC_LANDMARKS.filter(l => (l.name || '').toLowerCase().includes(q) || (l.short || '').toLowerCase().includes(q)
+        || (l.aliases || []).some(alias => alias.toLowerCase().includes(q)));
       const lmMatch = this.searchResults[0];
       roads = ROAD_LABELS.filter((l) => l.lower.includes(q) || l.raw.includes(q));
       if (roads.length) {
@@ -867,7 +893,7 @@ class NYCMapSystem {
     for (const landmark of NYC_LANDMARKS) {
       if (!this.arrivalFor(landmark)) continue;
       const pixels = Math.hypot(landmark.x - point.x, landmark.z - point.z) * this.viewZoom;
-      if (pixels <= 8 && pixels < distance) { nearest = landmark; distance = pixels; }
+      if (pixels <= (isSkateboardPin(landmark) ? 12 : 8) && pixels < distance) { nearest = landmark; distance = pixels; }
     }
     return nearest;
   }
@@ -883,7 +909,8 @@ class NYCMapSystem {
     const arrival = this.arrivalFor(landmark), target = arrival || point;
     if (![target?.x, target?.z].every(Number.isFinite)) return false;
     let result;
-    try { result = this.onTeleport?.(target.x, target.z, target.heading, target.referenceY ?? target.y); }
+    try { result = this.onTeleport?.(target.x, target.z, target.heading, target.referenceY ?? target.y,
+      { departure: target.exact === true ? target.departure ?? 0 : 0, exact: target.exact === true }); }
     catch { result = null; }
     // A scenery pin, missing host callback or unchecked/async callback never proves supported arrival.
     const succeeded = result?.succeeded === true && [result.x, result.z].every(Number.isFinite);
@@ -1295,6 +1322,7 @@ class NYCMapSystem {
       const lx = toX(lm.x);
       const ly = toY(lm.z);
       if (Math.abs(lx) < w * 0.48 && Math.abs(ly) < h * 0.48) {
+        if (isSkateboardPin(lm)) { drawSkateboardPin(ctx, lx, ly, 0.8); continue; }
         ctx.fillStyle = MAP.halo;
         ctx.beginPath();
         ctx.arc(lx, ly, 4.5, 0, Math.PI * 2);
@@ -1426,9 +1454,10 @@ class NYCMapSystem {
       const ly = toY(lm.z);
       if (Math.abs(lx) > w * 0.48 || Math.abs(ly) > h * 0.48) continue;
       const labelW = this.textWidth(ctx, lm.short || lm.name || 'Landmark') + 6;
-      const box = [lx + 6, ly - 8, lx + 8 + labelW, ly + 7];
+      const radius = isSkateboardPin(lm) ? 12 : 6;
+      const box = [lx + radius, ly - 8, lx + radius + 2 + labelW, ly + 7];
       const showLabel = !overlaps(placed, box);
-      placed.push([lx - 6, ly - 6, lx + 6, ly + 6]);
+      placed.push([lx - radius, ly - radius, lx + radius, ly + radius]);
       if (showLabel) placed.push(box);
       pins.push({ lm, lx, ly, showLabel });
     }
@@ -1472,20 +1501,24 @@ class NYCMapSystem {
     ctx.font = `700 11px ${FONT}`;
     ctx.textAlign = 'left';
     for (const { lm, lx, ly, showLabel } of pins) {
-      ctx.fillStyle = MAP.halo;
-      ctx.beginPath();
-      ctx.arc(lx, ly, 6.5, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = '#ffffff';
-      ctx.beginPath();
-      ctx.arc(lx, ly, 4.2, 0, Math.PI * 2);
-      ctx.fill();
+      if (isSkateboardPin(lm)) drawSkateboardPin(ctx, lx, ly);
+      else {
+        ctx.fillStyle = MAP.halo;
+        ctx.beginPath();
+        ctx.arc(lx, ly, 6.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(lx, ly, 4.2, 0, Math.PI * 2);
+        ctx.fill();
+      }
       if (showLabel) {
+        const offset = isSkateboardPin(lm) ? 15 : 9;
         ctx.lineWidth = 3;
         ctx.strokeStyle = MAP.halo;
-        ctx.strokeText(lm.short || lm.name || 'Landmark', lx + 9, ly + 4);
+        ctx.strokeText(lm.short || lm.name || 'Landmark', lx + offset, ly + 4);
         ctx.fillStyle = '#ffffff';
-        ctx.fillText(lm.short || lm.name || 'Landmark', lx + 9, ly + 4);
+        ctx.fillText(lm.short || lm.name || 'Landmark', lx + offset, ly + 4);
       }
     }
 

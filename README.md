@@ -4,7 +4,7 @@
 > WebGPU and WebGL2. Expect rough visuals, a long first load and unfinished corners; see
 > [Known rough spots](#known-rough-spots). Feedback is very welcome.
 
-**[▶ Play now](https://vibezzzcoder.github.io/euc-sanfrancisco/)** *(expected GitHub Pages address)*
+**[▶ Play now](https://vibezzzcoder.github.io/euc-sanfrancisco/)**
 
 **[EUC Thrills website](https://euc.erodmen.com/)**
 
@@ -78,6 +78,18 @@ The upper-left **3D resolution** (100/75/50%) and **Graphics** (High/Medium/Low)
 **Frame rate** sets a rendering cap, with Auto following your display. They change rendering only;
 routes, physics, traffic and the city stay the same. The speedometer
 shows mph and km/h. The [player guide](PLAYER_GUIDE.md) covers every control, the map, recovery and settings.
+
+## Skateparks
+
+- **UN Skate Plaza:** an 18×104 m Jefferson-inspired plaza with 11 features, linked banks and rollers, tabletop,
+  manual pad, bench, rail and opposing curved quarters for back-and-forth riding. A 4 m central strip stays clear.
+- **Zion / Waller Street:** a 38×76 m Pier 62-inspired park on the grass beside Waller, with 9 features, broad flow
+  lines, an 8 m-wide opposing halfpipe and a quarter/deck with a banked return. The road stays open beside its access path.
+- Use **Teleport**, or search the map for **UN Plaza**, **United Nations**, **Zion** or **Waller**. Skateboard icons
+  identify both parks on the fullscreen map and minimap. Arrivals are checked for a safe standing spot and ride-away.
+- The parks use original gameplay layouts adapted from the NYC destination, not surveyed replicas. Enter halfpipes
+  at moderate speed and ease off before the curved faces; full throttle can carry you over a lip. See the
+  [skatepark riding guide](PLAYER_GUIDE.md#skatepark-riding) and [source provenance](provenance/nyc-skateparks.json).
 
 ## Known rough spots
 

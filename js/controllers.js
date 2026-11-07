@@ -11,6 +11,8 @@ const ONE_SHOT_ACTIONS = new Set(['up', 'reset']);
 const INPUT_ACTIONS = ['forward', 'backward', 'left', 'right', 'up', 'boost', 'reset'];
 // Checked spots a teleport offers placeAt before reporting refusal (each refusal leaves the rider untouched).
 const TELEPORT_PLACE_ATTEMPTS = 8;
+// Matches placeAt's bounded placementDepartureClear policy in euc-recovery.js.
+const TELEPORT_MAX_DEPARTURE = 1.2;
 
 function interactiveTarget(target) {
   return !!target && (target.isContentEditable
@@ -207,14 +209,15 @@ class ThirdPersonControllerManager {
     return this.entities.euc.dispose();
   }
 
-  teleportActiveTo(x, z, heading = Math.PI, referenceY = Infinity) {
+  teleportActiveTo(x, z, heading = Math.PI, referenceY = Infinity, policy = {}) {
     const ent = this.entities.euc;
+    const { departure = 0 } = policy ?? {};
     if (!Number.isFinite(heading)) heading = ent.heading;
     let succeeded = false, attempts = 0;
-    // placeAt rechecks static support and refuses a spot a car, cable car or person occupies right now, atomically.
-    // A transiently occupied arrival is not a missing one: try the next statically checked spot nearby (bounded).
-    for (const destination of this.teleportCandidates(x, z, heading, referenceY)) {
-      succeeded = ent.placeAt(destination.x, destination.z, heading, destination.y, { requireClear: true }) === true;
+    // placeAt atomically rechecks static support and live occupancy along the requested departure.
+    // Ordinary arrivals may try nearby checked spots; exact-site policy never offers a ring fallback.
+    for (const destination of this.teleportCandidates(x, z, heading, referenceY, policy)) {
+      succeeded = ent.placeAt(destination.x, destination.z, heading, destination.y, { requireClear: true, departure }) === true;
       if (succeeded || ++attempts >= TELEPORT_PLACE_ATTEMPTS) break;
     }
     if (succeeded) this.resetInput();
@@ -222,20 +225,23 @@ class ThirdPersonControllerManager {
   }
 
   // Search actual SF support, preserving the requested elevation/layer and geography. No island/shore clamp.
-  // Dynamic occupancy is rechecked by placeAt(requireClear) before committing placement.
-  findTeleportPosition(x, z, heading, referenceY = Infinity) {
-    for (const found of this.teleportCandidates(x, z, heading, referenceY)) return found;
+  // Static standing-support preview only: placeAt rechecks full departure/occupancy before committing placement.
+  findTeleportPosition(x, z, heading, referenceY = Infinity, policy = {}) {
+    for (const found of this.teleportCandidates(x, z, heading, referenceY, policy)) return found;
     return null;
   }
 
   // Statically checked candidates, nearest first: the exact spot, then four-metre rings that cover nearby streets and
   // courtyards, with bounded work even for a click inside a large block.
-  *teleportCandidates(x, z, heading, referenceY = Infinity) {
+  *teleportCandidates(x, z, heading, referenceY = Infinity, policy = {}) {
+    const { departure = 0, exact: exactOnly = false } = policy ?? {};
     if (![x, z, heading].every(Number.isFinite) || (!Number.isFinite(referenceY) && referenceY !== Infinity)) return;
+    if (!Number.isFinite(departure) || departure < 0 || departure > TELEPORT_MAX_DEPARTURE) return;
     const target = (px, pz) => this.eucSampler.findPlacementTarget({ x: px, z: pz, headingY: heading, referenceY,
       registeredSurfaceOnly: true });
     const exact = target(x, z);
     if (exact) yield exact;
+    if (exactOnly) return;
     for (let distance = 4; distance <= 256; distance += 4) {
       for (let i = 0; i < 32; i++) {
         const angle = i * Math.PI / 16;

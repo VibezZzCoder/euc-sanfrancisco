@@ -12,6 +12,13 @@ const withoutFlight = p => {
 const regional = Object.fromEntries(Object.entries(N.PLACE_DATA?.regional || {}).map(([id, p]) => [id, withoutFlight(p)]));
 if (N.PLACE_DATA) N.PLACE_DATA = { ...N.PLACE_DATA, regional };
 const originalTeleports = Object.fromEntries(Object.entries(N.TELEPORT_LOCATIONS || {}).map(([id, p]) => [id, withoutFlight(p)]));
+// Authored SF adaptations: geographic pins are independent of the checked spine
+// arrivals published later by the construction module. Never guess an early floor.
+const skateparks = [
+  { id: 'un-plaza', name: 'UN Skate Plaza', x: -1027.4, z: 972.4, aliases: ['UN Plaza', 'United Nations Plaza'] },
+  { id: 'zion', name: 'Zion / Waller Street', x: -4598.4, z: 2275.5, aliases: ['Zion Skate Plaza', 'Waller', 'Waller Street'] }
+];
+for (const p of skateparks) originalTeleports[p.id] = { ...p };
 
 // Includes every modeled site, including the two names produced by the Mission Dolores loop. Do not replace this
 // inventory with all GEO.landmarks: that table also contains thousands of ordinary building/commerce footprints.
@@ -38,6 +45,7 @@ function add(id, name, pin, source, extra = {}) {
   return d;
 }
 for (const p of N.NYC_LANDMARKS || []) add(p.id, p.name, p, `NYC_LANDMARKS:${p.id}`);
+for (const p of skateparks) add(p.id, p.name, p, 'sf-skateparks:authored-adaptation', { aliases: [...p.aliases] });
 for (const [id, p] of Object.entries(regional)) {
   const d = add(id, p.name, p, `PLACE_DATA.regional:${id}`);
   d.preferred = p;
@@ -153,7 +161,9 @@ function nearestRoad(pin) {
 function proposal(d) {
   if (!N.Terrain?.loaded) return undefined;
   let p;
-  if (d.id === 'golden-gate-bridge') {
+  if (skateparks.some(p => p.id === d.id)) {
+    p = N.SF_SKATEPARKS?.find(p => p.id === d.id)?.arrival;
+  } else if (d.id === 'golden-gate-bridge') {
     const route = N.SF_BRIDGE_ROUTES?.goldengate;
     if (route) {
       const a = route.south, b = route.stations[1];
@@ -184,6 +194,7 @@ function proposal(d) {
   } else p = nearestRoad(d.pin);
   if (!p || ![p.x, p.y, p.z, p.heading].every(finite) || p.y <= N.Terrain.waterLevel + 0.05) return undefined;
   return { ...p, referenceY: p.y, requireClear: true, registeredSurfaceOnly: true, departure: 1.2,
+    ...(p.exact === true ? { exact: true } : {}),
     requiresValidation: true, status: 'proposal-not-native-route-acceptance' };
 }
 
@@ -196,11 +207,13 @@ N.TELEPORT_LOCATIONS = Object.fromEntries(Object.entries(originalTeleports).map(
   // The toolbar teleport uses the same checked stand/floor/heading as the map pin; source values only before terrain.
   Object.defineProperty(clone, 'y', { enumerable: true, get: () => d?.arrival?.y });
   for (const k of ['x', 'z', 'heading']) Object.defineProperty(clone, k, { enumerable: true, get: () => d?.arrival?.[k] ?? p[k] });
+  if (skateparks.some(p => p.id === d?.id)) for (const k of ['departure', 'exact'])
+    Object.defineProperty(clone, k, { enumerable: true, get: () => d?.arrival?.[k] });
   return [key, clone];
 }));
 const pins = [...(N.NYC_LANDMARKS || [])];
 for (const d of destinations) if (!pins.some(p => p.id === d.id) && [d.pin.x, d.pin.z].every(finite))
-  pins.push({ id: d.id, name: d.name, short: d.name, ...d.pin, district: 'San Francisco' });
+  pins.push({ id: d.id, name: d.name, short: d.name, aliases: d.aliases, ...d.pin, district: 'San Francisco' });
 N.NYC_LANDMARKS = pins.map(pin => {
   const d = byId.get(pin.id), clone = withoutFlight(pin);
   Object.defineProperty(clone, 'arrival', { enumerable: true, get: () => d?.arrival });

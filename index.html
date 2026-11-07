@@ -42,6 +42,8 @@
   <link rel="modulepreload" href="./js/sf-bootstrap.js" />
   <link rel="modulepreload" href="./js/main.js" />
   <link rel="modulepreload" href="./js/graphics-quality.js" />
+  <link rel="modulepreload" href="./js/sf-skateparks.js" />
+  <link rel="modulepreload" href="./js/sf-skatepark-geometry.js" />
   <!-- euc:preload:start (tools/vendor-euc.mjs) -->
   <link rel="modulepreload" href="./js/euc/app/nearSolids.js" />
   <link rel="modulepreload" href="./js/euc/app/oneFootPose.js" />
@@ -237,6 +239,8 @@
   <!-- Teleport Destinations (native popover: light-dismiss & Esc) -->
   <div id="teleport-popover" class="popover" popover data-side="below" data-anchor="hud-toolbar" aria-label="Teleport the active player">
     <div class="pop-title">Teleport to</div>
+    <button class="pop-item tp-btn" data-teleport="un-plaza" type="button"><span class="pop-name">UN Skate Plaza</span><span class="pop-sub">Jefferson-inspired street lines · Civic Center</span></button>
+    <button class="pop-item tp-btn" data-teleport="zion" type="button"><span class="pop-name">Zion / Waller Street</span><span class="pop-sub">Pier 62-inspired flow · Golden Gate Park</span></button>
     <button id="tp-ferry" class="pop-item tp-btn" data-teleport="ferry" type="button"><span class="pop-name">Ferry Building</span><span class="pop-sub">The Embarcadero</span></button>
     <button class="pop-item tp-btn" data-teleport="salesforce" type="button"><span class="pop-name">Salesforce Tower</span><span class="pop-sub">Financial District</span></button>
     <button class="pop-item tp-btn" data-teleport="paintedladies" type="button"><span class="pop-name">Painted Ladies</span><span class="pop-sub">Steiner St</span></button>

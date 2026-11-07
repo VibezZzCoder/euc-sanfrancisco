@@ -66,6 +66,24 @@ to cancel. In the map, left stick moves the cursor, right stick pans, triggers z
 X centers on the rider, Y fits the city and D-pad navigates controls/results. Let the pad return to neutral after
 connection, focus changes and dialog transitions.
 
+## Skatepark riding
+
+The parks combine street features with curved transition lines and open bypasses.
+
+- **UN Skate Plaza:** an 18×104 m Jefferson-inspired plaza with 11 features, including banks, rollers, tabletop,
+  manual pad, bench, rail and a 4×26 m opposing halfpipe (1.1 m high). A clear 4 m central strip links the lines.
+- **Zion / Waller Street:** a 38×76 m Pier 62-inspired park on grass beside Waller, with 9 features including rollers,
+  tabletop, pad/ledge/rail, an 8×32 m opposing halfpipe (1.5 m high) and a quarter/deck with sloping return.
+  The 8 m central strip provides a bypass; adjoining roads and paths remain continuous.
+- Find them in **Teleport** or search the map for **UN Plaza**, **United Nations**, **Zion** or **Waller**.
+  Vector skateboard markers identify the parks. The pin and safe arrival are separate; an occupied or obstructed
+  arrival can be refused.
+- These are original gameplay adaptations using the NYC parks' feature designs, not surveyed replicas of the
+  real SF facilities. Features retain physical sides and rails: allow a run-up, use charge/hop for raised ledges,
+  and use the banked return from Zion's deck. `R` requests checked recovery after a fall.
+- For back-and-forth halfpipe riding, enter at a moderate speed and ease off before the curved faces, especially
+  Zion's taller pair. Holding full throttle can carry you over a lip onto its deck and outside return bank.
+
 ## Map, recovery and settings
 
 - Map pins identify places; they do not guarantee a safe standing position. An arrival must pass support, clearance,

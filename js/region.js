@@ -243,7 +243,7 @@ function computeRegionVertexNormals(geo) {
   }
   normal.needsUpdate=true;
 }
-function buildSFRegion(scene) {
+function buildSFRegion(scene, { paintIntervals = null } = {}) {
   const ride = window.NYC.RideGeometry;
   const data=window.NYC.DATA.fullRegion;
   if(!data || new URLSearchParams(location.search).get('region')==='0')return { update(){}, disposeTerrainCache(){}, stats:()=>({}) };
@@ -397,13 +397,18 @@ function buildSFRegion(scene) {
     if(length<.1)continue;
     const dx=(bx-ax)/length,dz=(bz-az)/length,n=Math.ceil(length/16);
     for(let i=0;i<n;i++){
-      const a=i*length/n,b=(i+1)*length/n,x=ax+dx*(a+b)/2,z=az+dz*(a+b)/2;
+      // Authored former-street pavement suppresses only its dashed paint. Source
+      // linework, ground, vehicle routes and UV distance elsewhere stay unchanged.
+      const intervals=paintIntervals?paintIntervals(ax,az,dx,dz,i*length/n,(i+1)*length/n):[[i*length/n,(i+1)*length/n]];
+      for(const [a,b]of intervals){
+      const x=ax+dx*(a+b)/2,z=az+dz*(a+b)/2;
       if(inRect(x,z,{x0:core.x0-32,z0:core.z0-32,x1:core.x1+32,z1:core.z1+32})||sample(C,x,z)<=water+.05)continue;
       const key=Math.floor(x/1200)+','+Math.floor(z/1200);
       if(!roadCells.has(key))roadCells.set(key,{pos:[],uv:[]});const cell=roadCells.get(key);
       for(const [distance,side]of[[a,-1],[a,1],[b,-1],[a,1],[b,1],[b,-1]]){
         const px=ax+dx*distance-dz*.12*side,pz=az+dz*distance+dx*.12*side;
         cell.pos.push(px,sample(C,px,pz)+.08,pz);cell.uv.push(distance/8,(side+1)/2);
+      }
       }
     }
   }

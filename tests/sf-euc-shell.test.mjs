@@ -226,12 +226,14 @@ test('map does not turn scenery/undefined/refused arrivals into success or redir
     assert.equal(map.teleportToPoint({ x: 15000, z: -9000 }), false);
     assert.equal(map.waypoint, previous);
     assert.match(map.elActionStatus.textContent, /no safe EUC arrival/);
-    assert.deepEqual(calls.at(-1), [15000, -9000, undefined, undefined]);
+    assert.deepEqual(calls.at(-1).slice(0, 4), [15000, -9000, undefined, undefined]);
+    assert.deepEqual({ ...calls.at(-1)[4] }, { departure: 0, exact: false });
   }
   const landmark = { name: 'Overlook', arrival: { x: 17, z: 29, heading: -1, referenceY: 280 } };
   map.onTeleport = (...args) => { calls.push(args); return { succeeded: true, x: 18, y: 280, z: 30 }; };
   assert.equal(map.teleportToPoint({ x: 100, z: 200 }, landmark), true);
-  assert.deepEqual(calls.at(-1), [17, 29, -1, 280]);
+  assert.deepEqual(calls.at(-1).slice(0, 4), [17, 29, -1, 280]);
+  assert.deepEqual({ ...calls.at(-1)[4] }, { departure: 0, exact: false });
   assert.equal(map.waypoint.x, 18); assert.equal(map.waypoint.name, 'Overlook');
 });
 

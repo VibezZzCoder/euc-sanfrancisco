@@ -9,6 +9,9 @@ const ring = (p) => p.map((v) => ({ x: v.x ?? v[0], z: v.z ?? v[1] }));
 const validRing = (p) => p.length >= 3 && p.every((v) => finite(v.x) && finite(v.z));
 const planeAt = (p, x, z) => p.y + p.dx * (x - p.x) + p.dz * (z - p.z);
 const BITS = new Float64Array(1), WORDS = new Uint32Array(BITS.buffer); // addTriangles hash scratch
+// NYC 7cf4ce7, city-grid.js::addRideMesh: profiles opt in, actual world-space slopes own transitions.
+const transitionOf = (capabilities, plane) => capabilities.transition === 'slope'
+  ? Math.hypot(plane?.dx ?? 0, plane?.dz ?? 0) > 1e-6 : capabilities.transition === true;
 
 function addTop(poly, top, surface = 'pavement', options = {}) {
   const p = ring(poly);
@@ -20,6 +23,8 @@ function addTop(poly, top, surface = 'pavement', options = {}) {
     r.plane = { x: q.x, y: q.y, z: q.z, dx: q.dx, dz: q.dz };
   }
   for (const k of ['replacesTerrain', 'minReferenceY', 'maxReferenceY']) if (options[k] !== undefined) r[k] = options[k];
+  if (options.capabilities) r.capabilities = { ...options.capabilities, transition: transitionOf(options.capabilities, r.plane) };
+  if (options.source !== undefined) r.source = options.source;
   N.ride.tops.push(r);
   return r;
 }
@@ -27,6 +32,9 @@ function addBox(centre, halfExtents, rotationY = 0, options = {}) {
   if (![centre.x, centre.y, centre.z, halfExtents.x, halfExtents.y, halfExtents.z, rotationY].every(finite) ||
       halfExtents.x <= 0 || halfExtents.y <= 0 || halfExtents.z <= 0) return null;
   const r = { centre: xyz(centre), halfExtents: xyz(halfExtents), rotationY, surface: options.surface || 'pavement', support: false };
+  // Only explicit actual bar boxes opt in. Never infer a shell envelope from a whole mesh or its bounds.
+  if (options.wheelSweep === true) r.wheelSweep = true;
+  if (options.source !== undefined) r.source = options.source;
   N.ride.solids.push(r);
   if (options.top) addTop(boxPoly(centre, halfExtents, rotationY), centre.y + halfExtents.y, r.surface, options);
   return r;
@@ -35,6 +43,7 @@ function addPrism(outer, minY, maxY, options = {}) {
   const p = ring(outer);
   if (!validRing(p) || !finite(minY) || !finite(maxY) || maxY <= minY) return null;
   const r = { outer: p, minY, maxY, surface: options.surface || 'pavement', support: false };
+  if (options.source !== undefined) r.source = options.source;
   if (options.holes?.length) r.holes = options.holes.map(ring).filter(validRing);
   N.ride.prisms.push(r);
   return r;
@@ -113,6 +122,8 @@ function addTriangles(pos, idx, surface = 'pavement', options = {}) {
       const u = pts[e], v = pts[(e + 1) % 3];
       const other = edgeGet(keys[(e + 1) % 3], keys[e]);
       if (!other || other.poly.length !== 3) continue;
+      // Near-coplanar merge tolerance must not cross the explicit slope capability threshold.
+      if (options.capabilities?.transition === 'slope' && other.capabilities.transition !== transitionOf(options.capabilities, plane)) continue;
       const op = other.plane || { x: 0, y: other.top, z: 0, dx: 0, dz: 0 };
       if (Math.abs(op.dx - dx) > 1e-8 || Math.abs(op.dz - dz) > 1e-8 || pts.some((p) => Math.abs(planeAt(op, p.x, p.z) - p.y) > 1e-5)) continue;
       const k = other.poly.findIndex((p) => p.x === v.x && p.z === v.z); // == text-key equality (finite)
@@ -159,7 +170,8 @@ function addMesh(mesh, surface = 'pavement', options = {}) {
     for (const r of result.prisms) N.ride.prisms.push(r);
   }
   for (const b of options.bodies || []) {
-    const r = b.outer ? addPrism(b.outer, b.minY, b.maxY, { ...b, surface }) : addBox(b.centre, b.halfExtents, b.rotationY || 0, { surface });
+    const r = b.outer ? addPrism(b.outer, b.minY, b.maxY, { ...b, surface }) : addBox(b.centre, b.halfExtents, b.rotationY || 0,
+      { surface, wheelSweep: b.wheelSweep, source: b.source });
     if (r) (b.outer ? result.prisms : result.solids).push(r);
   }
   return result;

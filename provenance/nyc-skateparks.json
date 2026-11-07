@@ -1,0 +1,38 @@
+{
+  "source": "https://github.com/VibezZzCoder/euc-nyc",
+  "sourceSnapshot": "7cf4ce7f0092b1f5f0627c2b9a4611bcc262e31d",
+  "parkImplementationRevision": "ae413432045d1bca53afbb955c930803b5cd3ad6",
+  "note": "Separate selective adaptation; does not replace nyc-integration.json or the generated EUC source pins. Revisions identify local development snapshots, not publicly fetchable history. Hashes identify donor files before SF adaptation, not current output.",
+  "license": "MIT source; retain LICENSE, NOTICE.md and NOTICE-EUC-THRILLS.md. Authored park recipes and SF adaptations by VibezZzCoder; inherited city work by Mr.doob and Kamil. Existing EUC asset attribution and exceptions remain applicable.",
+  "adaptation": "Jefferson-derived linked lines and opposing curved quarters at UN Skate Plaza; broad Pier 62 flow, opposing return quarters and street features on verified grass beside Zion/Waller. Original gameplay layouts, not surveyed SF replicas. SF owns absolute elevations, local graded pads, terrain seams, support selection, actors and lifecycle. No NYC geography, waterfront, traffic routes, source photographs or additional rider assets imported.",
+  "siteRevision": {
+    "date": "2026-11-07",
+    "un": "18 by 104 metre clear plaza corridor, 4 metre spine, eleven features including a 4 by 26 metre paired-quarter half-pipe; original depression and tree rows retained.",
+    "zion": "38 by 76 metre grass-side court, 8 metre spine, nine features including an 8 by 32 metre paired-quarter half-pipe; 4 by 13 metre conforming path faces the unchanged Waller roadway. All original road paint retained.",
+    "fitting": "Committed 2 metre core/final Float32 curb facets and 8 metre regional support; quarter-metre pad samples plus source triangle vertices and footprint intersections. Independent tests verify source clearance, actual Float32 seams, native riding and checked arrivals. Small tilted pads preserve surrounding hills rather than a whole-court level lid."
+  },
+  "files": [
+    {
+      "path": "js/jefferson-skatepark.js",
+      "sourceSha256": "d257e9de6309b3b2ffd01df9a23fed4c93c34cc9df7dbc58a63736b1c9493327",
+      "reuse": "Banks, rollers, quarter, benches, pad and rail feature recipes; widths/layout adapted to UN and paired quarters composed in the SF site recipe."
+    },
+    {
+      "path": "js/city-grid.js",
+      "sourceSha256": "234273528f09b04fc4bcffa942dcf0d38aa2a46551ea0ed8387a61286326e47c",
+      "reuse": "skateProfile, selected pier62Section/pier62Extension recipes, corrected warm concrete/slate palette and world-space value noise, actual facet capabilities and inscribed side-body construction; adapted to tilted SF frames and bounded batching."
+    },
+    {
+      "path": "js/euc-terrain.js",
+      "sourceSha256": "0b02184372bc3b01bc23f8526d9493323493d3c563ccfb97532304cc9b1c1a4c",
+      "reuse": "Selected-support/floor-local capability queries and separate tagged-bar wheel shell queries; adapted to SF packed support/sparse indexes."
+    },
+    {
+      "path": "js/nyc-map.js",
+      "revision": "5493af02062b947d1f0d502f8b4f3e9406b73b43",
+      "sourceSha256": "1cb7895e249cc2c547ad5b71701d99ee855228bfe6d6dd38ceee3ac2e0a58dcd",
+      "reuse": "Vector skateboard marker drawing and atlas/radar scale and selection bounds; adapted to SF UN/Zion pins with checked independent arrivals."
+    }
+  ],
+  "outputs": ["js/sf-skatepark-geometry.js", "js/sf-skateparks.js", "js/sf-ride-geometry.js", "js/sf-terrain-sampler.js", "js/sf-map.js"]
+}

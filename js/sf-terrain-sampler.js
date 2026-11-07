@@ -5,6 +5,7 @@
 import { PlanTerrainSampler } from './euc/simulation/planSampler.js';
 import { findPlacementTarget, findRecoveryTarget } from './euc-recovery.js';
 import { SfSupportStore } from './sf-support-store.js';
+import { WHEEL, TERRAIN } from './euc/data/tuning.js';
 
 const EPS = 1e-8;
 const REACH = 0.6; // Layer-selection tolerance, never wheel step-up tuning.
@@ -190,6 +191,31 @@ class CeilingBounds {
   getBounds(id, out) { return this.store.getBounds(this.store.ceilingIds[id], out); }
 }
 
+// Only sparse metadata extras can carry capabilities. Index packed IDs, never
+// raw facets or materialized views, so registry handoff/cache eviction stay safe.
+class CapabilityBounds {
+  constructor(store) {
+    this.store = store;
+    const ids = [];
+    for (const [id, extra] of store.extras) {
+      const c = extra.fields?.capabilities;
+      if (c?.transition === true || c?.restartsAtRest === true) ids.push(id);
+    }
+    this.ids = Uint32Array.from(ids); this.length = this.ids.length;
+  }
+  getBounds(id, out) { return this.store.getBounds(this.ids[id], out); }
+}
+
+// Native narrow phase only; callers feed a one-cell scratch list from SparseIndex.
+function nativeBoxes(records) {
+  const n = new PlanTerrainSampler({ segments: [], solids: [], hazards: [], surround: { height: 0, surface: 'pavement' },
+    heightfield: { originX: 0, originZ: 0, spacing: 1, columns: 2, rows: 2, heights: [0, 0, 0, 0], surfaces: ['pavement'] } });
+  n.colliders = records; n.stamps = new Int32Array(records.length);
+  n.columnAt = n.rowAt = n.cellAt = nativeScratchCell;
+  n.gridStarts = new Int32Array(2); n.gridItems = new Int32Array(0);
+  return n;
+}
+
 function prepareBox(collider) {
   const cos = Math.cos(collider.rotationY ?? 0), sin = Math.sin(collider.rotationY ?? 0);
   const x = Math.abs(cos) * collider.halfExtents.x + Math.abs(sin) * collider.halfExtents.z;
@@ -252,11 +278,11 @@ function appendCityColliders(colliders, addBox, addPrism, seen, counts) {
       const o = c.obb;
       addBox({ centre: { x: o.cx, y: (minY + maxY) / 2, z: o.cz },
         halfExtents: { x: o.hx, y: (maxY - minY) / 2, z: o.hz }, rotationY: Math.atan2(o.sn, o.cs),
-        surface: c.surface ?? 'pavement', support: c.support === true, occludes: c.occludes });
+        surface: c.surface ?? 'pavement', support: c.support === true, occludes: c.occludes, wheelSweep: c.wheelSweep });
     } else if ([c.minX, c.maxX, c.minZ, c.maxZ].every(Number.isFinite)) {
       addBox({ centre: { x: (c.minX + c.maxX) / 2, y: (minY + maxY) / 2, z: (c.minZ + c.maxZ) / 2 },
         halfExtents: { x: (c.maxX - c.minX) / 2, y: (maxY - minY) / 2, z: (c.maxZ - c.minZ) / 2 }, rotationY: 0,
-        surface: c.surface ?? 'pavement', support: c.support === true, occludes: c.occludes });
+        surface: c.surface ?? 'pavement', support: c.support === true, occludes: c.occludes, wheelSweep: c.wheelSweep });
     }
   }
 }
@@ -607,6 +633,7 @@ export class SfTerrainSampler {
     this.topStore = new SfSupportStore([ride?.tops ?? EMPTY, tops, gradeTops(grade)], { cacheSize: topViewCacheSize });
     this.topIndex = new SparseIndex(this.topStore, 8);
     const store = this.topStore;
+    this.capabilityIndex = new SparseIndex(new CapabilityBounds(store), 8);
     this.ceilingIndex = new SparseIndex(new CeilingBounds(store), 8);
     // Current grade builder publishes exact bounded bore facets + real ceiling
     // bodies, but not its internal floors array. Do not approximate those ceilings
@@ -615,15 +642,23 @@ export class SfTerrainSampler {
     this.legacyGradeRays = !!grade && !grade.floors?.length && !this.registeredGradeBores;
     // Only the native narrow phase is reused. Its one-cell scratch candidate list
     // is supplied by our sparse index; it never constructs a dense city/horizon grid.
-    this.native = new PlanTerrainSampler({ segments: [], solids: [], hazards: [], surround: { height: 0, surface: 'pavement' },
-      heightfield: { originX: 0, originZ: 0, spacing: 1, columns: 2, rows: 2, heights: [0, 0, 0, 0], surfaces: ['pavement'] } });
-    this.native.colliders = this.boxRecords; this.native.stamps = new Int32Array(this.boxRecords.length);
-    this.native.columnAt = this.native.rowAt = this.native.cellAt = nativeScratchCell;
-    this.native.gridStarts = new Int32Array(2); this.native.gridItems = new Int32Array(0);
-    this._boxIds = []; this._prismIds = []; this._topIds = []; this._fieldIds = [];
+    this.native = nativeBoxes(this.boxRecords);
+    // NYC 7cf4ce7 euc-terrain.js: the wheel shell can meet a thin elevated bar
+    // above the pedal ray. Extend only tagged boxes downward in a separate query
+    // index; support, camera, placement, exit certificates and ragdolls keep the
+    // original actual geometry. SF retains sparse indexing across distant sites.
+    const reach = WHEEL.shellHeight - WHEEL.pedalHeight * TERRAIN.stepUpPedalFactor;
+    const wheelRecords = [];
+    for (const { collider: b } of this.boxRecords) if (b.wheelSweep === true) wheelRecords.push(prepareBox({ ...b,
+      centre: { ...b.centre, y: b.centre.y - reach / 2 },
+      halfExtents: { ...b.halfExtents, y: b.halfExtents.y + reach / 2 }, support: false }));
+    this.wheelBoxes = wheelRecords.length ? nativeBoxes(wheelRecords) : null;
+    this.wheelIndex = wheelRecords.length ? new SparseIndex(wheelRecords, 8) : null;
+    this._boxIds = []; this._prismIds = []; this._topIds = []; this._fieldIds = []; this._capabilityIds = []; this._wheelIds = [];
     this._probe = { normal: {} };
     const indexes = Object.freeze({ boxes: this.boxIndex.stats, prisms: this.prismIndex.stats, tops: this.topIndex.stats,
-      fields: this.fieldIndex.stats, ceilings: this.ceilingIndex.stats });
+      fields: this.fieldIndex.stats, ceilings: this.ceilingIndex.stats, capabilities: this.capabilityIndex.stats,
+      ...(this.wheelIndex ? { wheelShell: this.wheelIndex.stats } : {}) });
     this.stats = Object.freeze({ boxes: this.boxRecords.length, prisms: this.prisms.length, tops: store.length,
       ...counts, indexes, supportStore: store.stats,
       indexReferences: Object.values(indexes).reduce((n, s) => n + s.references, 0),
@@ -657,6 +692,33 @@ export class SfTerrainSampler {
   get colliderCount() { return this.boxRecords.length + this.prisms.length; }
   findPlacementTarget(request) { return findPlacementTarget(this, request); }
   findRecoveryTarget(request, canPlace) { return findRecoveryTarget(this, request, canPlace); }
+
+  /** NYC 7cf4ce7's exact selected-support contract. No venue bounds or slope
+   * heuristic grants park behavior to inherited SF roads or another floor.
+   */
+  transitionAt(x, z, referenceY) { return this.supportCapabilityAt('transition', x, z, referenceY); }
+
+  // Local restart speed policy only. Actual recovery still requires the existing
+  // footprint, dry support, full body, dynamic occupancy and departure checks.
+  restartsAtRest(x, z, referenceY) { return this.supportCapabilityAt('restartsAtRest', x, z, referenceY); }
+
+  supportCapabilityAt(capability, x, z, referenceY) {
+    if (!Number.isFinite(x) || !Number.isFinite(z) || !Number.isFinite(referenceY)) return false;
+    const store = this.topStore, index = this.capabilityIndex;
+    let candidate = false;
+    for (const localId of index.query({ minX: x, maxX: x, minZ: z, maxZ: z }, this._capabilityIds)) {
+      const id = index.items.ids[localId];
+      if (store.property(id, 'capabilities')?.[capability] !== true) continue;
+      const y = store.heightAt(id, x, z);
+      if (!Number.isFinite(y) || Math.abs(y - referenceY) > this.supportReach || !store.contains(id, x, z)) continue;
+      candidate = true; break;
+    }
+    if (!candidate) return false; // Remote, empty-cell and wrong-floor probes do no ordinary ground/body work.
+    const ground = this.sampleGround(x, z, this._capabilityProbe ??= { normal: {} }, referenceY);
+    return ground.registered === true && !ground.offCourse && !ground.water
+      && ground.support?.capabilities?.[capability] === true && Number.isFinite(ground.height)
+      && Math.abs(ground.height - referenceY) <= this.supportReach;
+  }
 
   cityGround(x, z, out, referenceY = Infinity) {
     out.height = this.waterLevel - 4; out.plane = null; out.surface = 'pavement';
@@ -832,6 +894,28 @@ export class SfTerrainSampler {
       }
     }
     return hit;
+  }
+
+  // Controller-only wheel/standoff query. Ordinary hits retain precedence and
+  // hit details on ties; the derived envelope never enters general clearance.
+  raycastWheelObstacle(origin, direction, maxDistance, sweepHalfWidth = 0, sweepLateral, out) {
+    const ordinary = this.raycastObstacle(origin, direction, maxDistance, sweepHalfWidth, sweepLateral, out);
+    const n = this.wheelBoxes;
+    if (!n) return ordinary;
+    const length = Math.hypot(direction.x, direction.y, direction.z);
+    if (!(length > 0) || !Number.isFinite(length) || !(maxDistance > 0) || !Number.isFinite(maxDistance)
+      || ![origin.x, origin.y, origin.z].every(Number.isFinite)) return ordinary;
+    const width = Number.isFinite(sweepHalfWidth) ? Math.max(0, sweepHalfWidth) : 0;
+    const ex = origin.x + direction.x / length * maxDistance, ez = origin.z + direction.z / length * maxDistance;
+    const ids = this.wheelIndex.query({ minX: Math.min(origin.x, ex) - width, maxX: Math.max(origin.x, ex) + width,
+      minZ: Math.min(origin.z, ez) - width, maxZ: Math.max(origin.z, ez) + width }, this._wheelIds);
+    if (!ids.length) return ordinary;
+    if (n.gridItems.length < ids.length) n.gridItems = new Int32Array(Math.max(ids.length, n.gridItems.length * 2, 16));
+    n.gridItems.set(ids); n.gridStarts[1] = ids.length;
+    const rail = n.raycastObstacle(origin, direction, maxDistance, width, sweepLateral);
+    if (rail === null || (ordinary !== null && ordinary <= rail)) return ordinary;
+    if (out) n.raycastObstacle(origin, direction, maxDistance, width, sweepLateral, out);
+    return rail;
   }
 
   _roofDistance(o, d, max, radius = 0) {
