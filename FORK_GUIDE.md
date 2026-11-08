@@ -80,5 +80,5 @@ publication requires a separate explicit owner decision.
 The first SF release is Early Access / Work in Progress and requires all intended regional EUC destinations, including Golden Gate
 approaches/crossing, Twin Peaks and Painted Ladies. Regional scenery-only pins or a downtown-only proof are not
 release completion. WebGPU and WebGL2 are required; visual roughness and unverified physical-device coverage must
-be described openly. Dorkins/booking behavior/looks follow after that first release. Keep public provenance with
+be described openly. SF now includes Dorkins' NYC-derived look, pursuit and booking, adapted to the city. Keep public provenance with
 the distributed source and data; development notes, working history and QA artifacts are excluded from curated releases.

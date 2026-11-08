@@ -15,7 +15,7 @@ export const CITY_SCRIPTS = Object.freeze([
   'sf-geodata', 'sf-places', 'city-config', 'sf-destinations', 'data-loader', 'terrain', 'drape',
   'sf-ride-geometry', // construction registry precedes all geometry builders
   'tsl-materials', 'trees', 'actor-models', 'world-collision', 'vehicle-lights', 'pedestrians',
-  'lighting', 'terrain-mesh', 'region', 'sf-ground', 'sf-style', 'buildings', 'sf-buildings',
+  'lighting', 'terrain-mesh', 'region', 'sf-ground', 'sf-style', 'buildings', 'sf-buildings', 'sf-jail-exterior',
   'landmarks', 'sf-bridges', 'street-details', 'sf-street-details', 'sf-sidewalk-scenes',
   'road-network', 'road-paint', 'grade-separation', 'sf-dynamic-bodies', 'traffic', 'sf-transit',
   'sf-map', 'scene-culling', 'post-processing'

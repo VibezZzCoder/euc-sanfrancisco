@@ -502,7 +502,7 @@ function buildCityBlocks(scene) {
     }
 
     const polyGeos = [];
-    let massCount = 0;
+    let massCount = 0, jailBuilt = false;
     for (let i = 0; i < header.count; i++) {
       if (covered.has(i)) { massCount += table[i * F + 7]; continue; } // massCount: the masses' index in `all`
       const rec = table.subarray(i * F, i * F + F);
@@ -628,6 +628,15 @@ function buildCityBlocks(scene) {
           roof, storey: storeyH || storeys[mat], groundAt: (x, z) => T.groundAt(x, z), roadAt: onRoadway, hash: (a) => hash(i, a)
         });
       }
+      // The 425 Seventh Street frontage is a coplanar treatment of its existing
+      // largest mass. It adds no geometry to sidewalks or actor navigation.
+      if (i === 5759 && window.NYC.buildSFJailExterior) {
+        if (!topBox) throw new Error('425 Seventh Street mass is unavailable; re-survey the jail facade');
+        const x = topBox.x - Math.cos(theta) * topBox.w / 2;
+        const z = topBox.z + Math.sin(theta) * topBox.w / 2;
+        window.NYC.buildSFJailExterior(group, topBox, T.groundAt(x, z));
+        jailBuilt = true;
+      }
       // towers & midrise: the crown the lidar's highest return shows over the main roof (peak - roof > CROWN_MIN m):
       // a penthouse up to 12 m, a setback storey block up to 45 m, higher a setback and a spire (sf-buildings.js)
       const crown = rec[2] - roof;
@@ -642,6 +651,7 @@ function buildCityBlocks(scene) {
       quadtree.insert(blk);
       allBlocks.push(blk);
     }
+    if (window.NYC.buildSFJailExterior && !jailBuilt) throw new Error('425 Seventh Street building is unavailable; re-survey the jail facade');
     for (const b of details.bays) {
       buckets[1].push(b);
       ride?.addBox({ x: b.x, y: b.y, z: b.z }, { x: b.w / 2, y: b.h / 2, z: b.d / 2 }, b.ry || 0,

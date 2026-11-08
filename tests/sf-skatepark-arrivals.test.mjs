@@ -13,6 +13,9 @@ import * as nearSolids from '../js/euc/app/nearSolids.js';
 import * as recovery from '../js/euc-recovery.js';
 import { SfTerrainSampler } from '../js/sf-terrain-sampler.js';
 import { createEucDynamicWorld } from '../js/euc-dynamic.js';
+import { createBookingDirector } from '../js/booking.js';
+import { createChaseDirector } from '../js/nemesis-chase.js';
+import { createSfBookingPlacement } from '../js/sf-booking-placement.js';
 
 const read = name => readFileSync(new URL(`../js/${name}.js`, import.meta.url), 'utf8');
 const noop = () => {};
@@ -92,6 +95,34 @@ function onlyExact(f, x = 0, z = 0) {
   assert.deepEqual([f.candidates[0].x, f.candidates[0].z], [x, z]);
   assert.ok(f.candidates[0].registeredSurfaceOnly);
 }
+
+test('booking remote handoff retries live native occupancy, then transfers and releases through the host checks', t => {
+  const bodies = [occupant(0, 0)], f = fixture(t, { bodies, spawn: { x: -400, z: -400, heading: 0 } });
+  const booking = createBookingDirector(), chase = createChaseDirector({ random: () => 0 });
+  chase.state.phase = 'captured'; booking.start('Rider', 4);
+  const intake = { x: 0, z: 0, y: 10, heading: 0 }, exit = { x: 10, z: 10, y: 10, heading: 0 };
+  let protects = 0, bookingSpawnProtected = false;
+  const host = read('main'), start = host.indexOf('function checkedBookingTeleport('), end = host.indexOf('    const checkedManager =', start);
+  assert.ok(start >= 0 && end > start);
+  const checked = new Function('controllerManager', 'trafficSystem', 'BOOKING_INTAKE', 'BOOKING_DESK', 'BOOKING_RELEASE',
+    'bookingSpawnProtected', `${host.slice(start, end)}\nreturn checkedBookingTeleport;`)(f.manager,
+    { setSpawnExclusions() { protects++; } }, intake, intake, exit, bookingSpawnProtected);
+  const placement = createSfBookingPlacement({ manager: { teleportActiveTo: checked }, booking, chase,
+    intake: [intake], release: [exit] });
+  const before = state(f), actorBefore = structuredClone(bodies);
+  assert.equal(placement.transfer(), null);
+  assert.deepEqual(state(f), before); assert.deepEqual(bodies, actorBefore); assert.equal(protects, 0);
+  bodies.length = 0; // represents the independently advanced live actor leaving the destination
+  assert.equal(placement.transfer().succeeded, true); assert.equal(booking.state.phase, 'intake');
+  assert.equal(protects, 1); assert.equal(f.entity.position.x, 0);
+  bodies.push(occupant(exit.x, exit.z));
+  const atIntake = state(f);
+  assert.equal(placement.release(), null); assert.deepEqual(state(f), atIntake); assert.equal(protects, 1);
+  bodies.length = 0;
+  assert.equal(placement.release().succeeded, true); assert.equal(protects, 2);
+  assert.equal(booking.state.phase, 'idle'); assert.equal(chase.state.phase, 'waiting');
+  assert.equal(f.entity.position.x, exit.x); assert.equal(f.entity.position.z, exit.z);
+});
 
 test('valid standing pose with a static wall in front refuses exact 1.2 m departure atomically', t => {
   const f = fixture(t, { support: sampler({ boxes: [obstacle(0, 0.92, 1, 0.01)] }) });

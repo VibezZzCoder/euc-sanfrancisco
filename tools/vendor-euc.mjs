@@ -48,7 +48,7 @@ const DONOR_HASHES = {
 };
 const REVIEWED_MODULES = new Set(`app/oneFootPose app/nearSolids data/rideStyles data/riders data/machines data/surfaces data/tuning
 input/actions render/blockoutKit render/coolRiderAtlas render/coolRiderLook render/euc render/inkKit
-render/machineLook render/rider render/riderClothDrape render/riderJointSurface render/riderLook
+render/machineLook render/paddle render/rider render/riderClothDrape render/riderJointSurface render/riderLook
 render/ridingRig render/rigConsolidation shared/freeze shared/letterPaths shared/maths shared/ragdollBoot
 shared/ragdollContact shared/ragdollHip shared/ragdollInterpolation shared/ragdollLimbContact shared/riderOccupancy
 shared/riderSideContact simulation/EucController simulation/eucStepPrimitives simulation/hazards
@@ -77,7 +77,7 @@ const ENTRIES = [
 // Worker roots are shipped/audited but never preloaded or imported into the document's initial graph.
 const WORKER_ENTRIES = ['render/appearanceWorker.ts'];
 
-// Initial SF release: the reviewed eleven playable riders, with no NPC appearance/metadata or paddle.
+// Eleven playable riders; Dorkins' separate cop look remains NPC-only.
 const REVIEWED_ROSTER = [
   ['cool-rider', 'standard', 'COOL_RIDER_LOOK', 'STANDARD_MACHINE_LOOK', 'crash_wipeout.wav'],
   ['trollina', 'trollina', 'TROLLINA_LOOK', 'TROLLINA_MACHINE_LOOK', 'crash_trollina.wav'],
@@ -92,18 +92,11 @@ const REVIEWED_ROSTER = [
   ['gnarwheel', 'gnarwheel', 'GNARWHEEL_LOOK', 'GNARWHEEL_MACHINE_LOOK', 'crash_gnarwheel.wav'],
 ];
 const KEEP_IDS = new Set(REVIEWED_ROSTER.flatMap(([id, machine]) => [id, machine]));
-// Reviewed source inventory remains visible even for intentionally unshipped sounds. No siren consumer exists
-// until the post-release Dorkins integration; offroad remains omitted as in the donor.
+// The two reviewed CC0 sirens are restored for the Dorkins integration; offroad remains omitted.
 const UNSHIPPED_AUDIO = {
   'tyre_offroad_loop.wav': 'No active SF offroad sample consumer',
-  'siren_far_loop.wav': 'Dorkins/siren is post-initial-release',
-  'siren_close_loop.wav': 'Dorkins/siren is post-initial-release',
 };
-// Complete pinned declarations, not name-prefix stripping: shared Trollina/other appearance fields stay intact.
-const UNSHIPPED_COLOURS = {
-  copShirt: '0x1e2a4c', copHiVis: '0xd8c22a', copBand: '0x2d6da8', copHelmet: '0xdfe2e6',
-  copSkin: '0xe2ab82', copGear: '0x2f3138', paddle: '0xe86a2f',
-};
+const UNSHIPPED_COLOURS = {};
 const PIXEL_CACHE_IDS = {
   'cool-rider': ['coolRiderAtlas.ts'], trollina: [], 'red-rider': [], adonisb2: [],
   'maribel-vargas': ['maribelAtlas.ts'], 'wheel-in-motion': ['wimAtlas.ts', 'wimMachineAtlas.ts'],
@@ -205,45 +198,7 @@ function pruneUnshippedColours(source) {
   return source;
 }
 
-// Remove only the public swing interface/member. All native stance defaults, ordinary arm carriage, tricks,
-// near-solid solve and rig resource ownership stay in their existing modules.
-function pruneRigSwingMembers(source) {
-  const tree = sourceTree(source), edits = [];
-  const visit = node => {
-    const members = ts.isInterfaceDeclaration(node) && node.name.text === 'RidingRig' ? node.members
-      : ts.isVariableDeclaration(node) && node.name.getText(tree) === 'self'
-        && node.initializer && ts.isObjectLiteralExpression(node.initializer) ? node.initializer.properties : [];
-    for (const member of members) if (member.name?.getText(tree) === 'applySwing') {
-      edits.push({ start: member.getStart(tree), end: member.end + (source[member.end] === ',' ? 1 : 0) });
-    }
-    ts.forEachChild(node, visit);
-  };
-  visit(tree);
-  if (edits.length !== 2) throw new Error('Reviewed rig swing interface/member changed');
-  for (const { start, end } of edits.sort((a, b) => b.start - a.start)) source = source.slice(0, start) + source.slice(end);
-  return source;
-}
-
-function pruneRigPaddle(source) {
-  source = pruneRigSwingMembers(source);
-  for (const line of [
-    "import { createPaddle } from './paddle.ts';",
-    '  const paddle = createPaddle();',
-    '  rider.grip.add(paddle.group);',
-    '  const swingHeadWorld = new THREE.Vector3();',
-    '  let swingHead: THREE.Vector3 | null = null;',
-    '  let swingBlend = 0;',
-    '  let carry = 0;',
-    '      carry = swingHead !== null ? 1 : Math.max(0, carry - 1 / 12);',
-    '      stance.carry = carry;',
-    '      paddle.aim(swingHead, swingBlend, pose.y - pose.suspensionOffset);',
-    '      paddle.dispose();',
-  ]) source = replaceOnce(source, line, '');
-  source = replaceOnce(source, "mesh.isMesh !== true || mesh.name === 'rider-paddle-mesh'", 'mesh.isMesh !== true');
-  return replaceOnce(source, '(swingHead === null && carry > 0) || stance.falling', 'stance.falling');
-}
-
-// Keep this after the independently testable pruning seam above. No upstream application/level migration: explicit
+// No upstream application/level migration: explicit
 // AST members/declarations only. Hashes and unchanged-member checks fail closed if the reviewed closure changes.
 const donorSources = new Map();
 const donorOrigins = new Map();
@@ -728,9 +683,9 @@ export interface TerrainSampler {
     return replaceOnce(s, 'to.dynamicImpactSpeed = from.dynamicImpactSpeed;', 'to.vehicleImpact = from.vehicleImpact;\n  to.crashVelocityX = from.crashVelocityX;\n  to.crashVelocityZ = from.crashVelocityZ;\n  to.recoveryRetrySeconds = from.recoveryRetrySeconds;\n  to.dynamicImpactSpeed = from.dynamicImpactSpeed;');
   },
   'render/riderLook.ts': (src) => {
-    return `${sliceDeclarations(src, ['MOTION_STILL'])}
+    return `${sliceDeclarations(src, ['COP_LOOK', 'MOTION_STILL'])}
 import { preparedRiderLook } from './appearanceRegistry.ts';
-export function riderLook(id: string) { return preparedRiderLook(id); }
+export function riderLook(id: string) { return id === 'cop' ? COP_LOOK : preparedRiderLook(id); }
 `;
   },
   'render/machineLook.ts': (src) => {
@@ -789,7 +744,14 @@ export function machineLook(id: string) {
           }
         }
       }`);
-    return pruneRigPaddle(source);
+    // Only the NPC carries a paddle. Keep player rigs free of paddle geometry; the
+    // upstream aiming/stance channel stays available for the one cop rig and owns its disposal.
+    source = replaceOnce(source, 'const paddle = createPaddle();', "const paddle = look.id === 'cop' ? createPaddle() : null;");
+    source = replaceOnce(source, 'rider.grip.add(paddle.group);', 'if (paddle) rider.grip.add(paddle.group);');
+    source = replaceOnce(source, 'paddle.aim(swingHead, swingBlend, pose.y - pose.suspensionOffset);',
+      'paddle?.aim(swingHead, swingBlend, pose.y - pose.suspensionOffset);');
+    source = replaceOnce(source, 'paddle.dispose();', 'paddle?.dispose();');
+    return source;
   },
   'data/riders.ts': src => {
     let source = replaceOnce(src, namedDeclaration(src, 'COP_CHARACTER'), '');

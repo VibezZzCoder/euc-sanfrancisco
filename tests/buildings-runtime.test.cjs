@@ -61,13 +61,30 @@ function build() {
     createPreWarBuildingMaterial: (o) => ({ opts: o }), createCurtainWallMaterial: (o) => ({ opts: o }), createBillboardMaterial: stub(),
     createFacadeBoxes: (material, boxes) => { facadeSets.push({ material, boxes }); return stub(); }
   });
-  for (const f of ['js/sf-style.js', 'js/buildings.js', 'js/sf-buildings.js']) vm.runInContext(readFileSync(join(root, f), 'utf8'), context);
+  for (const f of ['js/sf-style.js', 'js/buildings.js', 'js/sf-buildings.js', 'js/sf-jail-exterior.js']) vm.runInContext(readFileSync(join(root, f), 'utf8'), context);
+  const jailCalls = [], buildJail = NYC.buildSFJailExterior;
+  NYC.buildSFJailExterior = (group, box, ground) => { jailCalls.push({ box, ground }); return buildJail(group, box, ground); };
   const details = [];
   NYC.buildSFDetailMeshes = (group, d) => details.push(d);
   const city = NYC.buildCityBlocks(stub(), { sf: true });
-  built = { NYC, city, facadeSets, details: details[0], H };
+  built = { NYC, city, facadeSets, details: details[0], H, jailCalls };
   return built;
 }
+
+test('city construction installs the jail facade once on its actual mass', { skip }, () => {
+  const { jailCalls, details } = build();
+  assert.equal(jailCalls.length, 1);
+  const box = jailCalls[0].box;
+  assert.ok(Math.abs(box.x + 249.74118) < .02);
+  assert.ok(jailCalls[0].ground > 5 && jailCalls[0].ground < 7);
+  const cs = Math.cos(box.ry), sn = Math.sin(box.ry);
+  const frontDetails = details.steps.filter(p => {
+    const dx = p.x - box.x, dz = p.z - box.z;
+    const lx = dx * cs - dz * sn, lz = dx * sn + dz * cs;
+    return Math.abs(lx + box.w / 2) < 1 && lz > -2 && lz < 8;
+  });
+  assert.equal(frontDetails.length, 0, 'generic civic projections obscure the treatment');
+});
 
 test('masses stand on the curb islands', { skip }, () => {
   const { NYC, facadeSets } = build();

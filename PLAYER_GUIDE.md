@@ -84,6 +84,20 @@ The parks combine street features with curved transition lines and open bypasses
 - For back-and-forth halfpipe riding, enter at a moderate speed and ease off before the curved faces, especially
   Zion's taller pair. Holding full throttle can carry you over a lip onto its deck and outside return bank.
 
+## Officer Dorkins (experimental)
+
+Officer Dorkins may pursue you on a hover-wheel. Three admitted paddle knockdowns are warnings; a fourth leads to
+booking at County Jail. Hop or swerve away, or break sight and gain distance to escape. During booking, use **Skip
+booking** or, after the paperwork, **Back to riding**. On a standard controller, return the pad to neutral, use the
+D-pad or left stick to select an action, then press A separately. The game checks several nearby release positions
+and never forces an obstructed placement. If every exit remains blocked, try again or reload to resume the previous
+committed riding checkpoint. The SF chase, site and release remain experimental. The owner reports a real playtest on
+Ubuntu Chrome with an Xbox controller, Seal on a Wheel and blue-hour lighting; broader device coverage remains pending.
+
+While he is pursuing, a red-and-blue marker shows Dorkins on the radar and, when in view, the full map. A distant
+officer appears at the radar edge to show his direction. Maps show horizontal position only, so he may be on another
+level. The marker disappears when the chase ends; it is not a waypoint or an arrival target.
+
 ## Map, recovery and settings
 
 - At **Golden Gate Bridge**, the roadway and both lighter side paths are rideable. The paths curve around the tower legs
@@ -115,5 +129,5 @@ bug reports and ideas through [GitHub Issues](https://github.com/VibezZzCoder/eu
 Include your location, rider, device/browser, graphics backend, Frame rate / 3D resolution / Graphics settings,
 input device and steps to reproduce. These links target the first public repository release.
 
-Officer Dorkins/chase/booking is scheduled after the first release. There are no playable walking, car, bicycle,
+There are no playable walking, car, bicycle,
 helicopter or robotaxi-passenger modes in this adaptation. This is a game, not real-world EUC riding instruction.

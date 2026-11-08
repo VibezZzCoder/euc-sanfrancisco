@@ -312,16 +312,8 @@
       "shared/letterPaths.js"
     ]
   },
-  "removedColourEntries": 7,
-  "removedColourKeys": [
-    "copShirt",
-    "copHiVis",
-    "copBand",
-    "copHelmet",
-    "copSkin",
-    "copGear",
-    "paddle"
-  ],
+  "removedColourEntries": 0,
+  "removedColourKeys": [],
   "roster": [
     {
       "id": "cool-rider",
@@ -438,6 +430,7 @@
     "render/blockoutKit.js",
     "render/euc.js",
     "render/machineLook.js",
+    "render/paddle.js",
     "render/rider.js",
     "render/riderClothDrape.js",
     "render/riderJointSurface.js",
@@ -760,15 +753,13 @@
       "source": "assets/live/audio/siren_far_loop.wav",
       "sourceSha256": "09d77eacb93910f55565119a35b96b338c642f9862ba2723e2e077ac5e3100e7",
       "bytes": 516048,
-      "shipped": false,
-      "unshippedReason": "Dorkins/siren is post-initial-release"
+      "shipped": true
     },
     {
       "source": "assets/live/audio/siren_close_loop.wav",
       "sourceSha256": "0f34dc0bf177406aaaaded4fb1ac7e980bf497dd4a29423218458606fd7feed6",
       "bytes": 688038,
-      "shipped": false,
-      "unshippedReason": "Dorkins/siren is post-initial-release"
+      "shipped": true
     },
     {
       "source": "assets/live/audio/overspeed_beep.wav",
@@ -869,7 +860,7 @@
           ]
         }
       },
-      "outputSha256": "7bcb56f91a1ba7eaacc7d9491b2e37b8050d2a902292109acfefe9afc05fda5f",
+      "outputSha256": "a80470ad501dde43bb153f82c568d15a668c4fd7ea1cc822341ce3a390f0b53a",
       "sliced": true
     },
     "data/wimLogoAsset.js": {
@@ -1151,6 +1142,13 @@
       "outputSha256": "a0f686e3c1b6c0e5d43dee6332b784acf6340469af88596ed9698e78bedd8694",
       "sliced": false
     },
+    "render/paddle.js": {
+      "source": "src/render/paddle.ts",
+      "sourceSha256": "41385d417ba026ee9dace8ddf7a8f18c40c27fc4d9622862f03068444fd6082b",
+      "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
+      "outputSha256": "2cb82c672aa762979df094b908d3759451d6bdc911dd133a7951dcc008c25e5d",
+      "sliced": false
+    },
     "render/pixels/coolRiderAtlas.js": {
       "source": null,
       "sourceSha256": null,
@@ -1220,7 +1218,7 @@
           "sourceSha256": "d0c462aa34845cb31246063f8416f2a607a89829f60c8ecca5f89abb041bfd04"
         }
       ],
-      "outputSha256": "0309ebcda23d4de49c7419c6faa293034e9501a5a80111eeff7272c4089dc826",
+      "outputSha256": "41d545f769443a41f2b66b48b2b412f2208c1720b624d7941e1a142310efcacb",
       "sliced": false
     },
     "render/pixels/paintSurface.js": {
@@ -1472,7 +1470,7 @@
       "source": "src/render/riderLook.ts",
       "sourceSha256": "a5d06cdd735631c8acdc021cf6651e9843f08957e7c286d4c3d7e7fd823dacb5",
       "sourceCommit": "5f45fff19b258e140833841ba2473069af751a12",
-      "outputSha256": "b6f69ca273028bba11c6dc3af11291d7e3339e1be1c78b77b78e88ec15b0d2e8",
+      "outputSha256": "e2751be4955514aaa7cb98c2fb9f0e247d79cd407f0dcc65c6200fefc8270b98",
       "sliced": true
     },
     "render/ridingRig.js": {
@@ -1485,7 +1483,7 @@
         "sourceSha256": "7413e04db970dd1c791eb9fa59a06cfb62556c464b9e98502baff4a12912bad0",
         "selection": "near-solid presentation channel; NYC cached selected-geometry visual tyre radius, flight/crash exclusions and constraint-safe release easing; no appearance/resource graph migration"
       },
-      "outputSha256": "d3ac5287facbf959fdbe21f3a6ac39d6d769164471e873f5df39f4c7d5b3bd41",
+      "outputSha256": "7078cd491a150cb6c9ab4c7b452afb4218a6597f991c07d8cf2a937125c40cc9",
       "sliced": true
     },
     "render/rigConsolidation.js": {
@@ -1808,13 +1806,15 @@
     "assets/live/audio/stumble_drunkard.wav",
     "assets/live/audio/tyre_solid_loop.wav",
     "assets/live/audio/wind_howl_loop.wav",
+    "assets/live/audio/siren_far_loop.wav",
+    "assets/live/audio/siren_close_loop.wav",
     "assets/live/audio/overspeed_beep.wav"
   ],
   "counts": {
-    "modules": 100,
-    "eager": 40,
+    "modules": 101,
+    "eager": 41,
     "deferred": 60,
     "reviewedAudio": 18,
-    "shippedAudio": 15
+    "shippedAudio": 17
   }
 }

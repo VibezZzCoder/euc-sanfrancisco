@@ -395,6 +395,109 @@ function drawWaypoint(ctx, x, y, r) {
   ctx.fill();
 }
 
+// Officer marker adapted from euc-newyork@7cf4ce7/js/nyc-map.js (MIT). SF's audio view
+// contains the officer's own last published position, never the brain's rider/search target.
+function chaseMarker(chaser) {
+  const view = chaser?.audioView;
+  return view?.present === true && view.chasing === true && chaser.director?.state?.phase === 'chasing'
+    && Number.isFinite(view.x) && Number.isFinite(view.z) ? view : null;
+}
+
+// CSS-pixel-only presentation: never change the officer's world position or map hit testing.
+// Leave room for the rotated player arrow and both marker halos. At coincident positions choose
+// north deterministically; near a canvas edge pick the closest available direction inside it.
+function officerMarkerLayout(x, y, px, py, w, h) {
+  const margin = 8, separation = 25;
+  let mx = Math.max(-w / 2 + margin, Math.min(w / 2 - margin, x));
+  let my = Math.max(-h / 2 + margin, Math.min(h / 2 - margin, y));
+  const dx = mx - px, dy = my - py, distance = Math.hypot(dx, dy);
+  if (distance < separation) {
+    const cx = px + (distance > 1e-9 ? dx / distance : 0) * separation;
+    const cy = py + (distance > 1e-9 ? dy / distance : -1) * separation;
+    if (cx >= -w / 2 + margin && cx <= w / 2 - margin && cy >= -h / 2 + margin && cy <= h / 2 - margin)
+      return { x: cx, y: cy, actualX: x, actualY: y };
+    const base = distance > 1e-9 ? Math.atan2(dy, dx) : -Math.PI / 2;
+    let best = Infinity;
+    // Only try alternatives if a canvas edge blocks the exact radial direction.
+    for (let i = 1; i < 16; i++) {
+      const angle = base + Math.ceil(i / 2) * (i % 2 ? 1 : -1) * Math.PI / 8;
+      const cx = px + Math.cos(angle) * separation, cy = py + Math.sin(angle) * separation;
+      if (cx < -w / 2 + margin || cx > w / 2 - margin || cy < -h / 2 + margin || cy > h / 2 - margin) continue;
+      const cost = (cx - x) ** 2 + (cy - y) ** 2;
+      if (cost < best) { best = cost; mx = cx; my = cy; }
+    }
+  }
+  return { x: mx, y: my, actualX: x, actualY: y };
+}
+
+// A bounded, deterministic CSS-pixel search is only needed when the player-safe marker would
+// cover a pin. Test the whole marker halo against pin rectangles and the waypoint circle.
+const OFFICER_DIRECTIONS = Array.from({ length: 32 }, (_, i) => {
+  const a = -Math.PI / 2 + i * Math.PI / 16;
+  return [Math.cos(a), Math.sin(a)];
+});
+function officerPositionClear(x, y, px, py, w, h, pins, pinCount, wx, wy, waypointRadius) {
+  if (x < -w / 2 + 8 || x > w / 2 - 8 || y < -h / 2 + 8 || y > h / 2 - 8) return false;
+  if ((x - px) ** 2 + (y - py) ** 2 < 25 ** 2 - 1e-8) return false;
+  if (waypointRadius > 0 && (x - wx) ** 2 + (y - wy) ** 2 < (waypointRadius + 7.5) ** 2) return false;
+  for (let i = 0; i < pinCount; i++) {
+    const b = pins[i];
+    const dx = Math.max(b[0] - x, 0, x - b[2]), dy = Math.max(b[1] - y, 0, y - b[3]);
+    if (dx * dx + dy * dy < 7.5 ** 2) return false;
+  }
+  return true;
+}
+
+function avoidOfficerPins(marker, px, py, w, h, pins, pinCount, wx, wy, waypointRadius) {
+  if (officerPositionClear(marker.x, marker.y, px, py, w, h, pins, pinCount, wx, wy, waypointRadius)) return marker;
+  // Smallest sampled displacement, at 1 px radial / 11.25° angular resolution. If this
+  // bounded search is saturated, retain the prior player-safe result rather than hiding either.
+  const firstRadius = Math.max(1, Math.ceil(25 - Math.hypot(marker.actualX - px, marker.actualY - py) - 1e-8));
+  for (let r = firstRadius; r <= 72; r++) for (let i = 0; i < OFFICER_DIRECTIONS.length; i++) {
+    const direction = OFFICER_DIRECTIONS[i];
+    const x = marker.actualX + r * direction[0], y = marker.actualY + r * direction[1];
+    if (officerPositionClear(x, y, px, py, w, h, pins, pinCount, wx, wy, waypointRadius))
+      return { x, y, actualX: marker.actualX, actualY: marker.actualY };
+  }
+  return marker;
+}
+
+function drawOfficerConnector(ctx, marker) {
+  if (!marker || (marker.x === marker.actualX && marker.y === marker.actualY)) return;
+  ctx.save(); ctx.lineCap = 'round'; ctx.beginPath();
+  ctx.moveTo(marker.actualX, marker.actualY); ctx.lineTo(marker.x, marker.y);
+  ctx.strokeStyle = '#0a1118'; ctx.lineWidth = 4; ctx.stroke();
+  ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.5; ctx.stroke(); ctx.restore();
+}
+
+function drawOfficerMarker(ctx, x, y) {
+  ctx.save();
+  ctx.fillStyle = MAP.halo;
+  ctx.beginPath(); ctx.arc(x, y, 7, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#ff3b3b';
+  ctx.beginPath(); ctx.arc(x, y, 5, Math.PI / 2, Math.PI * 1.5); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#3b6bff';
+  ctx.beginPath(); ctx.arc(x, y, 5, -Math.PI / 2, Math.PI / 2); ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+
+// Try four sides without covering cached place/road labels or pins. Boxes share the static
+// canvas's centred CSS-pixel coordinates; a small margin protects their antialiased edges.
+function drawOfficerLabel(ctx, marker, px, py, w, h, textWidth, placed) {
+  const width = Math.ceil(textWidth) + 8, height = 18, gap = 10;
+  for (let side = 0; side < 4; side++) {
+    const x = side === 0 ? marker.x + gap : side === 1 ? marker.x - gap - width : marker.x - width / 2;
+    const y = side < 2 ? marker.y - height / 2 : side === 2 ? marker.y - gap - height : marker.y + gap;
+    if (x < -w / 2 || x + width > w / 2 || y < -h / 2 || y + height > h / 2) continue;
+    if (x < px + 14 && x + width > px - 14 && y < py + 14 && y + height > py - 14) continue;
+    if (overlaps(placed, [x - 2, y - 2, x + width + 2, y + height + 2])) continue;
+    ctx.save(); ctx.fillStyle = '#0a1118'; ctx.fillRect(x, y, width, height);
+    ctx.font = `700 11px ${FONT}`; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = '#ffffff'; ctx.fillText('Dorkins', x + 4, y + 13); ctx.restore();
+    return;
+  }
+}
+
 const overlaps = (boxes, b) => boxes.some((o) => b[0] < o[2] && b[2] > o[0] && b[1] < o[3] && b[3] > o[1]);
 
 // SF's authored parks; keep geographic pins and lazy checked arrivals owned by sf-destinations.js.
@@ -449,8 +552,12 @@ class NYCMapSystem {
     this.fullDpr = 1;
     this.fullStatic = null; // the full map's ground layers & labels for the current view
     this.fullStaticKey = '';
+    this.fullStaticPlaced = []; // pin/name bounds belonging only to this cached view (CSS pixels)
+    this.fullStaticPins = []; // symbol bounds from the same cached view, excluding text
+    this.miniOfficerPins = []; // reusable radar symbol bounds; populated only while chasing
     this.elHoverInfo = document.getElementById('fullmap-hover-info');
     this.elPlayerInfo = document.getElementById('fullmap-player-info');
+    this.elOfficerInfo = document.getElementById('fullmap-officer-info');
     this.elSearchInput = document.getElementById('fullmap-search');
     this.elSearchResults = document.getElementById('fullmap-search-results');
     this.elSearchList = document.getElementById('fullmap-search-list');
@@ -1317,11 +1424,20 @@ class NYCMapSystem {
       drawWaypoint(ctx, wx, wy, 4.5);
     }
 
+    const officer = chaseMarker(this.chaser);
+    const officerPins = this.miniOfficerPins ??= [];
+    let officerPinCount = 0;
     // Landmark blips
     for (const lm of NYC_LANDMARKS) {
       const lx = toX(lm.x);
       const ly = toY(lm.z);
       if (Math.abs(lx) < w * 0.48 && Math.abs(ly) < h * 0.48) {
+        if (officer) {
+          const radius = isSkateboardPin(lm) ? 10 : 4.5;
+          const pin = officerPins[officerPinCount] ??= [0, 0, 0, 0];
+          pin[0] = lx - radius; pin[1] = ly - radius; pin[2] = lx + radius; pin[3] = ly + radius;
+          officerPinCount++;
+        }
         if (isSkateboardPin(lm)) { drawSkateboardPin(ctx, lx, ly, 0.8); continue; }
         ctx.fillStyle = MAP.halo;
         ctx.beginPath();
@@ -1332,6 +1448,17 @@ class NYCMapSystem {
         ctx.arc(lx, ly, 2.8, 0, Math.PI * 2);
         ctx.fill();
       }
+    }
+
+    // Like NYC, hold a distant chasing officer at the radar rim to show his bearing.
+    let officerMarker = null;
+    if (officer && w > 0 && h > 0) {
+      let x = toX(officer.x), y = toY(officer.z);
+      const rim = Math.max(Math.abs(x) / (w * 0.44), Math.abs(y) / (h * 0.44));
+      if (rim > 1) { x /= rim; y /= rim; }
+      officerMarker = officerMarkerLayout(x, y, 0, 0, w, h);
+      officerMarker = avoidOfficerPins(officerMarker, 0, 0, w, h, officerPins, officerPinCount,
+        this.waypoint ? toX(this.waypoint.x) : 0, this.waypoint ? toY(this.waypoint.z) : 0, this.waypoint ? 6.5 : 0);
     }
 
     // Camera FOV Cone & Player Arrow at center (0, 0)
@@ -1351,11 +1478,13 @@ class NYCMapSystem {
     ctx.fill();
     ctx.restore();
 
+    drawOfficerConnector(ctx, officerMarker);
     // Player heading arrow
     ctx.save();
     ctx.rotate(-ent.heading + Math.PI);
     drawPlayerArrow(ctx, -9, 6.5, 7);
     ctx.restore();
+    if (officerMarker) drawOfficerMarker(ctx, officerMarker.x, officerMarker.y);
 
     ctx.restore();
   }
@@ -1371,6 +1500,11 @@ class NYCMapSystem {
     const v = new MapView(this.viewCenterX, this.viewCenterZ, this.viewZoom, w, h, dpr);
 
     const ent = this.controllerManager.getActiveEntity();
+    const officer = chaseMarker(this.chaser);
+    if (this.elOfficerInfo) {
+      const text = officer ? 'Officer Dorkins is pursuing you; his marker appears when in view.' : 'No pursuing officer marker.';
+      if (this.elOfficerInfo.textContent !== text) this.elOfficerInfo.textContent = text;
+    }
     if (this.elPlayerInfo) {
       const text = `You are at ${getLocationLabel(ent.position.x, ent.position.z)}`;
       if (text !== this.playerInfoText) {
@@ -1381,7 +1515,7 @@ class NYCMapSystem {
 
     // Ground layers, names & landmark pins: re-rendered only when the view, the search or the buildings change
     const fp = footprintLayers();
-    const key = `${v.cx}|${v.cz}|${v.s}|${this.fullCanvas.width}|${this.fullCanvas.height}|${this.searchHighlight}|${fp ? fp.version : 0}`;
+    const key = `${v.cx}|${v.cz}|${v.s}|${this.fullCanvas.width}|${this.fullCanvas.height}|${dpr}|${this.searchHighlight}|${fp ? fp.version : 0}`;
     if (!this.fullStatic) this.fullStatic = document.createElement('canvas');
     if (key !== this.fullStaticKey) {
       this.fullStaticKey = key;
@@ -1390,7 +1524,9 @@ class NYCMapSystem {
         sc.width = this.fullCanvas.width;
         sc.height = this.fullCanvas.height;
       }
-      this.renderFullMapStatic(sc.getContext('2d'), v);
+      const staticBounds = this.renderFullMapStatic(sc.getContext('2d'), v);
+      this.fullStaticPlaced = staticBounds?.placed || [];
+      this.fullStaticPins = staticBounds?.pins || [];
     }
 
     ctx.save();
@@ -1408,10 +1544,22 @@ class NYCMapSystem {
       drawWaypoint(ctx, wx, wy, 7);
     }
 
-    // Live Player Blip & Heading Arrow, with a slow pulse to find it at a glance
     const px = toX(ent.position.x);
     const py = toY(ent.position.z);
+    // The atlas is a top-down X/Z projection, not an indication of the officer's floor.
+    let officerMarker = null;
+    if (officer) {
+      const x = toX(officer.x), y = toY(officer.z);
+      if (Math.abs(x) <= w * 0.5 && Math.abs(y) <= h * 0.5) {
+        officerMarker = officerMarkerLayout(x, y, px, py, w, h);
+        const pins = this.fullStaticPins || [];
+        officerMarker = avoidOfficerPins(officerMarker, px, py, w, h, pins, pins.length,
+          this.waypoint ? toX(this.waypoint.x) : 0, this.waypoint ? toY(this.waypoint.z) : 0, this.waypoint ? 9 : 0);
+      }
+    }
+    drawOfficerConnector(ctx, officerMarker);
 
+    // Live Player Blip & Heading Arrow, with a slow pulse to find it at a glance
     ctx.save();
     ctx.translate(px, py);
     const pulse = (performance.now() % 1800) / 1800;
@@ -1426,6 +1574,13 @@ class NYCMapSystem {
     ctx.rotate(-ent.heading + Math.PI);
     drawPlayerArrow(ctx, -11, 7.5, 8);
     ctx.restore();
+
+    if (officerMarker) {
+      ctx.save(); ctx.font = `700 11px ${FONT}`;
+      const width = this.textWidth(ctx, 'Dorkins'); ctx.restore();
+      drawOfficerLabel(ctx, officerMarker, px, py, w, h, width, this.fullStaticPlaced || []);
+      drawOfficerMarker(ctx, officerMarker.x, officerMarker.y);
+    }
 
     ctx.restore();
   }
@@ -1449,12 +1604,15 @@ class NYCMapSystem {
     ctx.font = `700 11px ${FONT}`;
     const placed = [];
     const pins = [];
+    const pinBounds = [];
     for (const lm of NYC_LANDMARKS) {
       const lx = toX(lm.x);
       const ly = toY(lm.z);
       if (Math.abs(lx) > w * 0.48 || Math.abs(ly) > h * 0.48) continue;
       const labelW = this.textWidth(ctx, lm.short || lm.name || 'Landmark') + 6;
       const radius = isSkateboardPin(lm) ? 12 : 6;
+      const symbolRadius = isSkateboardPin(lm) ? 12 : 6.5;
+      pinBounds.push([lx - symbolRadius, ly - symbolRadius, lx + symbolRadius, ly + symbolRadius]);
       const box = [lx + radius, ly - 8, lx + radius + 2 + labelW, ly + 7];
       const showLabel = !overlaps(placed, box);
       placed.push([lx - radius, ly - radius, lx + radius, ly + radius]);
@@ -1525,6 +1683,7 @@ class NYCMapSystem {
     // 6. Scale bar (true metres); the true-north compass sits with the map controls (index.html)
     this.drawScaleBar(ctx, v);
     ctx.restore();
+    return { placed, pins: pinBounds };
   }
 
   drawScaleBar(ctx, v) {

@@ -1,8 +1,8 @@
 # audio/euc — provenance
 
-Reviewed sound inventory for the player's electric unicycle (`js/euc-audio.js`) in the initial San Francisco release.
-All **15 installed WAVs** are unchanged public-source copies: eleven crashes, one Drunkard stumble and three shared
-sounds. Sirens are reserved for post-release Dorkins and are **not shipped**, as is the offroad tyre loop.
+Reviewed sound inventory for the player's electric unicycle (`js/euc-audio.js`) and in-progress Dorkins integration.
+All **17 installed WAVs** are unchanged public-source copies: eleven crashes, one Drunkard stumble, three shared
+sounds and two sirens. The offroad tyre loop remains unshipped.
 The generator verifies exact installed filenames and source hashes, including missing/extra/unshipped WAV rejection.
 NYC's earlier all-eleven backend/audio evidence belongs to the donor; it is not SF listening or runtime acceptance.
 
@@ -13,7 +13,8 @@ Assets from EUC Thrills by VibezZzCoder — CC BY 4.0 — https://github.com/Vib
 - Upstream: `VibezZzCoder/EUC-thrills` @ `5f45fff19b258e140833841ba2473069af751a12` (v1.1.0).
 - Source folder: `assets/live/audio/`.
 - Donor import history: 2026-10-23 (sirens 2026-10-24); ten full-roster additions installed 2026-10-31.
-  SF seed copied from NYC; initial-release pruning on 2026-11-01 removed both siren WAVs without changing retained audio.
+  SF seed copied from NYC; initial-release pruning on 2026-11-01 removed both sirens; they were restored for the
+  in-progress Dorkins work on 2026-11-07 without changing their source bytes.
 - Origin and copyright notice: `NOTICE-EUC-THRILLS.md` in this repository, from upstream `NOTICE.md`.
 
 ## Installed original/shared inventory
@@ -29,9 +30,9 @@ Assets from EUC Thrills by VibezZzCoder — CC BY 4.0 — https://github.com/Vib
 ## Installed full-roster additions — unchanged source bytes
 
 Paths are relative to upstream `assets/live/audio/`, at the same exact commit above. Hashes identify the installed
-source bytes. There are eleven crash files total plus one Drunkard stumble and three shared files: **15 installed
-WAVs**. The generated manifest still reviews **18** source entries, explicitly marking both sirens and the CC0
-`tyre_offroad_loop.wav` as not shipped. Source/output hashes and exact inventory checks remain required.
+source bytes. Eleven crash files, one Drunkard stumble, three shared files and two sirens make **17 installed WAVs**.
+The generated manifest reviews **18** source entries, marking the CC0 `tyre_offroad_loop.wav` as not shipped.
+Source/output hashes and exact inventory checks remain required.
 
 | File / upstream basename | SHA-256 | Rider / provenance | Licence or exception |
 |---|---|---|---|
@@ -46,15 +47,15 @@ WAVs**. The generated manifest still reviews **18** source entries, explicitly m
 | `crash_wyldist.wav` | `1a17e0c6ab6e671a67cdd6bd4aefb60abaa56c9a507d18251d6b22b9b36f03bd` | Wyldist's supplied riding clip, filmed by a companion; **companion's exclamations, not Wyldist's voice**. Continuous 3.4 s one-channel cut, high-pass 80 Hz, matched/faded/soft-limited; exclamations −5 dB, unidentified airborne bursts −12 dB. No substituted/generated sound. | Contributed recording, not CC BY 4.0; narrow game redistribution only. No additional filmmaker/voice rights inferred. |
 | `crash_gnarwheel.wav` | `dda0cf3b706bd4fbb0dca2ed837a4bb52cafd10b06e77f20f077b03b283d4392` | Gnarwheel's contributed crash/spoken recordings plus separately synthesized 2845 Hz alarm measured without copying recorded voice/background; approved 3.4 s stereo timing/pitch-preserved speech/beep. | Recordings outside CC BY 4.0, no broader reuse/sublicensing grant; original synthesized alarm CC BY 4.0. Mixed file is not wholly CC BY. |
 
-## Reviewed, unshipped source inventory
+## Sirens and unshipped source inventory
 
-These rows preserve provenance only; no WAV with these filenames belongs in `audio/euc/` for the initial release.
-Source paths are relative to the same pinned upstream root. Reintroducing sirens belongs to the post-release NPC work.
+Source paths are relative to the same pinned upstream root. The two sirens are installed for the in-progress NPC port;
+the offroad loop remains absent.
 
 | File | Upstream path | SHA-256 | Origin / licence | Initial SF status |
 |---|---|---|---|---|
-| `siren_far_loop.wav` | `assets/live/audio/siren_far_loop.wav` | `09d77eacb93910f55565119a35b96b338c642f9862ba2723e2e077ac5e3100e7` | [TitanKaempfer, Freesound #746302](https://freesound.org/people/TitanKaempfer/sounds/746302/), loop-processed by EUC Thrills; CC0 / public domain. | Unshipped; post-release Dorkins. |
-| `siren_close_loop.wav` | `assets/live/audio/siren_close_loop.wav` | `0f34dc0bf177406aaaaded4fb1ac7e980bf497dd4a29423218458606fd7feed6` | [vlammenos, Freesound #52906](https://freesound.org/people/vlammenos/sounds/52906/), loop-processed by EUC Thrills; CC0 / public domain. | Unshipped; post-release Dorkins. |
+| `siren_far_loop.wav` | `assets/live/audio/siren_far_loop.wav` | `09d77eacb93910f55565119a35b96b338c642f9862ba2723e2e077ac5e3100e7` | [TitanKaempfer, Freesound #746302](https://freesound.org/people/TitanKaempfer/sounds/746302/), loop-processed by EUC Thrills; CC0 / public domain. | Installed for Dorkins. |
+| `siren_close_loop.wav` | `assets/live/audio/siren_close_loop.wav` | `0f34dc0bf177406aaaaded4fb1ac7e980bf497dd4a29423218458606fd7feed6` | [vlammenos, Freesound #52906](https://freesound.org/people/vlammenos/sounds/52906/), loop-processed by EUC Thrills; CC0 / public domain. | Installed for Dorkins. |
 | `tyre_offroad_loop.wav` | `assets/live/audio/tyre_offroad_loop.wav` | `0ded352777f872ec6df9566fe6f203ca5c3b13fd31031eb043592b487fc791fc` | [gadesound, Freesound #697049](https://freesound.org/people/gadesound/sounds/697049/), source offroad tyre loop; CC0 / public domain. | Unshipped; no active sample consumer. |
 
 ## Rights and implementation rules
@@ -62,7 +63,7 @@ Source paths are relative to the same pinned upstream root. Reintroducing sirens
 - Copy **only** this explicit reviewed inventory; future source files are not auto-approved. Retain unchanged bytes
   and source treatment. `tools/vendor-euc.mjs --check` and `js/euc/MANIFEST.json` pin and audit this inventory/hashes;
   retain these checks when changing source or installed files. Validation rejects missing, extra or altered WAVs
-  and verifies that the three reviewed unshipped samples remain absent.
+  and verifies that the unshipped offroad sample remains absent.
 - If a file is replaced, update its row (sha256, origin and licence) and the test together.
 - Prepare the selected rider's crash, plus stumble only for `drunkard`, before committing the selection. No hover
   playback, eager eleven-bank fetch/decode or silent substitution of another rider's recording. Keep bounded lifecycle

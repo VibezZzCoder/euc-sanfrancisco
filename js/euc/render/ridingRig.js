@@ -8,6 +8,7 @@ import { createBlockoutEUC } from './euc.js';
 import { STANDARD_MACHINE_LOOK } from './machineLook.js';
 import { armEaseForSpeed, createPlaceholderRider, createStanceInput } from './rider.js';
 import { riderLook, MOTION_STILL } from './riderLook.js';
+import { createPaddle } from './paddle.js';
 import { consolidateRig } from './rigConsolidation.js';
 export const BAKED_PAIRS = Object.freeze([
     Object.freeze(['euc-pad-right', 'euc-pad-left']),
@@ -38,8 +39,15 @@ export function createRidingRig(look = riderLook('cool-rider'), machine = STANDA
             throw new RangeError('Invalid selected visual tyre geometry');
         visualTyreRadius = Math.max(visualTyreRadius, radius);
     }
+    const paddle = look.id === 'cop' ? createPaddle() : null;
+    if (paddle)
+        rider.grip.add(paddle.group);
     const stance = createStanceInput();
     let lastAirHeight = 0;
+    const swingHeadWorld = new THREE.Vector3();
+    let swingHead = null;
+    let swingBlend = 0;
+    let carry = 0;
     let settlingAfterApply = false;
     let trickOneFoot = 0;
     let trickSide = 0;
@@ -100,7 +108,7 @@ export function createRidingRig(look = riderLook('cool-rider'), machine = STANDA
         const entries = [];
         rider.root.traverse((object) => {
             const mesh = object;
-            if (mesh.isMesh !== true)
+            if (mesh.isMesh !== true || mesh.name === 'rider-paddle-mesh')
                 return;
             const position = mesh.geometry.getAttribute('position');
             if (position === undefined || position.count === 0)
@@ -358,7 +366,9 @@ export function createRidingRig(look = riderLook('cool-rider'), machine = STANDA
             stance.oneFoot = trickOneFoot;
             stance.oneFootSide = trickSide;
             stance.armEase = armEaseForSpeed(pose.speed);
-            settlingAfterApply = stance.falling;
+            carry = swingHead !== null ? 1 : Math.max(0, carry - 1 / 12);
+            stance.carry = carry;
+            settlingAfterApply = (swingHead === null && carry > 0) || stance.falling;
             rider.applyStanceReaction(stance);
             if (excluded) {
                 push[0] = 0;
@@ -372,6 +382,18 @@ export function createRidingRig(look = riderLook('cool-rider'), machine = STANDA
                     group.updateMatrixWorld(true);
                 }
             }
+            paddle?.aim(swingHead, swingBlend, pose.y - pose.suspensionOffset);
+        },
+        applySwing(headWorld, angle, blend) {
+            stance.swingAngle = angle;
+            stance.swingBlend = headWorld === null ? 0 : blend;
+            swingBlend = stance.swingBlend;
+            if (headWorld === null) {
+                swingHead = null;
+                return;
+            }
+            swingHeadWorld.copy(headWorld);
+            swingHead = swingHeadWorld;
         },
         get settling() {
             return settlingAfterApply;
@@ -406,6 +428,7 @@ export function createRidingRig(look = riderLook('cool-rider'), machine = STANDA
             return push;
         },
         dispose() {
+            paddle?.dispose();
             euc.dispose();
             rider.dispose();
             consolidation?.dispose();

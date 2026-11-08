@@ -79,6 +79,22 @@ The upper-left **3D resolution** (100/75/50%) and **Graphics** (High/Medium/Low)
 routes, physics, traffic and the city stay the same. The speedometer
 shows mph and km/h. The [player guide](PLAYER_GUIDE.md) covers every control, the map, recovery and settings.
 
+## Officer Dorkins
+
+Keep an eye out for Officer Dorkins on his hover-wheel. If he pursues you, hop or swerve away, or break sight and
+gain distance to escape. Three paddle knockdowns are warnings; a fourth leads to booking at County Jail. During
+booking, choose **Skip booking** or, after the paperwork, **Back to riding**. Release positions are checked for
+clearance; if every exit is blocked, try again or reload to resume your previous committed riding checkpoint.
+
+During a pursuit, a red-and-blue marker shows Dorkins on the radar and, when in view, the full map. A distant
+officer appears at the radar's edge to indicate his direction. The marker shows horizontal position, so he may be
+on another level; it disappears when the chase ends and is not a waypoint or arrival target. See the
+[player guide](PLAYER_GUIDE.md#officer-dorkins-experimental) for booking and controller details.
+
+The chase and booking are experimental. The owner has playtested on Ubuntu Chrome with an Xbox controller, Seal
+on a Wheel and blue-hour lighting; broader routes, devices, long sessions and booking fallback transitions still
+need review.
+
 ## Skateparks
 
 - **UN Skate Plaza:** an 18×104 m Jefferson-inspired plaza with 11 features, linked banks and rollers, tabletop,
@@ -112,6 +128,8 @@ This is an early release. Known issues include:
 - **Alcatraz and Yerba Buena Island** are undercooked.
 - **Golden Gate Park** has sparse trees.
 - **Long first load:** around 30 seconds on a desktop, longer on slower devices.
+- **Dorkins:** chase, booking and map-marker behavior are still being tested across routes and devices; the map
+  cannot show whether the officer is on a different elevation.
 - **Phones, tablets and foldables:** touch layouts are tested in desktop browser emulation, but physical phones and
   foldables are not fully verified. Performance on phones may be low; the 3D resolution and Graphics options can help.
 

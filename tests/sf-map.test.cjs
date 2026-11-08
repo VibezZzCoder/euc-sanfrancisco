@@ -443,7 +443,8 @@ function markerHarness(dpr) {
       if (key in target) return target[key];
       if (key === 'createRadialGradient') return () => ({ addColorStop() {} });
       return (...args) => { calls.push([key, ...args]); };
-    }
+    },
+    set(target, key, value) { calls.push(['property', key, value]); target[key] = value; return true; }
   });
   let canvases = 0;
   const document = { body: { classList: { contains: () => false } }, createElement() {
@@ -452,7 +453,8 @@ function markerHarness(dpr) {
   const pins = parkPins();
   assert.equal(pins.length, 2);
   const ordinary = { id: 'ordinary', name: 'Ordinary landmark', x: 500, z: 0 };
-  const window = { devicePixelRatio: dpr, NYC: { GEO: {}, ROADS: [], NYC_LANDMARKS: [...pins, ordinary] } };
+  const window = { devicePixelRatio: dpr, NYC: { GEO: {}, ROADS: [], NYC_LANDMARKS: [...pins, ordinary],
+    getLocationLabel: (x, z) => `${x}, ${z}` } };
   vm.runInNewContext(source, { window, document, performance: { now: () => 0 } });
   const map = Object.create(window.NYC.NYCMapSystem.prototype);
   const canvas = { clientWidth: 800, clientHeight: 600, width: 800 * dpr, height: 600 * dpr, offsetParent: {} };
@@ -506,6 +508,264 @@ test('radar draws the nearby park as a smaller skateboard, culls the distant par
     h.map.renderMinimap();
     assert.equal(h.canvases(), canvases, 'no new canvas per radar update');
   }
+});
+
+function chasingOfficer(x, z) {
+  return { director: { state: { phase: 'chasing' } }, audioView: { present: true, chasing: true, x, z },
+    get position() { throw new Error('map must not read another position'); },
+    get target() { throw new Error('map must not inspect pursuit target'); } };
+}
+
+for (const dpr of [1, 1.5, 2]) test(`officer overlays use SF CSS-pixel transforms and live position at DPR ${dpr}`, () => {
+  const h = markerHarness(dpr), { map, calls } = h;
+  const cop = map.chaser = chasingOfficer(-1800, 900);
+  map.elOfficerInfo = { textContent: '' };
+  map.renderFullMap();
+  let x = (cop.audioView.x - map.viewCenterX) * map.viewZoom;
+  let y = (cop.audioView.z - map.viewCenterZ) * map.viewZoom;
+  assert.ok(calls.some(c => c[0] === 'arc' && c[1] === x && c[2] === y && c[3] === 7));
+  assert.ok(calls.some(c => c[0] === 'fillText' && c[1] === 'Dorkins' && c[2] === x + 14 && c[3] === y + 4));
+  assert.match(map.elOfficerInfo.textContent, /Officer Dorkins is pursuing you/);
+  const canvases = h.canvases();
+  cop.audioView.x += 60; cop.audioView.z += 40;
+  calls.length = 0;
+  map.renderFullMap();
+  x = (cop.audioView.x - map.viewCenterX) * map.viewZoom;
+  y = (cop.audioView.z - map.viewCenterZ) * map.viewZoom;
+  assert.ok(calls.some(c => c[0] === 'arc' && c[1] === x && c[2] === y && c[3] === 7));
+  assert.equal(h.canvases(), canvases, 'movement must not invalidate the static map cache');
+  calls.length = 0;
+  cop.audioView.x = 100; cop.audioView.z = -50;
+  map.renderMinimap();
+  assert.ok(calls.some(c => c[0] === 'arc' && c[1] === 32 && c[2] === -16 && c[3] === 7));
+  calls.length = 0;
+  cop.audioView.x = 5000; cop.audioView.z = -2500;
+  map.renderMinimap();
+  assert.ok(calls.some(c => c[0] === 'arc' && Math.abs(c[1] - 352) < 1e-9 && Math.abs(c[2] + 176) < 1e-9 && c[3] === 7),
+    'distant radar bearing is clamped to the rim');
+  calls.length = 0;
+  map.renderFullMap();
+  assert.ok(!calls.some(c => c[0] === 'fillText' && c[1] === 'Dorkins'), 'atlas does not clamp offscreen officers');
+});
+
+for (const dpr of [1, 1.5, 2]) test(`composited officer/player markers and label stay distinct at DPR ${dpr}`, () => {
+  const h = markerHarness(dpr), { map, calls } = h;
+  map.viewCenterX = map.viewCenterZ = 0; map.viewZoom = 1;
+  map.chaser = chasingOfficer(0, 0);
+  // Give the retained background a real draw operation, as a stand-in for a crossing street label.
+  map.renderFullMapStatic = ctx => { ctx.fillText('Montgomery', 10, -21); };
+  for (const point of [{ x: 0, z: 0 }, { x: 6, z: 3 }, { x: -9, z: -4 }]) {
+    Object.assign(map.chaser.audioView, point);
+    calls.length = 0; map.renderFullMap();
+    const iconIndex = calls.findIndex(c => c[0] === 'arc' && c[3] === 7);
+    const icon = calls[iconIndex];
+    const arrowIndex = calls.findIndex(c => c[0] === 'moveTo' && c[1] === 0 && c[2] === -11);
+    const labelIndex = calls.findIndex(c => c[0] === 'fillText' && c[1] === 'Dorkins');
+    const rectIndex = calls.findLastIndex((c, i) => i < labelIndex && c[0] === 'fillRect');
+    const rect = calls[rectIndex];
+    assert.ok(icon && Math.hypot(icon[1], icon[2]) >= 24.999999, 'marker halo clears the player arrow');
+    assert.ok(arrowIndex >= 0 && iconIndex > arrowIndex, 'final icon remains on top after the player is drawn');
+    assert.ok(labelIndex > calls.findIndex(c => c[0] === 'drawImage'), 'label overlays the cached street names');
+    assert.ok(rectIndex > arrowIndex && rectIndex < labelIndex);
+    assert.deepEqual(calls[rectIndex - 1], ['property', 'fillStyle', '#0a1118'], 'label backing is opaque');
+    assert.ok(rect[1] >= 14 || rect[1] + rect[3] <= -14 || rect[2] >= 14 || rect[2] + rect[4] <= -14,
+      'label background cannot cover the player');
+    assert.ok(calls.some((c, i) => c[0] === 'moveTo' && c[1] === point.x && c[2] === point.z
+      && calls[i + 1]?.[0] === 'lineTo' && calls[i + 1][1] === icon[1] && calls[i + 1][2] === icon[2]),
+    'connector starts at the true position and ends at the displaced icon');
+    assert.ok(calls.findIndex(c => c[0] === 'moveTo' && c[1] === point.x && c[2] === point.z) < arrowIndex,
+      'player arrow is drawn over the connector');
+  }
+  const canvasCount = h.canvases();
+  calls.length = 0; map.chaser.audioView.x = 30; map.chaser.audioView.z = 0; map.renderFullMap();
+  assert.ok(calls.some(c => c[0] === 'arc' && c[1] === 30 && c[2] === 0 && c[3] === 7),
+    'non-overlapping marker stays at its true position');
+  assert.ok(!calls.some(c => c[0] === 'lineTo' && c[1] === 30 && c[2] === 0), 'no unnecessary connector');
+  assert.equal(h.canvases(), canvasCount, 'live overlays do not allocate a new canvas');
+
+  calls.length = 0; map.chaser.audioView.x = map.chaser.audioView.z = 0; map.renderMinimap();
+  const iconIndex = calls.findIndex(c => c[0] === 'arc' && c[3] === 7);
+  const icon = calls[iconIndex];
+  const arrowIndex = calls.findIndex(c => c[0] === 'moveTo' && c[1] === 0 && c[2] === -9);
+  assert.ok(icon && Math.hypot(icon[1], icon[2]) >= 24.999999 && iconIndex > arrowIndex);
+  assert.ok(calls.some((c, i) => c[0] === 'moveTo' && c[1] === 0 && c[2] === 0
+    && calls[i + 1]?.[0] === 'lineTo' && calls[i + 1][1] === icon[1] && calls[i + 1][2] === icon[2]));
+});
+
+for (const dpr of [1, 1.5, 2]) test(`officer label avoids retained static labels and reuses their cache at DPR ${dpr}`, () => {
+  const h = markerHarness(dpr), { map, calls } = h;
+  map.viewCenterX = map.viewCenterZ = 0; map.viewZoom = 1;
+  map.chaser = chasingOfficer(100, 0);
+  let builds = 0;
+  // Right, left, top, bottom: each box blocks only its corresponding candidate.
+  const blockers = [[149, -2, 151, 2], [49, -2, 51, 2], [99, -25, 101, -23], [99, 23, 101, 25]];
+  let active = [blockers[0]];
+  map.drawRoadLabels = (_ctx, _view, { placed }) => { builds++; placed.push(...active); };
+  map.renderFullMap();
+  assert.equal(builds, 1);
+  assert.ok(calls.some(c => c[0] === 'fillText' && c[1] === 'Dorkins' && c[2] === 44 && c[3] === 4),
+    'blocked right side chooses the clear left side');
+  const retained = map.fullStaticPlaced, canvasCount = h.canvases();
+  calls.length = 0; map.chaser.audioView.x = 101; map.renderFullMap();
+  assert.equal(builds, 1); assert.equal(map.fullStaticPlaced, retained);
+  assert.equal(h.canvases(), canvasCount, 'a moving overlay does not rebuild or allocate the static canvas');
+  assert.ok(calls.some(c => c[0] === 'fillText' && c[1] === 'Dorkins' && c[2] === 45));
+
+  // Search changes generate fresh bounds, with the top and bottom candidates tried in turn.
+  map.chaser.audioView.x = 100;
+  for (const [count, expectedY] of [[2, -15], [3, 23]]) {
+    active = blockers.slice(0, count); map.searchHighlight = `search ${count}`;
+    calls.length = 0; map.renderFullMap();
+    assert.equal(builds, count);
+    assert.ok(calls.some(c => c[0] === 'fillText' && c[1] === 'Dorkins' && c[2] === 79 && c[3] === expectedY));
+  }
+  // None of the four candidates may cover the new names.
+  active = blockers; map.searchHighlight = 'all blocked';
+  calls.length = 0; map.renderFullMap();
+  assert.equal(builds, 4); assert.notEqual(map.fullStaticPlaced, retained);
+  assert.ok(!calls.some(c => c[0] === 'fillText' && c[1] === 'Dorkins'), 'all blocked hides label');
+  assert.ok(calls.some(c => c[0] === 'arc' && c[1] === 100 && c[2] === 0 && c[3] === 7), 'icon remains visible');
+  active = []; map.viewCenterX = 1;
+  calls.length = 0; map.renderFullMap();
+  assert.equal(builds, 5);
+  assert.ok(calls.some(c => c[0] === 'fillText' && c[1] === 'Dorkins' && c[2] === 113), 'new view drops stale boxes');
+
+  const beforeResize = map.fullStaticPlaced;
+  map.fullCanvas.width += 100;
+  calls.length = 0; map.renderFullMap();
+  assert.equal(builds, 6); assert.notEqual(map.fullStaticPlaced, beforeResize);
+  // Even if backing dimensions happen to stay equal, DPR changes the CSS-pixel viewport and bounds.
+  const previous = map.fullStaticPlaced;
+  map.fullDpr = dpr * 1.25;
+  calls.length = 0; map.renderFullMap();
+  assert.equal(builds, 7); assert.notEqual(map.fullStaticPlaced, previous);
+  assert.equal(h.canvases(), canvasCount);
+});
+
+test('real static landmark pin and name boxes displace the officer label', () => {
+  const h = markerHarness(1), { map, calls } = h;
+  map.viewCenterX = 400; map.viewCenterZ = 0; map.viewZoom = 1;
+  map.chaser = chasingOfficer(475, 0);
+  map.renderFullMap();
+  assert.ok(calls.some(c => c[0] === 'fillText' && c[1] === 'Ordinary landmark' && c[2] === 109));
+  assert.ok(map.fullStaticPlaced.some(b => b[0] === 94 && b[2] === 106), 'pin footprint retained');
+  assert.ok(map.fullStaticPlaced.some(b => b[0] === 106 && b[2] > 160), 'landmark label bounds retained');
+  assert.ok(calls.some(c => c[0] === 'fillText' && c[1] === 'Dorkins' && c[2] === 19),
+    'the left label avoids the landmark pin and name');
+});
+
+for (const dpr of [1, 1.5, 2]) test(`officer avoids landmark, waypoint and player symbols on both maps at DPR ${dpr}`, () => {
+  const h = markerHarness(dpr), { map, calls, player } = h;
+  // The ordinary landmark, rider and officer coincide at x=500, z=0.
+  map.viewCenterX = 500; map.viewCenterZ = 0; map.viewZoom = 1;
+  Object.assign(player.position, { x: 500, z: 0 });
+  map.chaser = chasingOfficer(500, 0);
+  for (const waypointZ of [0, -25]) {
+    map.waypoint = { x: 500, z: waypointZ };
+    calls.length = 0; map.renderFullMap();
+    const icon = calls.findLast(c => c[0] === 'arc' && c[3] === 7);
+    assert.ok(icon, 'officer remains visible');
+    assert.ok(Math.hypot(icon[1], icon[2]) >= 24.999999, 'player arrow remains clear');
+    assert.ok(Math.hypot(icon[1], icon[2] - waypointZ) >= 16.5 - 1e-8, 'waypoint halo remains clear');
+    const pin = map.fullStaticPins.find(b => b[0] === -6.5 && b[1] === -6.5);
+    assert.ok(pin, 'landmark symbol bounds belong to the static canvas');
+    const dx = Math.max(pin[0] - icon[1], 0, icon[1] - pin[2]);
+    const dy = Math.max(pin[1] - icon[2], 0, icon[2] - pin[3]);
+    assert.ok(Math.hypot(dx, dy) >= 7.5 - 1e-8, 'landmark symbol remains clear');
+    assert.ok(calls.some((c, i) => c[0] === 'moveTo' && c[1] === 0 && c[2] === 0
+      && calls[i + 1]?.[0] === 'lineTo' && calls[i + 1][1] === icon[1] && calls[i + 1][2] === icon[2]));
+  }
+  const pins = map.fullStaticPins, placed = map.fullStaticPlaced, canvases = h.canvases();
+  calls.length = 0; map.renderFullMap();
+  assert.equal(map.fullStaticPins, pins); assert.equal(map.fullStaticPlaced, placed);
+  assert.equal(h.canvases(), canvases, 'moving markers do not rebuild the static canvas');
+
+  // Put the live radar waypoint at the old player-safe offset to force a second placement search.
+  map.waypoint.z = -25 / 0.32;
+  calls.length = 0; map.renderMinimap();
+  const radarIcon = calls.find(c => c[0] === 'arc' && c[3] === 7);
+  assert.ok(radarIcon && Math.hypot(radarIcon[1], radarIcon[2]) >= 24.999999);
+  assert.ok(Math.hypot(radarIcon[1], radarIcon[2] + 25) >= 14 - 1e-8);
+  assert.ok(calls.some((c, i) => c[0] === 'moveTo' && c[1] === 0 && c[2] === 0
+    && calls[i + 1]?.[0] === 'lineTo' && calls[i + 1][1] === radarIcon[1] && calls[i + 1][2] === radarIcon[2]));
+  const radarPins = map.miniOfficerPins, firstPin = radarPins[0], radarCanvases = h.canvases();
+  map.renderMinimap();
+  assert.equal(map.miniOfficerPins, radarPins); assert.equal(map.miniOfficerPins[0], firstPin);
+  assert.equal(h.canvases(), radarCanvases, 'radar reuses its pin scratch and cache canvas');
+});
+
+test('officer symbol stays at its true position when only a map label is nearby', () => {
+  const h = markerHarness(1), { map, calls } = h;
+  map.viewCenterX = map.viewCenterZ = 0; map.viewZoom = 1;
+  map.chaser = chasingOfficer(100, 0);
+  map.drawRoadLabels = (_ctx, _view, { placed }) => placed.push([90, -10, 110, 10]);
+  map.renderFullMap();
+  assert.ok(calls.some(c => c[0] === 'arc' && c[1] === 100 && c[2] === 0 && c[3] === 7));
+  assert.ok(!calls.some(c => c[0] === 'lineTo' && c[1] === 100 && c[2] === 0));
+});
+
+test('officer clears an edge waypoint without leaving the full-map viewport', () => {
+  for (const x of [-395, 395]) {
+    const h = markerHarness(1), { map, calls } = h;
+    map.viewCenterX = map.viewCenterZ = 0; map.viewZoom = 1;
+    map.chaser = chasingOfficer(x, 0); map.waypoint = { x, z: 0 };
+    map.renderFullMap();
+    const icon = calls.findLast(c => c[0] === 'arc' && c[3] === 7);
+    assert.ok(icon && Math.abs(icon[1]) <= 392 && Math.abs(icon[2]) <= 292);
+    assert.ok(Math.hypot(icon[1] - x, icon[2]) >= 16.5 - 1e-8);
+    assert.ok(calls.some((c, i) => c[0] === 'moveTo' && c[1] === x && c[2] === 0
+      && calls[i + 1]?.[0] === 'lineTo' && calls[i + 1][1] === icon[1] && calls[i + 1][2] === icon[2]));
+  }
+});
+
+test('saturated pin search keeps the player-safe officer marker instead of hiding it', () => {
+  const h = markerHarness(1), { map, calls } = h;
+  map.viewCenterX = map.viewCenterZ = 0; map.viewZoom = 1;
+  map.chaser = chasingOfficer(0, 0); map.renderFullMap();
+  map.fullStaticPins.push([-100, -100, 100, 100]);
+  calls.length = 0; map.renderFullMap();
+  const icon = calls.find(c => c[0] === 'arc' && c[3] === 7);
+  assert.ok(icon && Math.hypot(icon[1], icon[2]) >= 24.999999);
+  assert.ok(calls.some(c => c[0] === 'moveTo' && c[1] === 0 && c[2] === -11), 'player arrow is still drawn');
+});
+
+test('officer marker and label stay inside the atlas when coincident near each corner', () => {
+  for (const [x, z] of [[-395, -295], [395, -295], [-395, 295], [395, 295]]) {
+    const h = markerHarness(1), { map, calls } = h;
+    map.viewCenterX = map.viewCenterZ = 0; map.viewZoom = 1;
+    Object.assign(h.player.position, { x, z }); map.chaser = chasingOfficer(x, z);
+    map.renderFullMap();
+    const icon = calls.find(c => c[0] === 'arc' && c[3] === 7);
+    assert.ok(icon && Math.abs(icon[1]) <= 392 && Math.abs(icon[2]) <= 292);
+    assert.ok(Math.hypot(icon[1] - x, icon[2] - z) >= 24.999999);
+    const labelIndex = calls.findIndex(c => c[0] === 'fillText' && c[1] === 'Dorkins');
+    assert.ok(labelIndex >= 0, 'a label fits inside the viewport');
+    const rect = calls[calls.findLastIndex((c, i) => i < labelIndex && c[0] === 'fillRect')];
+    assert.ok(rect[1] >= -400 && rect[1] + rect[3] <= 400 && rect[2] >= -300 && rect[2] + rect[4] <= 300);
+    assert.ok(rect[1] >= x + 14 || rect[1] + rect[3] <= x - 14 || rect[2] >= z + 14 || rect[2] + rect[4] <= z - 14);
+  }
+});
+
+test('officer marker and accessible status disappear for absent, inactive, invalid and booking states', () => {
+  const h = markerHarness(1), { map, calls } = h;
+  map.elOfficerInfo = { textContent: '' };
+  const cop = chasingOfficer(-1800, 900);
+  const candidate = (view = {}, phase = 'chasing') => ({ director: { state: { phase } },
+    audioView: { ...cop.audioView, ...view } });
+  const cases = [null, candidate({ present: false }), candidate({ chasing: false }), candidate({}, 'captured'),
+    candidate({}, 'leaving'), candidate({ x: NaN }), candidate({ z: Infinity })];
+  for (const candidate of cases) {
+    map.chaser = candidate;
+    calls.length = 0; map.renderFullMap();
+    assert.ok(!calls.some(c => c[0] === 'fillText' && c[1] === 'Dorkins'));
+    assert.doesNotMatch(map.elOfficerInfo.textContent, /Dorkins/);
+    calls.length = 0; map.renderMinimap();
+    assert.ok(!calls.some(c => c[0] === 'arc' && c[3] === 7));
+  }
+  map.chaser = cop; map.renderFullMap();
+  assert.match(map.elOfficerInfo.textContent, /Dorkins/);
+  cop.audioView.present = false; map.renderFullMap();
+  assert.doesNotMatch(map.elOfficerInfo.textContent, /Dorkins/, 'no stale status after hide');
 });
 
 test('skateboard selection uses 12 CSS pixels, preserves ordinary 8px pins and checked arrival/search behavior', () => {

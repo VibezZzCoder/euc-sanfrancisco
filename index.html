@@ -25,6 +25,7 @@
   <link rel="preload" href="./fonts/overpass-latin.woff2" as="font" type="font/woff2" crossorigin />
   <link rel="stylesheet" href="./css/fonts.css" />
   <link rel="stylesheet" href="./css/style.css" />
+  <link rel="stylesheet" href="./css/booking.css" />
   <!-- One local Three identity, pinned to e27dfa9 by tools/vendor-three.mjs. -->
   <script type="importmap">
     {
@@ -59,6 +60,7 @@
   <link rel="modulepreload" href="./js/euc/render/blockoutKit.js" />
   <link rel="modulepreload" href="./js/euc/render/euc.js" />
   <link rel="modulepreload" href="./js/euc/render/machineLook.js" />
+  <link rel="modulepreload" href="./js/euc/render/paddle.js" />
   <link rel="modulepreload" href="./js/euc/render/rider.js" />
   <link rel="modulepreload" href="./js/euc/render/riderClothDrape.js" />
   <link rel="modulepreload" href="./js/euc/render/riderJointSurface.js" />
@@ -319,6 +321,11 @@
       <div id="hud-trick" class="wheel-cue trick-cue" role="status" aria-atomic="true" hidden></div>
       <div id="hud-overspeed" class="wheel-cue overspeed-cue" data-level="none" hidden><span aria-hidden="true">⚠</span> Max speed</div>
       <div id="hud-warning" class="wheel-cue power-cue" data-level="none" role="status" hidden></div>
+      <div id="hud-chase" class="wheel-cue chase-cue" hidden>
+        <span id="hud-chase-text"></span><span class="chase-detail"><span id="hud-chase-heat-text"></span>
+          <span id="hud-chase-heat" class="chase-heat" data-level="0" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="chase-meter" aria-hidden="true"><span id="hud-chase-meter"></span></span></span>
+      </div>
     </div>
     <section id="hud-cluster" class="panel cluster" aria-label="Speed, rider and camera">
       <div class="gauge">
@@ -341,6 +348,32 @@
       </div>
     </section>
   </div>
+
+  <div id="hud-chase-banner" class="chase-banner" role="status" aria-live="assertive" aria-atomic="true" hidden></div>
+  <!-- Adapted from euc-newyork@7cf4ce7, © 2026 VibezZzCoder, MIT. -->
+  <dialog id="booking-overlay" class="booking-overlay" aria-labelledby="booking-heading" data-phase="captured">
+    <button id="booking-skip" class="booking-skip" type="button">Skip booking <span aria-hidden="true">↗</span></button>
+    <header class="booking-heading">
+      <p class="booking-kicker">County Jail · Seventh Street</p>
+      <h2 id="booking-heading">Busted.</h2><p class="booking-subtitle">Vehicle processing</p>
+      <p class="booking-pad-hint">D-pad / left stick: select · A: activate</p>
+    </header>
+    <section class="booking-paper" aria-label="Booking receipt">
+      <div class="booking-paper-head"><span>FORM EUC-02</span><span id="booking-number">EUC-001</span></div>
+      <p class="booking-paper-title">BOOKING RECORD</p>
+      <div class="booking-dialogue" aria-live="polite" aria-atomic="true">
+        <p class="booking-speaker">Officer Dorkins</p><p id="booking-line"></p><p id="booking-reply"></p>
+      </div>
+      <div class="booking-form">
+        <dl><div><dt>Rider</dt><dd id="booking-rider">Rider</dd></div><div><dt>Front wheel</dt><dd class="booking-field">1</dd></div></dl>
+        <dl class="booking-form-bottom"><div><dt>Rear wheel</dt><dd class="booking-field">?</dd></div><div><dt>Total wheels</dt><dd>1</dd></div></dl>
+        <svg class="booking-scribble" viewBox="0 0 300 100" aria-hidden="true"><path d="M14 75Q70 4 81 50T140 37T167 70T213 29L191 77L245 39L230 79L282 53"/></svg>
+        <strong id="booking-stamp" class="booking-stamp">VOID</strong>
+      </div>
+      <p id="booking-note" class="booking-note" role="status"></p>
+      <button id="booking-release" class="booking-release" type="button" disabled>Back to riding <span aria-hidden="true">→</span></button>
+    </section>
+  </dialog>
 
   <!-- Touch input stays available in clean view; the map temporarily suspends it. -->
   <div id="hud-getup" class="getup-prompt" role="status" aria-live="assertive" hidden><span id="hud-getup-verb">Press</span><kbd id="hud-getup-key">R</kbd><span id="hud-getup-text">to get up</span></div>
@@ -375,8 +408,9 @@
   </div>
 
   <!-- Full-Screen Interactive San Francisco Street Map ([M]) -->
-  <dialog id="fullmap-modal" class="fullmap-modal hidden" role="dialog" aria-modal="true" aria-label="Full San Francisco Interactive Street Map" aria-describedby="fullmap-instructions" tabindex="-1" inert>
-    <p id="fullmap-instructions" class="fullmap-sr-only">Search streets or landmarks. Tab to a result and press Enter or Space for a checked arrival. The waypoint line shows direction, not a route. Press Escape to close the map.</p>
+  <dialog id="fullmap-modal" class="fullmap-modal hidden" role="dialog" aria-modal="true" aria-label="Full San Francisco Interactive Street Map" aria-describedby="fullmap-instructions fullmap-officer-info" tabindex="-1" inert>
+    <p id="fullmap-instructions" class="fullmap-sr-only">Search streets or landmarks. Tab to a result and press Enter or Space for a checked arrival. The waypoint line shows direction, not a route. A red and blue marker labeled Dorkins shows the pursuing officer, projected onto the map without floor information. A line links a shifted marker to his actual map position, including when symbols overlap or approach the edge. Press Escape to close the map.</p>
+    <p id="fullmap-officer-info" class="fullmap-sr-only">No pursuing officer marker.</p>
     <div id="fullmap-canvas-wrap" class="fullmap-canvas-wrap">
       <canvas id="fullmap-canvas"></canvas>
     </div>

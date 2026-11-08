@@ -1,0 +1,66 @@
+/* Adapted from euc-newyork@7cf4ce7f0092b1f5f0627c2b9a4611bcc262e31d,
+   css/style.css blob 2242e670a411a2b38da25a89b442c0925169de03.
+   © 2026 VibezZzCoder, MIT. Selectors are scoped to the booking dialog. */
+.booking-overlay { position: fixed; inset: 0; margin: 0; width: 100%; height: 100%; max-width: none; max-height: none; padding: 0; border: 0; box-sizing: border-box; color: #f5eddb; background: linear-gradient(180deg, rgba(8,17,25,.65), transparent 34%, rgba(8,17,25,.24)); }
+.booking-overlay *, .booking-overlay *::before, .booking-overlay *::after { box-sizing: border-box; }
+.booking-overlay:not([open]) { display: none; }
+.booking-overlay::backdrop { background: rgba(0,0,0,.12); }
+.booking-overlay .booking-heading { position: absolute; top: max(24px, env(safe-area-inset-top)); left: max(24px, env(safe-area-inset-left)); max-width: calc(100% - 200px); }
+.booking-overlay .booking-kicker { margin: 0 0 8px; color: #e3c883; font-size: 12px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+.booking-overlay .booking-heading h2 { margin: 0; font-size: clamp(25px, 3.5vw, 48px); letter-spacing: -.04em; text-shadow: 0 2px 14px #0b1018; }
+.booking-overlay .booking-subtitle { margin: 6px 0 0; font-size: 13px; color: #e0e4e5; }
+.booking-overlay .booking-skip { position: absolute; z-index: 1; right: max(20px, env(safe-area-inset-right)); top: max(20px, env(safe-area-inset-top)); min-height: 44px; padding: 8px 14px; border: 1px solid #84918e; border-radius: 999px; color: #f5eddb; background: #172a32; font: inherit; font-size: 12px; cursor: pointer; }
+.booking-overlay .booking-paper { position: absolute; right: max(24px, env(safe-area-inset-right)); bottom: max(24px, env(safe-area-inset-bottom)); width: min(340px, calc(100% - 48px)); max-height: calc(100% - 96px); overflow: auto; overscroll-behavior: contain; padding: 22px; border-radius: 3px; color: #19333a; background: #f5eddb; box-shadow: 0 12px 45px #0006; }
+.booking-overlay .booking-paper-head { display: flex; justify-content: space-between; font-size: 10px; font-weight: 800; letter-spacing: .09em; }
+.booking-overlay .booking-paper-title { margin: 12px 0 16px; padding-bottom: 10px; border-bottom: 2px solid #19333a; font-size: 20px; font-weight: 900; letter-spacing: -.03em; }
+.booking-overlay .booking-dialogue { min-height: 105px; }
+.booking-overlay .booking-speaker { margin: 0 0 5px; font-size: 10px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: #5b6b69; }
+.booking-overlay #booking-line { margin: 0 0 8px; font-size: 20px; font-weight: 800; line-height: 1.2; }
+.booking-overlay #booking-reply { margin: 0; min-height: 32px; font-size: 14px; line-height: 1.3; }
+.booking-overlay .booking-form { position: relative; padding: 8px 0; border-block: 1px dashed #9d9d88; }
+.booking-overlay .booking-form dl { margin: 0; }
+.booking-overlay .booking-form dl div { display: flex; justify-content: space-between; gap: 10px; padding: 5px 0; font-size: 12px; }
+.booking-overlay .booking-form dt { color: #5b6b69; }
+.booking-overlay .booking-form dd { margin: 0; font-weight: 750; }
+.booking-overlay .booking-form dd.booking-field { min-width: 24px; text-align: center; border: 1px solid #7c8c82; background: #fff8e9; }
+.booking-overlay .booking-scribble { position: absolute; inset: 15px 0 0; width: 100%; height: 90%; opacity: 0; pointer-events: none; }
+.booking-overlay .booking-scribble path { fill: none; stroke: #26333d; stroke-width: 7; stroke-linecap: round; stroke-dasharray: 650; stroke-dashoffset: 650; }
+.booking-overlay .booking-stamp { position: absolute; top: 37%; left: 50%; padding: 4px 10px; border: 3px solid currentColor; border-radius: 3px; color: #a93c32; font-size: 27px; font-weight: 900; letter-spacing: .05em; transform: translate(-50%, -50%) rotate(-10deg); opacity: 0; }
+.booking-overlay .booking-note { min-height: 16px; margin: 14px 0; font-size: 12px; line-height: 1.3; }
+.booking-overlay .booking-release { width: 100%; min-height: 48px; padding: 12px; border: 0; border-radius: 6px; color: #f5eddb; background: #235843; font: inherit; font-size: 14px; font-weight: 800; cursor: pointer; }
+.booking-overlay .booking-release:disabled { opacity: .35; cursor: default; }
+.booking-overlay .booking-pad-hint { display: none; margin: 8px 0 0; font-size: 11px; }
+body[data-input='gamepad'] .booking-overlay .booking-pad-hint, .booking-overlay[data-pad-focus='true'] .booking-pad-hint { display: block; }
+.booking-overlay .booking-skip:focus-visible, .booking-overlay .booking-release:focus-visible,
+body[data-input='gamepad'] .booking-overlay .booking-skip:focus,
+body[data-input='gamepad'] .booking-overlay .booking-release:focus,
+.booking-overlay[data-pad-focus='true'] .booking-skip:focus, .booking-overlay[data-pad-focus='true'] .booking-release:focus { outline: 3px solid #d19c18; outline-offset: 3px; }
+.booking-overlay[data-phase='captured'] { background: #081119b3; }
+.booking-overlay[data-phase='captured'] .booking-heading { top: 36%; left: 50%; transform: translate(-50%, -50%); width: 90%; max-width: 90%; text-align: center; }
+.booking-overlay[data-phase='captured'] .booking-heading h2 { font-size: clamp(50px, 10vw, 120px); }
+.booking-overlay[data-phase='captured'] .booking-paper { visibility: hidden; }
+.booking-overlay[data-signing='true'] .booking-scribble { opacity: 1; }
+.booking-overlay[data-signing='true'] .booking-scribble path { animation: booking-sign 1.3s ease-in both; }
+.booking-overlay[data-torn='true'] .booking-stamp { opacity: 1; }
+.booking-overlay[data-torn='true'] .booking-form-bottom { transform: translate(7px, 5px) rotate(3deg); border-top: 4px dashed #f5eddb; }
+.booking-overlay[data-phase='released'] .booking-stamp { color: #235843; background: #f5eddbed; }
+body.booking-open .hud, body.booking-open .getup-prompt, body.booking-open .chase-banner,
+body.booking-open #touch-controls { visibility: hidden; pointer-events: none; }
+@keyframes booking-sign { to { stroke-dashoffset: 0; } }
+@media (prefers-reduced-motion: reduce) { .booking-overlay[data-signing='true'] .booking-scribble path { animation: none; stroke-dashoffset: 0; } }
+@media (max-width: 600px) and (orientation: portrait) {
+  .booking-overlay .booking-heading { top: max(16px, env(safe-area-inset-top)); left: max(16px, env(safe-area-inset-left)); max-width: 55%; }
+  .booking-overlay .booking-kicker { font-size: 10px; }
+  .booking-overlay .booking-heading h2 { font-size: 25px; }
+  .booking-overlay .booking-skip { right: max(12px, env(safe-area-inset-right)); top: max(12px, env(safe-area-inset-top)); }
+  .booking-overlay .booking-paper { left: max(12px, env(safe-area-inset-left)); right: max(12px, env(safe-area-inset-right)); bottom: max(12px, env(safe-area-inset-bottom)); width: auto; max-height: 56%; padding: 16px; }
+  .booking-overlay .booking-dialogue { min-height: 80px; }
+  .booking-overlay #booking-line { font-size: 18px; }
+}
+@media (max-height: 500px) and (orientation: landscape) {
+  .booking-overlay .booking-heading { top: max(12px, env(safe-area-inset-top)); left: max(12px, env(safe-area-inset-left)); max-width: calc(100% - 340px); }
+  .booking-overlay .booking-heading h2 { font-size: 25px; }
+  .booking-overlay .booking-paper { top: calc(max(12px, env(safe-area-inset-top)) + 52px); bottom: max(12px, env(safe-area-inset-bottom)); right: max(12px, env(safe-area-inset-right)); width: min(300px, 55%); padding: 14px; max-height: none; }
+  .booking-overlay .booking-dialogue { min-height: 66px; }
+  .booking-overlay .booking-release { min-height: 44px; }
+}

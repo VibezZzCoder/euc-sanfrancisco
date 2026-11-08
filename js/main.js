@@ -24,6 +24,28 @@ import { createFrameRatePreference, createFramePacer, frameRateHealth } from './
 import { createRenderResolutionPreference, drawingBufferRatio } from './render-resolution.js';
 import { createGraphicsQualityPreference, createGraphicsQuality } from './graphics-quality.js';
 import { buildSFSkateparks, skateparkPaintIntervals } from './sf-skateparks.js';
+import { createSfNemesis } from './sf-nemesis.js';
+import { SfChaseHud } from './sf-chase-hud.js';
+import { createBookingDirector, BookingScreen } from './booking.js';
+import { createBookingScene } from './booking-scene.js';
+import { createSfBookingPlacement } from './sf-booking-placement.js';
+
+// Exploratory survey points, NOT accepted final staging. The intake is derived from the
+// surveyed desk point; every transfer and release is independently checked at runtime.
+const BOOKING_DESK = Object.freeze({ x: -286.649, y: 5.890, z: 1535.154, heading: 0.78335 });
+const BOOKING_INTAKE = Object.freeze({ x: BOOKING_DESK.x + Math.sin(BOOKING_DESK.heading) * 1.5,
+  y: BOOKING_DESK.y, z: BOOKING_DESK.z + Math.cos(BOOKING_DESK.heading) * 1.5,
+  heading: BOOKING_DESK.heading + Math.PI });
+const BOOKING_RELEASE = Object.freeze({ x: -275.715, y: 5.988, z: 1544.136, heading: 0.78335 });
+// Only the first point has a bounded exploratory ride-away survey. The other
+// positions are unsurveyed, short offsets along that sidewalk-aligned heading.
+// Every candidate is independently checked, including its floor and departure.
+const BOOKING_RELEASE_SITES = Object.freeze([0, 1.8, -1.8, 3.6, -3.6].map(distance => Object.freeze({
+  x: BOOKING_RELEASE.x + Math.sin(BOOKING_RELEASE.heading) * distance,
+  y: BOOKING_RELEASE.y,
+  z: BOOKING_RELEASE.z + Math.cos(BOOKING_RELEASE.heading) * distance,
+  heading: BOOKING_RELEASE.heading,
+})));
 
 export async function initApp(startup) {
   const city = window.NYC;
@@ -193,6 +215,10 @@ export async function initApp(startup) {
 
   await stage('Preparing the selected rider, wheel and controls…', 'rider');
   const playerState = createPlayerState({ isPlayableRider });
+  const booking = createBookingDirector();
+  let bookingSpawnProtected = false;
+  let bookingProtectedExit = null;
+  let bookingClearancePending = false;
   const rider = [params.get('rider'), playerState.rider].find(isPlayableRider) ?? PLAYABLE_RIDERS[0];
   riderPreparationWork = prepareEucRider(rider, { signal: startupPreparation.signal });
   const appearance = await riderPreparationWork;
@@ -211,6 +237,8 @@ export async function initApp(startup) {
   };
   playerState.restore(pose => controllerManager.teleportActiveTo(pose.x, pose.z, pose.heading, pose.y).succeeded);
   function savePlayerState() {
+    // Preserve the previously committed checkpoint throughout capture/intake, including pagehide.
+    if (booking.active) return;
     const entity = controllerManager.getActiveEntity();
     playerState.save({ x: entity.position.x, y: entity.position.y, z: entity.position.z, heading: entity.heading }, entity.riderId);
   }
@@ -220,6 +248,20 @@ export async function initApp(startup) {
   const soundButton = document.getElementById('btn-sound');
   const audioSystem = new CityAudioSystem({ controllerManager, trafficSystem, highwayTraffic, streetDetails },
     { onStateChange: updateSoundButton });
+  const nemesis = params.get('cop') === '0' ? null : createSfNemesis({ scene,
+    sampler: controllerManager.eucSampler, network: roadNetwork,
+    getPlayer: () => controllerManager.getActiveEntity(), camera: cameraSystem.camera });
+  if (nemesis) ownedDisposals.push(() => nemesis.dispose());
+  const bookingOfficer = nemesis ? {
+    beginBooking: (...args) => nemesis.beginBooking(...args),
+    presentBooking: (...args) => nemesis.presentBooking(...args),
+    endBooking: () => nemesis.endBooking(),
+    onPaperTorn: () => { nemesis.audioView.hit++; }, // NYC's existing one-shot thump
+  } : null;
+  const bookingScene = nemesis ? createBookingScene(scene, BOOKING_DESK, bookingOfficer) : null;
+  if (bookingScene) ownedDisposals.push(() => bookingScene.dispose());
+  audioSystem.setChaser(nemesis);
+  let bookingScreen = null;
   function updateSoundButton() {
     const reason = audioSystem.unavailableReason;
     for (const id of ['sound-unavailable', 'title-audio-status', 'menu-audio-status']) {
@@ -237,6 +279,7 @@ export async function initApp(startup) {
   soundButton.addEventListener('click', () => audioSystem.setEnabled(!audioSystem.enabled));
   updateSoundButton();
   stopRuntime = async () => {
+    bookingScreen?.dispose(); clearBookingSpawnProtection();
     controllerManager.setInputEnabled(false); touchControls.setEnabled(false); audioSystem.dispose();
     try { await compileWork; } catch { /* Drain startup readers. */ }
     await controllerManager.dispose();
@@ -302,6 +345,7 @@ export async function initApp(startup) {
 
   let titleScreen = null, gameMenu = null;
   let lifecycleReady = false, dirtyView = true, lastOwner = null, currentFps = 0;
+  let windowFocused = document.hasFocus(), bookingSuspended = false;
   let lastTime = null, elapsed = 0, titleElapsed = 0, frameCount = 0, fpsTimer = 0, nextPlayerSave = 0, warmedUp = false;
   const cameraButtons = [...document.querySelectorAll('[data-camera]')];
   const timeButtons = [...document.querySelectorAll('[data-time]')];
@@ -309,6 +353,7 @@ export async function initApp(startup) {
   const frameRatePreference = createFrameRatePreference();
   const framePacer = createFramePacer(frameRatePreference.value);
   const eucHud = new EucHud(document);
+  const chaseHud = nemesis ? new SfChaseHud(document) : null;
   const gamepadControls = new GamepadControls(controllerManager, cameraSystem, {
     onCycleRider: step => gameMenu?.browse(step),
     onToggleMenu: () => { if (mapSystem.isFullMapOpen) mapSystem.toggleFullMap(false); gameMenu?.openPause(); },
@@ -390,16 +435,23 @@ export async function initApp(startup) {
   }
   const mapSystem = new city.NYCMapSystem({ controllerManager, cameraSystem, trafficSystem,
     allBlocks: cityBlocks.allBlocks, onToggle: open => { syncLifecycle(); if (open) mapSystem.setInputDevice(promptDevice); }, onTeleport: teleportTo });
+  mapSystem.chaser = nemesis; // The map reads only the officer's published presence and position.
   mapSystem.enabled = false;
   function owner() {
     return menuOwner({ failed: startup.failed || stopped, hidden: document.hidden, pageAway,
-      menu: gameMenu?.isOpen, map: mapSystem.isFullMapOpen,
+      booking: booking.active, menu: gameMenu?.isOpen, map: mapSystem.isFullMapOpen,
       title: !titleScreen || titleScreen.isOpen || !titleScreen.started });
   }
   function resetFramePacing() { framePacer.reset(); frameCount = fpsTimer = 0; }
   function resetFrameClock() { lastTime = null; resetFramePacing(); }
   function syncLifecycle() {
     const current = owner();
+    const suspended = booking.active && (current !== 'booking' || !windowFocused || !document.hasFocus());
+    const suspensionChanged = suspended !== bookingSuspended;
+    bookingSuspended = suspended;
+    bookingScreen?.setSuspended(suspended);
+    audioSystem.setPaused(current !== 'riding' && (current !== 'booking' || suspended));
+    if (suspensionChanged && lifecycleReady) resetFrameClock();
     if (current === lastOwner) return;
     lastOwner = current; dirtyView = true;
     if (lifecycleReady) resetFrameClock();
@@ -407,7 +459,7 @@ export async function initApp(startup) {
     controllerManager.setInputEnabled(riding); controllerManager.resetInput();
     touchControls.setEnabled(riding); gamepadControls.setEnabled(riding); gamepadControls.reset();
     cameraSystem._clearPointers(); mapSystem.cancelGestures();
-    mapSystem.enabled = riding || current === 'map'; audioSystem.setPaused(!riding);
+    mapSystem.enabled = riding || current === 'map';
   }
   function compileRider({ group }, { signal }) {
     const previous = runtimeCompile;
@@ -435,7 +487,7 @@ export async function initApp(startup) {
     onCommit: () => { updateCommittedRider(); dirtyView = true; } });
   gameMenu = new GameMenu({ root: document.getElementById('game-menu'), riders: PLAYABLE_RIDERS, specs: RIDERS,
     getRider: () => controllerManager.getActiveEntity().riderId,
-    canOpen: view => !startup.failed && !stopped && !document.hidden && !pageAway && !mapSystem.isFullMapOpen
+    canOpen: view => !startup.failed && !stopped && !document.hidden && !pageAway && !booking.active && !mapSystem.isFullMapOpen
       && !titleScreen?.preparing && (view === 'picker' || titleScreen?.started),
     onChange: () => { closePopovers(); titleScreen?.resetInput(); syncLifecycle(); },
     onConfirm: id => riderSelection.prepare(id), onCancel: () => riderSelection.cancel(),
@@ -461,6 +513,9 @@ export async function initApp(startup) {
     }
   });
   stopRuntime = async () => {
+    bookingScreen?.dispose(); // synchronous, before boot focuses Retry or waits on GPU readers
+    trafficSystem.setPresentationClearance(null);
+    clearBookingSpawnProtection();
     controllerManager.setInputEnabled(false); gamepadControls.setEnabled(false); touchControls.setEnabled(false);
     gameMenu.dispose(); titleScreen.dispose(); cameraSystem._clearPointers();
     if (mapSystem.isFullMapOpen) mapSystem.toggleFullMap(false);
@@ -469,6 +524,108 @@ export async function initApp(startup) {
     try { await compileWork; } catch { /* Active rig must survive startup compilation. */ }
     await controllerManager.dispose();
   };
+
+  if (nemesis) {
+    // Reject an unintended stacked floor even when the sampler finds a valid nearby elevation.
+    function checkedBookingTeleport(x, z, heading, y, policy) {
+      // The rider faces the desk. Intake only needs a stationary checked pose;
+      // the 1.2 m ride-away corridor applies solely to the outside release.
+      const intake = x === BOOKING_INTAKE.x && z === BOOKING_INTAKE.z;
+      const checkedPolicy = { ...policy, departure: intake ? 0 : 1.2 };
+      const preview = controllerManager.findTeleportPosition(x, z, heading, y, checkedPolicy);
+      if (!preview || Math.abs(preview.y - y) > 0.5) return null;
+      const result = controllerManager.teleportActiveTo(x, z, heading, y, checkedPolicy);
+      if (result?.succeeded) {
+        // The live world was checked before the controller committed. Protect the accepted
+        // area from future pool spawns, including the first camera jump after a remote Skip.
+        trafficSystem.setSpawnExclusions([
+          { x: BOOKING_DESK.x, z: BOOKING_DESK.z, radius: 6 },
+          { x, z, radius: 4 },
+        ]);
+        bookingSpawnProtected = true;
+        bookingProtectedExit = { x, z };
+      }
+      return result;
+    }
+    const checkedManager = { teleportActiveTo: checkedBookingTeleport };
+    const placement = createSfBookingPlacement({ manager: checkedManager, booking, chase: nemesis.director,
+      intake: [BOOKING_INTAKE], release: BOOKING_RELEASE_SITES });
+    // One conservative envelope covers all props, the complete posed officer and paddle,
+    // lamp, exhaust and both torn-paper trajectories, including the gaps between them.
+    // Check actual support, statics and current actors; never reserve an actor route.
+    function stagingClear() {
+      const s = Math.sin(BOOKING_DESK.heading), c = Math.cos(BOOKING_DESK.heading);
+      const sampler = controllerManager.eucSampler;
+      for (const [x, z, halfWidthMetres, halfLengthMetres, height] of [
+        [BOOKING_DESK.x - c * 0.24 - s * 0.825, BOOKING_DESK.z + s * 0.24 - c * 0.825, 2.15, 1.475, 2.4],
+      ]) {
+        const ground = sampler.findPlacementTarget({ x, z, headingY: BOOKING_DESK.heading, referenceY: BOOKING_DESK.y,
+          registeredSurfaceOnly: true, hull: { halfWidthMetres, halfLengthMetres, heightMetres: height } });
+        if (!ground || Math.abs(ground.y - BOOKING_DESK.y) > 0.12) return false;
+        // The prop group is level, not draped: refuse unsupported or steep corners.
+        for (const u of [-halfWidthMetres, halfWidthMetres]) for (const v of [-halfLengthMetres, halfLengthMetres]) {
+          const px = x + c * u + s * v, pz = z - s * u + c * v;
+          const corner = sampler.sampleGround(px, pz, { normal: {} }, BOOKING_DESK.y);
+          if (!corner || corner.offCourse || !Number.isFinite(corner.height)
+            || Math.abs(corner.height - BOOKING_DESK.y) > 0.12) return false;
+        }
+        const body = { x, z, headingY: BOOKING_DESK.heading, halfWidthMetres, halfLengthMetres,
+          minY: BOOKING_DESK.y - 0.6, maxY: BOOKING_DESK.y + height, floorY: ground.y, velocityX: 0, velocityZ: 0 };
+        if (!sampler.isVolumeClear(body) || !dynamicWorld.canPlace({ reason: 'recover', body })) return false;
+      }
+      return true;
+    }
+    function finishBooking() {
+      if (!placement.release()) return false;
+      trafficSystem.setPresentationClearance(null);
+      bookingClearancePending = false;
+      bookingScene.end(); nemesis.hide(); // also retire an unstaged capture/Skip; release already set cooldown
+      cameraSystem.setCinematic(null);
+      controllerManager.resetInput(); touchControls.reset(); gamepadControls.reset();
+      cameraSystem.resetForTeleport(); selectCamera('chase', true, false);
+      bookingScreen.update(booking.state); syncLifecycle();
+      container.focus({ preventScroll: true });
+      savePlayerState(); // actual accepted outside pose, never the provisional coordinate
+      dirtyView = true;
+      return true;
+    }
+    bookingScreen = new BookingScreen({ root: document.getElementById('booking-overlay'), onRelease: finishBooking });
+    // Kept on the screen owner to keep all transfer attempts behind one checked path.
+    bookingScreen.transfer = () => {
+      if (!stagingClear() || !placement.transfer()) return false;
+      // Draw-only clearance for the temporary desk: walking, routes and physical bodies continue.
+      // Pad the rotated stage envelope for pedestrian silhouettes, not just their centres.
+      const s = Math.sin(BOOKING_DESK.heading), c = Math.cos(BOOKING_DESK.heading);
+      const x = BOOKING_DESK.x - c * 0.24 - s * 0.825;
+      const z = BOOKING_DESK.z + s * 0.24 - c * 0.825;
+      const rx = Math.abs(c) * 2.15 + Math.abs(s) * 1.475 + 0.8;
+      const rz = Math.abs(s) * 2.15 + Math.abs(c) * 1.475 + 0.8;
+      trafficSystem.setPresentationClearance({ minX: x - rx, maxX: x + rx, minZ: z - rz, maxZ: z + rz });
+      return true;
+    };
+  }
+
+  function startBooking() {
+    const entity = controllerManager.getActiveEntity();
+    if (!booking.start(RIDERS[entity.riderId].name, nemesis.director.state.knockdowns)) return;
+    closePopovers(); bookingScreen.update(booking.state); syncLifecycle();
+  }
+
+  function clearBookingSpawnProtection() {
+    if (bookingSpawnProtected) trafficSystem.setSpawnExclusions();
+    bookingSpawnProtected = false;
+    bookingProtectedExit = null;
+  }
+
+  function retireBookingSpawnProtection(entity) {
+    if (!bookingSpawnProtected || booking.active) return;
+    const nearExit = p => bookingProtectedExit && Math.hypot(p.x - bookingProtectedExit.x, p.z - bookingProtectedExit.z) <= 100;
+    // The just-completed traffic update covered the exit, or another checked teleport has
+    // already taken the player elsewhere before that update could happen.
+    if (nearExit(cameraSystem.currentPos) || !nearExit(entity.position)) {
+      clearBookingSpawnProtection();
+    }
+  }
 
   function listen(target, name, callback, options) {
     target.addEventListener(name, callback, options);
@@ -578,8 +735,9 @@ export async function initApp(startup) {
   listen(window, 'pageshow', () => { pageAway = false; gameMenu.leaving = false; gameMenu.reset(); syncLifecycle(); resetFrameClock(); scheduleViewportResize(); });
   listen(document, 'visibilitychange', () => { if (document.hidden) suspendPage(); else { syncLifecycle(); resetFrameClock(); } });
   for (const type of ['blur', 'focus']) listen(window, type, () => {
+    windowFocused = type === 'focus';
     controllerManager.resetInput(); touchControls.reset(); gamepadControls.reset(); cameraSystem._clearPointers();
-    mapSystem.cancelGestures(); resetFrameClock();
+    mapSystem.cancelGestures(); syncLifecycle(); resetFrameClock();
   });
 
   let resizePending = false;
@@ -632,13 +790,19 @@ export async function initApp(startup) {
         triangles: renderer.info.render.triangles, geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures,
         terrain: cityGrid.terrain?.stats(), region: region.stats() }) } };
 
+  let nemesisWarming = false;
   async function precompileShaders() {
     rendererBusy = true;
     const target = renderer.getRenderTarget(), previousMRT = renderer.getMRT(), culled = [];
+    const temporary = bookingScene ? [[bookingScene.group, bookingScene.group.visible]] : [];
+    let compiled = false;
     try {
       await stage('Preparing reflections and bloom…', 'effects');
       scene.visible = false;
       try { renderPipeline.render(); } finally { scene.visible = true; }
+      const player = controllerManager.getActiveEntity();
+      nemesisWarming = !!nemesis?.beginWarmup(player.position.x, player.position.y, player.position.z, player.heading);
+      for (const [object] of temporary) object.visible = true;
       const jobs = [], byMaterial = new Map();
       scene.traverseVisible(object => {
         if (object.frustumCulled) { culled.push(object); object.frustumCulled = false; }
@@ -668,7 +832,10 @@ export async function initApp(startup) {
       const results = await Promise.allSettled(Array.from({ length: 16 }, worker));
       const failure = results.find(result => result.status === 'rejected');
       if (failure) throw failure.reason;
+      compiled = true;
     } finally {
+      if (!compiled && nemesisWarming) { nemesis.endWarmup(); nemesisWarming = false; }
+      for (const [object, visible] of temporary) object.visible = visible;
       renderer.setMRT(previousMRT); renderer.setRenderTarget(target);
       for (const object of culled) object.frustumCulled = true;
       rendererBusy = false; scheduleViewportResize();
@@ -707,29 +874,70 @@ export async function initApp(startup) {
       syncLifecycle();
       let current = owner();
       const rawDt = lastTime === null ? 0 : Math.max(0, (now - lastTime) / 1000); lastTime = now;
-      const dt = Math.min(rawDt, 0.05);
+      let dt = Math.min(rawDt, 0.05);
+      const ownerBeforeInput = current;
       if (current === 'menu') gameMenu.updateGamepad(dt);
       else if (current === 'title' && titleScreen.isOpen) titleScreen.update();
+      else if (current === 'booking') bookingScreen.updateGamepad();
       else if (current === 'riding' || current === 'map') gamepadControls.update(dt);
       current = owner(); // a pad edge may change owner in this callback
+      if (current !== ownerBeforeInput) dt = 0;
       if (current === 'hidden' || current === 'graphics' || rendererBusy) return;
-      const riding = current === 'riding', title = current === 'title';
+      let riding = current === 'riding';
+      const title = current === 'title';
       const entity = controllerManager.getActiveEntity();
       if (riding) {
         elapsed += dt;
         if (streetDetails.signalClock) streetDetails.signalClock.value = elapsed;
         // Final logical actor poses reach native admission; city systems never push the rider mesh.
         trafficSystem.update(dt, elapsed, cameraSystem.currentPos, entity, 'euc', cameraSystem.camera);
+        // Keep the exclusion through any old-camera frame; the first destination-focused
+        // recycling pass is protected even when Skip releases directly from a remote district.
+        retireBookingSpawnProtection(entity);
         highwayTraffic.update(dt, cameraSystem.camera, entity, 'euc'); transit.update(dt);
         controllerManager.update(dt, elapsed);
       } else entity.update(0, controllerManager.keys);
       if (title) titleElapsed += dt;
       const viewTime = title ? titleElapsed : elapsed;
       if (riding || title || !warmedUp) cameraSystem.update(dt, viewTime);
+      // The officer sees the final camera and player pose. A capture owns input and
+      // persistence in this same callback, before any periodic save or render.
+      if (nemesis && !booking.active) {
+        const result = nemesis.update(dt, riding);
+        if (result.captured) {
+          startBooking(); current = owner(); riding = false; dt = 0;
+        }
+      }
+      if (current === 'booking') {
+        const bookingDt = bookingSuspended ? 0 : dt;
+        if (bookingDt > 0) {
+          elapsed += bookingDt;
+          if (streetDetails.signalClock) streetDetails.signalClock.value = elapsed;
+          trafficSystem.update(bookingDt, elapsed, cameraSystem.currentPos, entity, 'euc', cameraSystem.camera);
+          bookingClearancePending = false;
+          highwayTraffic.update(bookingDt, cameraSystem.camera, controllerManager.getActiveEntity(), 'euc');
+          transit.update(bookingDt);
+        }
+        if (booking.update(bookingDt) === 'transfer') {
+          if (bookingScreen.transfer()) {
+            cameraSystem.resetForTeleport();
+            // Traffic's draw buffers were packed before the stage clearance existed. Wait for
+            // the next normal actor update before submitting the first staged view.
+            bookingClearancePending = true;
+            dirtyView = true;
+          }
+          else document.querySelector('#booking-overlay .booking-subtitle').textContent = 'Intake occupied. Retrying…';
+        }
+        const view = bookingScene.update(bookingDt, booking.state, cameraSystem.camera.aspect);
+        if (view) { cameraSystem.setCinematic(view); cameraSystem.update(bookingDt, elapsed); }
+        bookingScreen.update(booking.state);
+      }
       mapSystem.update(); audioSystem.update(dt, elapsed, cameraSystem.camera, lightingSystem.activePresetId === 'midnight');
       eucHud.update(entity.controller, elapsed, promptDevice, entity.tricks?.label ?? ''); touchControls.setDown(entity.controller.crashed);
+      if (nemesis) chaseHud.update(nemesis.hudView);
       if (riding && now >= nextPlayerSave) { savePlayerState(); nextPlayerSave = now + 5000; }
-      const renderFrame = (riding || title) && framePacer.shouldRender(now) || dirtyView || !warmedUp;
+      const renderFrame = !bookingClearancePending && ((riding || title || current === 'booking')
+        && framePacer.shouldRender(now) || dirtyView || !warmedUp);
       if (renderFrame) {
         graphics.apply(graphicsPreference.value);
         dirtyView = false; entity.prepareView?.(now); updateWorldView(elapsed);
@@ -737,7 +945,10 @@ export async function initApp(startup) {
         if (!warmedUp) {
           const culled = [];
           scene.traverse(object => { if (object.frustumCulled && !object.userData.sharesPipelineWith) { culled.push(object); object.frustumCulled = false; } });
-          try { renderPipeline.render(); } finally { for (const object of culled) object.frustumCulled = true; }
+          try { renderPipeline.render(); } finally {
+            for (const object of culled) object.frustumCulled = true;
+            if (nemesisWarming) { nemesis.endWarmup(); nemesisWarming = false; }
+          }
         }
         renderPipeline.render(); frameCount++;
         graphicsLimit.dataset.quality = graphics.value;

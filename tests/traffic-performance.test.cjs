@@ -16,7 +16,7 @@ for (const [hasView, inView, draw] of [[true, false, false], [true, true, true],
     let args, drawn = 0;
     const ped = { x: 10, z: 20, ux: 0, uz: 1, dir: 1, rig: { update(...values) { args = values; } } };
     const renderPed = productionFunction('renderPed', {
-      hasView, visible: () => inView, pedGround: () => 0, focusX: 0, focusZ: 0,
+      hasView, visible: () => inView, pedGround: () => 0, focusX: 0, focusZ: 0, presentationClearance: null,
       pedCrowd: { add(rig) { assert.equal(rig, ped.rig); drawn++; } }
     });
     renderPed(ped, 1 / 60);

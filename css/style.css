@@ -1558,6 +1558,23 @@ body.hud-minimized .performance-controls { display: none; }
 .wheel-cues:not(:has(.wheel-cue:not([hidden]))) { display: none; }
 .wheel-cue { padding: 7px 12px; border: 1px solid var(--glass-border); border-radius: 10px; background: var(--glass-strong); font-size: 12px; line-height: 1.4; text-align: right; }
 .wheel-cue[hidden] { display: none; }
+.chase-cue { border-color: #ed9b71; color: #fff3df; max-width: min(260px, 80vw); }
+.chase-cue[data-hot='true'] { border-color: #ff6f62; }
+.chase-detail { display: flex; align-items: center; justify-content: flex-end; gap: 6px; font-size: 11px; }
+.chase-heat { display: inline-flex; gap: 3px; }
+.chase-heat i { width: 6px; height: 6px; border-radius: 50%; background: #66534e; }
+.chase-heat[data-level='1'] i:first-child, .chase-heat[data-level='2'] i:nth-child(-n+2),
+.chase-heat[data-level='3'] i { background: #ff8a72; }
+.chase-meter { display: inline-block; width: 32px; height: 4px; background: #ffffff40; }
+.chase-meter span { display: block; height: 100%; background: #7bf0a0; }
+.chase-banner { position: fixed; z-index: 11; top: max(12px, env(safe-area-inset-top)); left: 50%;
+  transform: translateX(-50%); max-width: min(90vw, 460px); padding: 9px 16px; border: 1px solid #ff9b80;
+  border-radius: 12px; background: #1b2932ef; color: #fff1e6; font-size: 14px; font-weight: 750;
+  text-align: center; pointer-events: none; }
+.chase-banner[hidden] { display: none; }
+body.title-open .chase-banner, body.game-menu-open .chase-banner { visibility: hidden; }
+/* One booking suspension flag also freezes the receipt's CSS-owned animation. */
+.booking-overlay[data-suspended='true'][data-signing='true'] .booking-scribble path { animation-play-state: paused; }
 /* These are the actual euc-hud.js model levels, shared with NYC. Text remains authoritative. */
 .power-cue[data-level='notice'], .overspeed-cue[data-level='notice'] { color: #ffd23f; }
 .power-cue[data-level='warn'], .overspeed-cue[data-level='warn'] { color: #ff8a1f; }

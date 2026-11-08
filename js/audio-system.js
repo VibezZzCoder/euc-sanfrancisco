@@ -3,6 +3,7 @@ import { createEventResources, playEvent, createWindVoice } from './audio-events
 import { CityAudioSources } from './audio-sources.js';
 import { CityAcoustics } from './audio-acoustics.js';
 import { EucAudio, RiderAudioBanks } from './euc-audio.js';
+import { NemesisAudio } from './nemesis-audio.js';
 
 export const SOUND_STATE_KEY = 'euc-sanfrancisco-sound';
 
@@ -94,6 +95,8 @@ class CityAudioSystem {
     this.sources = new CityAudioSources(simulation);
     this.controllerManager = simulation.controllerManager;
     this.euc = null;
+    this.chaser = null;
+    this.cop = null;
     this.riderBanks = new RiderAudioBanks({ onCommit: () => this.euc?.reset() });
     this.paused = false;
     this.pageHidden = false;
@@ -170,12 +173,12 @@ class CityAudioSystem {
       if (!this.context) {
         try { this.initialize(); } catch (error) {
           // A transient constructor/graph failure must allow a fresh confirmation to retry, not masquerade as unsupported.
-          this.euc?.dispose(); this.wind?.dispose(true);
+          this.euc?.dispose(); this.cop?.dispose(); this.wind?.dispose(true);
           for (const key of ['mix', 'compressor', 'master', 'reflections', 'reverb', 'reflectionFilter']) {
             this[key]?.disconnect(); this[key] = null;
           }
           this.context?.close().catch(() => {});
-          this.context = this.euc = this.wind = this.resources = null;
+          this.context = this.euc = this.cop = this.wind = this.resources = null;
           throw error;
         }
       }
@@ -331,10 +334,42 @@ class CityAudioSystem {
       onWindHowl: (buffer) => this.wind?.useHowl(buffer), // one wind sound for the whole game: the EUC Thrills howl
       riderBanks: this.riderBanks,
     });
+    this.prepareChaserAudio();
     context.onstatechange = () => {
       if (context.state !== 'running') this.reset();
       this.onStateChange();
     };
+  }
+
+  // No NPC or siren graphs are constructed until an actual chaser is attached. The audio object
+  // owns its asynchronous sample requests and drops late responses on disposal.
+  prepareChaserAudio() {
+    if (!this.chaser || !this.context || this.cop) return;
+    this.cop = new NemesisAudio(this.context, this.mix, { noise: this.resources.noise, reflections: this.reflections });
+    this.cop.reset(this.chaser.audioView);
+  }
+
+  setChaser(chaser) {
+    if (this.disposed) return;
+    if (!chaser) {
+      this.cop?.dispose();
+      this.cop = this.chaser = null;
+      return;
+    }
+    this.chaser = chaser;
+    this.prepareChaserAudio();
+    this.cop?.reset(chaser.audioView);
+  }
+
+  updateChaser(camera, playing) {
+    if (!this.cop) return;
+    const view = this.chaser?.audioView;
+    if (!playing || !view) { this.cop.reset(view); return; }
+    const m = camera.matrixWorld.elements;
+    const dx = view.x - camera.position.x, dz = view.z - camera.position.z;
+    const distance = Math.hypot(dx, dz);
+    view.pan = distance > 0.5 ? (dx * m[0] + dz * m[2]) / distance : 0;
+    this.cop.update(view, this.context.currentTime);
   }
 
   setEnabled(enabled) {
@@ -376,6 +411,7 @@ class CityAudioSystem {
     this.accumulator = 0;
     this.intervalElapsed = 0;
     this.euc?.reset();
+    this.cop?.reset(this.chaser?.audioView);
     if (this.master) {
       this.master.gain.cancelScheduledValues(this.context.currentTime);
       this.master.gain.setValueAtTime(0, this.context.currentTime);
@@ -561,6 +597,7 @@ class CityAudioSystem {
   update(dt, elapsed, camera, night = false) {
     const playing = !this.disposed && this.ready && this.enabled && !this.paused && !this.pageHidden && this.context?.state === 'running' && !document.hidden;
     this.updateRider(playing);
+    this.updateChaser(camera, playing);
     if (!playing) {
       if (this.haveListener || this.accumulator || this.intervalElapsed) this.reset();
       return;
@@ -695,6 +732,7 @@ class CityAudioSystem {
     globalThis.removeEventListener?.('pageshow', this.onPageShow);
     this.reset();
     this.euc?.dispose();
+    this.cop?.dispose();
     this.riderBanks.dispose();
     this.wind?.dispose(true);
     for (const node of [this.mix, this.compressor, this.master, this.reflections, this.reverb, this.reflectionFilter]) node?.disconnect();

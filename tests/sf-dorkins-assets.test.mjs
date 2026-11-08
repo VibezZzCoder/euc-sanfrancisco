@@ -1,0 +1,31 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import * as THREE from '../vendor/three/build/three.core.js';
+import { createRidingRig } from '../js/euc/render/ridingRig.js';
+import { COP_LOOK, riderLook } from '../js/euc/render/riderLook.js';
+import { TROLLINA_LOOK } from '../js/euc/render/riderAppearance-trollina.js';
+import { createPose } from '../js/euc/simulation/EucController.js';
+import { PLAYABLE_RIDERS } from '../js/euc-roster.js';
+
+test('NPC cop look owns the only paddle; player remains paddle-free and cop is not selectable', () => {
+  assert.equal(riderLook('cop'), COP_LOOK);
+  assert.equal(PLAYABLE_RIDERS.includes('cop'), false);
+  const cop = createRidingRig(COP_LOOK);
+  const player = createRidingRig(TROLLINA_LOOK);
+  const paddle = cop.group.getObjectByName('rider-paddle-mesh');
+  assert.ok(paddle);
+  assert.equal(player.group.getObjectByName('rider-paddle-mesh'), undefined);
+  let disposed = 0;
+  paddle.geometry.addEventListener('dispose', () => disposed++);
+  const pose = createPose();
+  cop.applySwing(new THREE.Vector3(1, 1, 1), 0, 1);
+  cop.apply(pose);
+  assert.ok(paddle.parent.visible, 'aiming shows the held paddle');
+  assert.ok(paddle.matrixWorld.elements.every(Number.isFinite));
+  cop.applySwing(null, 0, 0);
+  cop.apply(pose);
+  assert.equal(paddle.parent.visible, false);
+  cop.dispose();
+  player.dispose();
+  assert.equal(disposed, 1);
+});

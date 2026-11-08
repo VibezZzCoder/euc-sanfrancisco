@@ -1337,6 +1337,19 @@ function createTrafficSystem(scene, sidewalks, obstacles, opts = {}) {
     return true;
   }
 
+  // Temporary spawn-only exclusions for a checked discontinuous player arrival. Existing actors
+  // keep their routes and can move normally; unsuccessful spawn attempts retain their old actor.
+  let spawnExclusions = [];
+  function setSpawnExclusions(circles = []) {
+    if (!Array.isArray(circles) || !circles.every(c => c && [c.x, c.z, c.radius].every(Number.isFinite) && c.radius >= 0)) {
+      throw new TypeError('invalid traffic spawn exclusions');
+    }
+    spawnExclusions = circles.map(({ x, z, radius }) => ({ x, z, radius }));
+  }
+  function spawnExcluded(x, z, extent) {
+    return spawnExclusions.some(c => Math.hypot(x - c.x, z - c.z) < c.radius + extent);
+  }
+
   function place(v, e, lane, s) {
     v.edge = e;
     v.lane = lane;
@@ -1375,6 +1388,7 @@ function createTrafficSystem(scene, sidewalks, obstacles, opts = {}) {
       const z = e.sz + e.dz * s + e.rz * e.lanes[lane];
       const d = Math.hypot(x - focusX, z - focusZ);
       if (d < rMin || d > rMax || (hidden && visible(x, z, v.half + 4))) continue;
+      if (spawnExcluded(x, z, Math.hypot(v.half, v.halfWidth) + 1)) continue;
       if (player.active && Math.hypot(x - player.x, z - player.z) < 25) continue;
       if (!laneClear(e.occ[lane], s, v.half + 8)) continue;
       place(v, e, lane, s);
@@ -1479,6 +1493,7 @@ function createTrafficSystem(scene, sidewalks, obstacles, opts = {}) {
       const z = track.az + track.uz * t;
       const d = Math.hypot(x - focusX, z - focusZ);
       if (d < rMin || d > rMax || (hidden && visible(x, z, 2))) continue;
+      if (spawnExcluded(x, z, 1)) continue;
       if (crosswalk && track.node.curb.some((q) => Math.hypot(q.x - x, q.z - z) < QUEUE_GAP)) continue;
       pedestrianSocial.reset(p, clock);
       Object.assign(p, track);
@@ -1832,6 +1847,7 @@ function createTrafficSystem(scene, sidewalks, obstacles, opts = {}) {
   // Walking surface around a pedestrian: the terrain, CURB_H higher on the sidewalks; crosswalk tracks start and end
   // with 2 m of sidewalk (the rig steps down and up the curbs)
   const CURB = window.NYC.CURB_H;
+  let presentationClearance = null; // temporary desk stage: drawing only, never routes, occupancy or bodies
   function pedGround(p, x, z) {
     const g = groundAt(x, z);
     if (!p.node) return g + CURB;
@@ -1842,7 +1858,9 @@ function createTrafficSystem(scene, sidewalks, obstacles, opts = {}) {
   // Every rig's gait advances every frame; only those the camera may see (or whose shadow it may see) solve their
   // bone transforms and are drawn, the far ones with the light LOD.
   function renderPed(p, dt) {
-    const draw = !hasView || visible(p.x, p.z, 7);
+    const a = presentationClearance;
+    const onStage = a && p.x >= a.minX && p.x <= a.maxX && p.z >= a.minZ && p.z <= a.maxZ;
+    const draw = !onStage && (!hasView || visible(p.x, p.z, 7));
     const pair = p.conversation, partner = pair && (pair.a === p ? pair.b : pair.a);
     const heading = partner ? Math.atan2(partner.x - p.x, partner.z - p.z) : Math.atan2(p.ux * p.dir, p.uz * p.dir);
     p.rig.update(dt, p.x, p.z, heading, pedGround, p, 0, draw);
@@ -2053,6 +2071,8 @@ function createTrafficSystem(scene, sidewalks, obstacles, opts = {}) {
   return {
     group,
     update,
+    setSpawnExclusions,
+    setPresentationClearance(area) { presentationClearance = area; },
     dynamicBodiesNear: bodyIndex.dynamicBodiesNear,
     bodyVersion: bodyIndex.bodyVersion,
     bodyQueryStats: bodyIndex.stats,

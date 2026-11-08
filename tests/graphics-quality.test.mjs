@@ -8,6 +8,7 @@ import * as TSL from '../vendor/three/build/three.tsl.js';
 import { createGraphicsQualityPreference, createGraphicsQuality, GRAPHICS_QUALITY_KEY } from '../js/graphics-quality.js';
 import { createFramePacer, frameRateHealth } from '../js/frame-rate.js';
 import { menuOwner } from '../js/game-menu.js';
+import { createBookingDirector } from '../js/booking.js';
 
 const read = name => readFileSync(new URL(`../js/${name}.js`, import.meta.url), 'utf8');
 const main = read('main');
@@ -250,10 +251,13 @@ function hostFixture() {
     compileAsync: () => native.promise, dispose: () => f.order.push('renderer-dispose') });
   const env = { ...f.env, ...f, menuOwner, frameRateHealth,
     framePacer: createFramePacer('30'), frameRatePreference: { value: '30' },
-    document: { hidden: false, getElementById: () => control },
+    document: { hidden: false, hasFocus: () => true, getElementById: () => control },
     startup: { failed: false, onStop(fn) { cleanup = fn; } },
     graphicsFailed: error => { failures.push(error); env.startup.failed = true; },
     titleScreen: { isOpen: false, started: true, update: noop }, gameMenu: { isOpen: false, updateGamepad: noop },
+    booking: createBookingDirector(),
+    bookingScreen: { setSuspended: value => calls.push(['suspended', value]), updateGamepad: noop, update: noop },
+    bookingScene: { update: () => null }, nemesis: null, retireBookingSpawnProtection: noop,
     controllerManager: { getActiveEntity: () => entity, update: () => calls.push('simulation'),
       setInputEnabled: noop, resetInput: noop, keys: {} },
     gamepadControls: { update: noop, setEnabled: noop, reset: noop },
@@ -271,6 +275,7 @@ function hostFixture() {
   const runtime = evaluate(`let rendererBusy = false, stopped = false, pageAway = false, runtimeCompile = null;
     let rendererInit = null, compileWork = null, firstFrameWork = null, riderPreparationWork = null;
     let dirtyView = false, lastOwner = null, lifecycleReady = false, currentFps = 0;
+    let windowFocused = true, bookingSuspended = false, bookingClearancePending = false;
     let lastTime = null, elapsed = 0, titleElapsed = 0, frameCount = 0, fpsTimer = 0, nextPlayerSave = Infinity, warmedUp = true;
     ${section('  function owner()', '  function compileRider(')}
     ${section('  function compileRider(', '  const riderSelection =')}
@@ -329,6 +334,25 @@ test('FPS-skipped frames retain effects while dirty menu/map frames apply qualit
   f.env.gameMenu.isOpen = false; f.env.mapSystem.isFullMapOpen = true; f.change('high'); f.step(20);
   assert.equal(f.graphics.value, 'high'); assert.equal(f.pipelines[0].renders, 2);
   f.step(25); assert.equal(f.pipelines[0].renders, 2, 'unchanged frozen map draws no extra frame');
+  assert.equal(f.calls.filter(call => call === 'simulation').length, ridingSteps);
+  assert.deepEqual(f.failures, []); f.graphics.dispose();
+});
+
+test('booking owns quality submissions and suspends its clock when focus is lost', () => {
+  const f = hostFixture(); f.step(0);
+  const ridingSteps = f.calls.filter(call => call === 'simulation').length;
+  assert.equal(f.env.booking.start('Rider', 3), true);
+  f.change('low'); f.step(20);
+  assert.equal(f.graphics.value, 'low'); assert.equal(f.pipelines[1].renders, 1);
+  const age = f.env.booking.state.age;
+  f.env.document.hasFocus = () => false;
+  f.change('high'); f.step(40);
+  assert.equal(f.env.booking.state.age, age);
+  assert.deepEqual(f.calls.filter(call => Array.isArray(call)).at(-1), ['suspended', true]);
+  assert.equal(f.graphics.value, 'high');
+  f.env.document.hasFocus = () => true; f.step(60);
+  assert.ok(f.env.booking.state.age > age);
+  assert.deepEqual(f.calls.filter(call => Array.isArray(call)).at(-1), ['suspended', false]);
   assert.equal(f.calls.filter(call => call === 'simulation').length, ridingSteps);
   assert.deepEqual(f.failures, []); f.graphics.dispose();
 });

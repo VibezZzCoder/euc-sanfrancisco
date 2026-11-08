@@ -8,9 +8,9 @@ between the rules are excerpts copied **verbatim** (grouping headings adapted) f
 read that file for the complete upstream notice. The MIT licence text is in `js/euc/LICENSE`. Edition-specific
 scope, adaptations and rights summaries follow the second rule; they do not amend the upstream grants.
 
-**SF local adaptation, 2026-11-01:** this notice carries the reviewed eleven-rider baseline and unchanged source
-audio copies adapted through the owner's NYC destination. It does not assert a new identity/asset grant or a public
-SF release. The full intended regional destination scope remains mandatory before first publication.
+**SF adaptation:** this notice carries the reviewed eleven-rider baseline and source audio copies adapted through
+the owner's NYC destination. It does not assert a new identity or asset grant. SF is an Early Access destination;
+see its public README and player guide for the current features and testing limitations.
 [Fork authors and coding agents: start here](FORK_GUIDE.md).
 
 ---
@@ -57,10 +57,10 @@ If you use this project's original assets under CC BY 4.0, attribute as:
 
 ## SF destination and owner permission position
 
-**SF Spin-off: EUC Thrills** is a provisional owner-maintained city destination within EUC Thrills, adapted from
-Kamil's San Francisco world, itself derived from Mr.doob's New York world. The SF implementation is local and
-in progress. The intended main-menu journey uses same-tab navigation to a separately hosted game; no live SF link,
-publication, physical-device acceptance or completed regional-route acceptance is claimed here.
+**SF Spin-off: EUC Thrills** is an owner-maintained Early Access city destination within EUC Thrills, adapted from
+Kamil's San Francisco world, itself derived from Mr.doob's New York world. It is separately hosted, with same-tab
+navigation to the EUC Thrills main menu. The public README describes current hosting and testing limitations;
+this notice does not claim comprehensive physical-device or regional-route acceptance.
 
 VibezZzCoder considers the participants' existing EUC Thrills permissions applicable to this SF destination and
 has authorized the reviewed full-roster content on that basis. **This records the owner's position, not independent
@@ -105,8 +105,8 @@ Only the public identities below are credited; no additional legal/private ident
 | Wyldist | `wyldist` | `wyldist` | Real persona, chosen name; [@wyldist](https://www.instagram.com/wyldist/). Participated directly, supplied references and crash clip; its exclamations are the filming companion's, not his. Separately owned SMLS mark below. |
 | Gnarwheel | `gnarwheel` | `gnarwheel` | Real persona; [@\_gnarwheel\_](https://www.instagram.com/_gnarwheel_/). Participated, supplied copyrighted logo, crash and spoken recordings. |
 
-**Officer Dorkins (`cop`) is not a playable rider.** NYC-style pursuit/booking and looks are planned for SF after its
-initial release; this notice does not claim they are implemented in SF. He is a fictional original character, not a real officer; generic
+**Officer Dorkins (`cop`) is not a playable rider.** SF includes his NYC-derived look, pursuit and booking behavior,
+adapted to its city and terrain. He is a fictional original character, not a real officer; generic
 police styling conveys no real force's identity. Cool Rider, Trollina, The Drunkard and the cop's original geometry
 and project-authored asset work fall within the original-asset grant, with audio exceptions below. The grant over
 project-authored geometry/materials does not license the real participants' identities.
@@ -139,8 +139,8 @@ outside the distribution. His original fictional design has no real brewery iden
 ## Audio rights — per file and per layer
 
 All filenames below have the `.wav` extension in `audio/euc/`. The [provenance inventory](audio/euc/PROVENANCE.md)
-records upstream paths and SHA-256 values for the **15 installed WAVs** (18 source entries reviewed; both sirens
-and offroad tyre are unshipped). Preserve source
+records upstream paths and SHA-256 values for the **17 installed WAVs** (18 source entries reviewed; the offroad
+tyre is unshipped). Preserve source
 recordings/treatment; a crash filename does not establish whose voice it contains or which licence applies.
 
 | File(s) | Provenance and standing |
@@ -155,7 +155,7 @@ recordings/treatment; a crash filename does not establish whose voice it contain
 | `crash_trollina`, `crash_drunkard`, `stumble_drunkard` | Project-composed synthesized slapstick layers; original authored layers CC BY 4.0. Vocal beats are machine-generated with OpenAI `gpt-audio`, cut/retimed/pitch-shifted and mixed; no copyright is claimed over that vocal layer, and these files are excluded from the blanket CC BY claim. Source describes redistribution with the build, **not a separate broad licence**. Replace for a clean independently licensed audio set. Drunkard's stumble is 0.4 s, synthesized clanks plus generated hic; no real person's voice is in his sounds. |
 | `overspeed_beep`, `tyre_solid_loop` | Original synthesis, CC BY 4.0. Beep rebuilt from measurements (2565 Hz plus second harmonic), no reference-video audio copied; solid tyre synthesized from scratch. |
 | `wind_howl_loop` | [swiftoid, Freesound #117611](https://freesound.org/people/swiftoid/sounds/117611/), CC0, trimmed/filtered/loop-processed. |
-| `siren_far_loop`, `siren_close_loop` — **unshipped** | [TitanKaempfer #746302](https://freesound.org/people/TitanKaempfer/sounds/746302/) and [vlammenos #52906](https://freesound.org/people/vlammenos/sounds/52906/), CC0, loop-processed. Historical source provenance retained; reserved for post-initial-release Dorkins work. |
+| `siren_far_loop`, `siren_close_loop` | [TitanKaempfer #746302](https://freesound.org/people/TitanKaempfer/sounds/746302/) and [vlammenos #52906](https://freesound.org/people/vlammenos/sounds/52906/), CC0, loop-processed. Restored for the SF Dorkins integration. |
 
 The source's CC0 offroad tyre loop ([gadesound #697049](https://freesound.org/people/gadesound/sounds/697049/)) is
 **not in this inherited audio inventory**. CC0 needs no attribution; the entries above preserve provenance. Motor, hop,
@@ -184,9 +184,10 @@ Generated headers and `js/euc/MANIFEST.json` identify both revisions, donor sele
 the actual eager/deferred graph and local adaptations. Do not hand-edit `js/euc/`; generation is owned by
 `tools/vendor-euc.mjs` and requires the exact public source snapshots. This is a focused code adaptation rather than
 a broad engine/source migration. The reviewed roster, appearance/mark closure and audio remain from the base
-snapshot, including **18 reviewed source audio entries / 15 installed WAVs**. Both sirens and the offroad tyre are
-unshipped. The generated graph contains **100 modules / 40 eager / 60 deferred**, with the exclusive NPC look/metadata
-and hidden player-paddle closure pruned. The audio provenance identifies source treatment, not SF gameplay acceptance.
+snapshot, including **18 reviewed source audio entries / 17 installed WAVs**. The offroad tyre is unshipped. The
+generated graph contains **101 modules / 41 eager / 60 deferred**. The NPC look and paddle are restored for the
+SF Dorkins integration; the paddle is constructed for the cop only and his metadata remains outside the playable roster.
+The audio provenance identifies source treatment, not SF gameplay acceptance.
 Selected CPU-only pixel workers and bounded
 rig/audio preparation are carried into SF. [Public provenance](provenance/README.md) records the NYC donor revisions
 and copied-byte hashes before SF changes.
@@ -195,10 +196,10 @@ and copied-byte hashes before SF changes.
   trees, traffic, pedestrians, transit, waterfront and regional support. Presentation-only near-solid clearance
   does not move physical controller state. Stock EUC tuning and the **0.216 m** step-up limit remain; SF's drawn
   kerbs are **0.15 m**, not Manhattan's 0.22 m. Real grades and absolute elevations are preserved.
-- The copied controller capability code does not establish an authored SF skate venue. NYC's Jefferson/Pier 62
-  locations, Dorkins chase/booking shell and the original EUC Thrills game modes/levels/built `docs/` distribution
-  are not imported as a second game. Dorkins/booking is scheduled after initial SF release; authored SF venues
-  remain separate scope. Native integrated behavior and manual game feel still need SF-specific acceptance.
+- The copied controller capability code alone does not establish an authored SF skate venue. SF's UN and Zion parks
+  adapt NYC's Jefferson/Pier 62 feature designs to SF; they are not copies of those NYC locations. SF also adapts
+  NYC's Dorkins chase/booking behavior. The original EUC Thrills game modes/levels/built `docs/` distribution are not
+  imported as a second game. SF-specific behavior and game feel remain subject to the project's stated testing limits.
 - Machines are fictional project designs, sometimes personalized from participant reference colours/forms, not
   commercial shells or manufacturer identities. Kit excludes manufacturer marks; reviewed identity marks above are
   the narrow exception. No manufacturer affiliation, sponsorship or endorsement is implied. Participation is not

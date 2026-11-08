@@ -595,6 +595,12 @@ export const BLOCKOUT_COLOURS = {
     trollinaSkin: 0xc08e6e,
     trollinaFace: 0xf2ece1,
     trollinaGear: 0x2c2e34,
+    copShirt: 0x1e2a4c,
+    copHiVis: 0xd8c22a,
+    copBand: 0x2d6da8,
+    copHelmet: 0xdfe2e6,
+    copSkin: 0xe2ab82,
+    copGear: 0x2f3138,
     redRiderSuit: 0xba262b,
     redRiderHelmet: 0xd4333a,
     redRiderVisor: 0x1b1d22,
@@ -699,6 +705,7 @@ export const BLOCKOUT_COLOURS = {
     gate: 0x2f7fe8,
     gatePassed: 0x1a3c66,
     gateFinish: 0xffd23f,
+    paddle: 0xe86a2f,
     target: 0xf2c14a,
 };
 export const FX = {

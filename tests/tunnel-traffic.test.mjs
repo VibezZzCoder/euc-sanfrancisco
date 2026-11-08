@@ -22,7 +22,8 @@ const digest = value => sha(JSON.stringify(value, (_, v) => typeof v === 'number
 const FROZEN = Object.freeze({
   roadSource: 'bb55891475d2a06bdf16d6475cdad80b99d73b783960a8f0d56a4861d7ab81fb',
   gradeSource: '9ff431f3790e84843cf978907e6afed8eb575c091b5b16e9e5e2beb702c8fb09',
-  trafficSource: '68f3b7312eef5553f932bbc03d1b39a1cde2617d02a1ad11942a86c37402d3b6',
+  // Booking adds spawn-only exclusions and pedestrian draw clearance; routing and pose checks remain frozen below.
+  trafficSource: 'c6e9beb14bc82d67fd9d1e7482c45803e7fe301621b1f0ea7261e141c91fa5f3',
   graph: 'f702c29efb17b09eb0d9024391f1b2545d55dca22a2b21f8ad27cf2cb5c18c8d',
   baselineRouting: '2c6ac0523f4fd067c3d60afe9af57ee23a11424cc3602efc1125f57113501a7f', // 67f0686, not the candidate
   tunnels: 'b65fe8d264ce76951ab84af4f57650830391c8c7753ef5107cc30b8098972c3a',
