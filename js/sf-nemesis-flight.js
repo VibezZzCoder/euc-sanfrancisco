@@ -41,8 +41,14 @@ export function createSfFlightQueries(sampler) {
    * thin physical walls are not skipped between volume samples. Never infer a
    * floor from the globally highest surface.
    */
-  function clearFlight(a, b, { halfWidth = 0.4, halfLength = 0.4, height = 2.1, step = 0.5 } = {}) {
-    if (!finitePoint(a) || !finitePoint(b) || ![halfWidth, halfLength, height, step].every(Number.isFinite)
+  // Per-adapter scratch: clearFlight runs several times per officer frame, so it reuses its query
+  // body/ray endpoints instead of allocating ~20 objects per call. Same queries, same order.
+  const body = { x: 0, z: 0, headingY: 0, halfWidthMetres: 0, halfLengthMetres: 0, minY: 0, maxY: 0, floorY: 0 };
+  const lateral = { x: 0, z: 0 }, from = { x: 0, y: 0, z: 0 }, to = { x: 0, y: 0, z: 0 };
+  const NO_OPTIONS = Object.freeze({});
+  function clearFlight(a, b, { halfWidth = 0.4, halfLength = 0.4, height = 2.1, step = 0.5 } = NO_OPTIONS) {
+    if (!finitePoint(a) || !finitePoint(b) || !Number.isFinite(halfWidth) || !Number.isFinite(halfLength)
+      || !Number.isFinite(height) || !Number.isFinite(step)
       || halfWidth <= 0 || halfLength <= 0 || height <= 0 || step <= 0) return false;
     const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
     const distance = Math.hypot(dx, dy, dz);
@@ -52,38 +58,39 @@ export function createSfFlightQueries(sampler) {
     const headingY = horizontal > 1e-8 ? Math.atan2(dx, dz) : 0;
     const sideX = Math.cos(headingY), sideZ = -Math.sin(headingY);
     const forwardX = Math.sin(headingY), forwardZ = Math.cos(headingY);
-    const body = { x: 0, z: 0, headingY, halfWidthMetres: halfWidth, halfLengthMetres: halfLength,
-      minY: 0, maxY: 0, floorY: 0 };
+    body.headingY = headingY; body.halfWidthMetres = halfWidth; body.halfLengthMetres = halfLength;
     const count = Math.max(1, Math.ceil(distance / step));
     for (let i = 0; i <= count; i++) {
       const t = i / count;
-      body.x = a.x + dx * t; body.z = a.z + dz * t;
-      body.minY = a.y + dy * t; body.maxY = body.minY + height; body.floorY = body.minY;
-      const center = sampler.sampleGround(body.x, body.z, ground, body.minY);
-      if (!Number.isFinite(center.height) || (!center.offCourse && center.height > body.minY + 1e-4)) return false;
+      const x = a.x + dx * t, z = a.z + dz * t, minY = a.y + dy * t;
+      const center = sampler.sampleGround(x, z, ground, minY);
+      if (!Number.isFinite(center.height) || (!center.offCourse && center.height > minY + 1e-4)) return false;
       // Predict each corner's reference from the selected centre plane, so steep
       // continuous floors remain selectable without ever querying at infinity.
       const normal = center.normal;
       const nx = normal?.x, ny = normal?.y, nz = normal?.z;
       const gx = Number.isFinite(nx) && Number.isFinite(ny) && ny > 1e-8 ? -nx / ny : 0;
       const gz = Number.isFinite(nz) && Number.isFinite(ny) && ny > 1e-8 ? -nz / ny : 0;
-      for (const side of [-halfWidth, halfWidth]) for (const forward of [-halfLength, halfLength]) {
+      for (let c = 0; c < 4; c++) {
+        const side = c < 2 ? -halfWidth : halfWidth, forward = c & 1 ? halfLength : -halfLength;
         const ox = sideX * side + forwardX * forward, oz = sideZ * side + forwardZ * forward;
-        const corner = supportAt(body.x + ox, body.z + oz, body.minY + gx * ox + gz * oz);
-        if (!corner || (!corner.offCourse && corner.height > body.minY + 1e-4)) return false;
+        const corner = supportAt(x + ox, z + oz, minY + gx * ox + gz * oz);
+        if (!corner || (!corner.offCourse && corner.height > minY + 1e-4)) return false;
       }
+      body.x = x; body.z = z; body.minY = minY; body.maxY = minY + height; body.floorY = minY;
       if (!sampler.isVolumeClear(body)) return false;
     }
     if (distance < 1e-8) return true;
     direction.x = dx / distance; direction.y = dy / distance; direction.z = dz / distance;
-    const lateral = { x: sideX, z: sideZ };
-    for (const up of [0.02, height / 2, height]) {
-      origin.x = a.x; origin.y = a.y + up; origin.z = a.z;
+    lateral.x = sideX; lateral.z = sideZ;
+    for (let u = 0; u < 3; u++) {
+      origin.x = a.x; origin.y = a.y + (u === 0 ? 0.02 : u === 1 ? height / 2 : height); origin.z = a.z;
       if (sampler.raycastObstacle(origin, direction, distance, halfWidth, lateral) !== null) return false;
     }
-    for (const side of [-halfWidth, 0, halfWidth]) for (const up of [0.02, height]) {
-      const from = { x: a.x + sideX * side, y: a.y + up, z: a.z + sideZ * side };
-      const to = { x: b.x + sideX * side, y: b.y + up, z: b.z + sideZ * side };
+    for (let k = 0; k < 6; k++) {
+      const side = k < 2 ? -halfWidth : k < 4 ? 0 : halfWidth, up = k & 1 ? height : 0.02;
+      from.x = a.x + sideX * side; from.y = a.y + up; from.z = a.z + sideZ * side;
+      to.x = b.x + sideX * side; to.y = b.y + up; to.z = b.z + sideZ * side;
       if (!clearLine(from, to)) return false;
     }
     return true;

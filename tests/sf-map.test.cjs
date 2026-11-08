@@ -619,26 +619,32 @@ for (const dpr of [1, 1.5, 2]) test(`officer label avoids retained static labels
     assert.equal(builds, count);
     assert.ok(calls.some(c => c[0] === 'fillText' && c[1] === 'Dorkins' && c[2] === 79 && c[3] === expectedY));
   }
-  // None of the four candidates may cover the new names.
-  active = blockers; map.searchHighlight = 'all blocked';
+  // All four sides blocked: a clear diagonal (top-right first) is used.
+  active = blockers; map.searchHighlight = 'sides blocked';
   calls.length = 0; map.renderFullMap();
   assert.equal(builds, 4); assert.notEqual(map.fullStaticPlaced, retained);
+  assert.ok(calls.some(c => c[0] === 'fillText' && c[1] === 'Dorkins' && c[2] === 114 && c[3] === -15), 'diagonal label');
+  // None of the eight candidates may cover the new names.
+  active = [...blockers, [105, -40, 200, -5], [0, -40, 95, -5], [105, 5, 200, 40], [0, 5, 95, 40]];
+  map.searchHighlight = 'all blocked';
+  calls.length = 0; map.renderFullMap();
+  assert.equal(builds, 5);
   assert.ok(!calls.some(c => c[0] === 'fillText' && c[1] === 'Dorkins'), 'all blocked hides label');
   assert.ok(calls.some(c => c[0] === 'arc' && c[1] === 100 && c[2] === 0 && c[3] === 7), 'icon remains visible');
   active = []; map.viewCenterX = 1;
   calls.length = 0; map.renderFullMap();
-  assert.equal(builds, 5);
+  assert.equal(builds, 6);
   assert.ok(calls.some(c => c[0] === 'fillText' && c[1] === 'Dorkins' && c[2] === 113), 'new view drops stale boxes');
 
   const beforeResize = map.fullStaticPlaced;
   map.fullCanvas.width += 100;
   calls.length = 0; map.renderFullMap();
-  assert.equal(builds, 6); assert.notEqual(map.fullStaticPlaced, beforeResize);
+  assert.equal(builds, 7); assert.notEqual(map.fullStaticPlaced, beforeResize);
   // Even if backing dimensions happen to stay equal, DPR changes the CSS-pixel viewport and bounds.
   const previous = map.fullStaticPlaced;
   map.fullDpr = dpr * 1.25;
   calls.length = 0; map.renderFullMap();
-  assert.equal(builds, 7); assert.notEqual(map.fullStaticPlaced, previous);
+  assert.equal(builds, 8); assert.notEqual(map.fullStaticPlaced, previous);
   assert.equal(h.canvases(), canvasCount);
 });
 
@@ -795,4 +801,17 @@ test('skateboard selection uses 12 CSS pixels, preserves ordinary 8px pins and c
     assert.equal(h.map.teleportToPoint(point, landmark), false);
     assert.equal(h.map.waypoint, accepted);
   }
+});
+
+test('officer label does not cover the live full-map waypoint', () => {
+  const h = markerHarness(1), { map, calls } = h;
+  map.viewCenterX = map.viewCenterZ = 0; map.viewZoom = 1;
+  map.chaser = chasingOfficer(100, 0); map.waypoint = { x: 125, z: 0 };
+  map.renderFullMap();
+  const textIndex = calls.findIndex(c => c[0] === 'fillText' && c[1] === 'Dorkins');
+  assert.ok(textIndex >= 0, 'a clear side remains available');
+  const box = calls.slice(0, textIndex).findLast(c => c[0] === 'fillRect');
+  const [, x, y, w, hgt] = box;
+  const dx = Math.max(x - 125, 0, 125 - x - w), dy = Math.max(y, 0, -y - hgt);
+  assert.ok(dx * dx + dy * dy >= 81, `label ${JSON.stringify(box)} overlaps waypoint`);
 });

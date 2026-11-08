@@ -18,6 +18,11 @@ const SEARCHLIGHT = Object.freeze({ intensity: 260, distance: 40, angle: 0.3, pe
 const FACE = PADDLE.reach * 0.62;
 // Includes the outstretched paddle, hover bob, lean and the shadow quad's maximum visible extent.
 const RIG_BOUND = 3.5, SHADOW_BOUND = 2.3;
+// The shadow is fully transparent at this height; it is then hidden so it neither draws nor
+// counts as visible presentation that would hold a departure indefinitely.
+const SHADOW_FADE = 12;
+// After this long held in view, a departure beyond HOLD_FAR metres from the camera may retire.
+const HOLD_LIMIT = 30, HOLD_FAR = 150;
 const finite = p => p && [p.x, p.y, p.z].every(Number.isFinite);
 const beamScale = () => Math.max(0, Math.min(1.28, ((globalThis.window?.NYC?.cityUniforms?.uInteriorGlow?.value ?? 0) - 0.60) * 1.45));
 
@@ -84,7 +89,7 @@ function hoverShadow() {
   return { mesh, place(x, y, z, height) {
     const h = Math.max(0, height), size = 1.1 + h * 0.15;
     mesh.position.set(x, y + 0.03, z); mesh.scale.set(size, 1, size);
-    strength.value = 0.6 * Math.max(0, 1 - h / 12);
+    strength.value = 0.6 * Math.max(0, 1 - h / SHADOW_FADE);
   }, dispose() { mesh.removeFromParent(); mesh.geometry.dispose(); material.dispose(); } };
 }
 
@@ -107,12 +112,12 @@ export function createSfNemesis({ scene, sampler, network, getPlayer, camera }) 
   const light = new THREE.SpotLight(0xe8f2ff, 0, SEARCHLIGHT.distance, SEARCHLIGHT.angle, SEARCHLIGHT.penumbra, SEARCHLIGHT.decay);
   light.name = 'nemesis-searchlight'; light.castShadow = false; scene.add(light, light.target);
   const frustum = new THREE.Frustum(), projection = new THREE.Matrix4(), sphere = new THREE.Sphere(new THREE.Vector3(), 1.5);
-  const head = new THREE.Vector3(), face = new THREE.Vector3();
+  const head = new THREE.Vector3(), face = new THREE.Vector3(), departCamera = new THREE.Vector3();
   const facts = { riding: false, crashed: false, distance: Infinity, sees: false, inView: false };
   const audioView = { present: false, chasing: false, x: 0, z: 0, range: Infinity, closing: 0, speed: 0,
     chaseTime: 0, sting: 0, windup: 0, swing: 0, hit: 0, swinging: false, pan: 0 };
   let active = false, booking = false, warming = false, disposed = false, time = 0, lastRange = Infinity;
-  let departure = null, departRetry = 0;
+  let departure = null, departRetry = 0, heldTime = 0;
   let observedPlayer = null, observedController = null, serial, wasCrashed = false, wasRecovering = false;
   const observedPosition = { x: 0, y: 0, z: 0 };
   const stage = { x: 0, y: 0, z: 0, heading: 0, speed: 0, bank: 0, pitch: 0 };
@@ -122,7 +127,7 @@ export function createSfNemesis({ scene, sampler, network, getPlayer, camera }) 
     light.distance = SEARCHLIGHT.distance; light.decay = SEARCHLIGHT.decay; light.color.set(0xe8f2ff);
   }
   function hide() {
-    active = booking = warming = false; departure = null; departRetry = 0;
+    active = booking = warming = false; departure = null; departRetry = 0; heldTime = 0;
     rig.group.visible = shadow.mesh.visible = false; resetLight();
     audioView.present = audioView.chasing = audioView.swinging = false;
     audioView.range = Infinity; audioView.closing = 0; lastRange = Infinity;
@@ -152,7 +157,8 @@ export function createSfNemesis({ scene, sampler, network, getPlayer, camera }) 
     rig.applySwing(head, swing.angle, commit); rig.apply(pose); rig.applyStatus(0, time, 1);
     hover.update(time, f.speed, swing.phase === 'windup');
     const floor = queries.supportAt(f.x, f.z, f.y);
-    shadow.mesh.visible = (active || warming) && !!floor && !floor.offCourse && !floor.water && floor.height <= f.y;
+    shadow.mesh.visible = (active || warming) && !!floor && !floor.offCourse && !floor.water && floor.height <= f.y
+      && f.y - floor.height < SHADOW_FADE;
     if (shadow.mesh.visible) shadow.place(f.x, floor.height, f.z, f.y - floor.height);
   }
   function observe(p) {
@@ -219,13 +225,14 @@ export function createSfNemesis({ scene, sampler, network, getPlayer, camera }) 
   function depart(dt) {
     const f = brain.state;
     departRetry -= dt;
-    if (departure && Math.hypot(f.x - departure.x, f.z - departure.z) < 1) { departure = null; departRetry = 0; }
+    // 3D: a vertical climb shares the flyer's X/Z and is reached only at its altitude.
+    if (departure && Math.hypot(f.x - departure.x, f.y - departure.y, f.z - departure.z) < 1) { departure = null; departRetry = 0; }
     if (departRetry <= 0) {
       departRetry = 2;
       const up = { x: f.x, y: f.y + 3, z: f.z };
       if (queries.clearFlight(f, up)) departure = { x: f.x, y: f.y + 30, z: f.z };
       else {
-        const cam = new THREE.Vector3(); camera.getWorldPosition(cam);
+        const cam = camera.getWorldPosition(departCamera);
         const away = Math.atan2(f.x - cam.x, f.z - cam.z);
         departure = null;
         for (const delta of [0, Math.PI / 4, -Math.PI / 4, Math.PI / 2, -Math.PI / 2, 3 * Math.PI / 4, -3 * Math.PI / 4, Math.PI]) {
@@ -295,11 +302,17 @@ export function createSfNemesis({ scene, sampler, network, getPlayer, camera }) 
       } else parkLight();
       facts.distance = Math.hypot(p.position.x - f.x, p.position.y - f.y, p.position.z - f.z);
       if (director.state.phase === 'leaving') refreshFrustum();
-      facts.inView = director.state.phase === 'leaving' && presentationInView(f.x, f.y, f.z,
-        shadow.mesh.visible ? shadow.mesh.position.y : null);
+      // A long-held departure (e.g. sealed under a roof while watched) may retire once it is only a
+      // distant speck: never a visible pop at close range, never an indefinite hold.
+      const leaving = director.state.phase === 'leaving';
+      heldTime = leaving ? heldTime + (facts.inView ? dt : 0) : 0;
+      facts.inView = leaving && presentationInView(f.x, f.y, f.z, shadow.mesh.visible ? shadow.mesh.position.y : null)
+        && (heldTime < HOLD_LIMIT || camera.getWorldPosition(departCamera).distanceTo(sphere.center.set(f.x, f.y, f.z)) < HOLD_FAR);
       // The shared director has an eight-second timeout even when visible. Advance its departure
       // clock only while the entire presentation is out of view; never pop away under a roof.
-      if ((!facts.inView || director.state.phase !== 'leaving') && director.update(dt, facts) === 'gone') { hide(); return status(); }
+      // A held departure still ages the escape banner.
+      if (facts.inView && director.state.phase === 'leaving') director.hold(dt);
+      else if (director.update(dt, facts) === 'gone') { hide(); return status(); }
       const range = facts.distance, closing = Number.isFinite(lastRange) ? (lastRange - range) / dt : 0;
       audioView.present = true; audioView.chasing = director.state.phase === 'chasing';
       audioView.x = f.x; audioView.z = f.z; audioView.range = range;

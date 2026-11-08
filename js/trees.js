@@ -1170,6 +1170,23 @@ function createTreeField(scene, sites) {
     publish(false); // standalone API always exposes raw selected LOD, including after a filtered view
     return changed;
   }
+  // Plane snapshot of the last published union (six normals+constants per frustum).
+  let unionPlanes = new Float64Array(72), unionCount = 0;
+  function rememberUnion() {
+    if (unionPlanes.length < frustumCount * 24) unionPlanes = new Float64Array(frustumCount * 24);
+    for (let f = 0, k = 0; f < frustumCount; f++) for (const p of frusta[f].planes) {
+      unionPlanes[k++] = p.normal.x; unionPlanes[k++] = p.normal.y; unionPlanes[k++] = p.normal.z; unionPlanes[k++] = p.constant;
+    }
+    unionCount = frustumCount;
+  }
+  function sameUnion() {
+    if (unionCount !== frustumCount) return false;
+    for (let f = 0, k = 0; f < frustumCount; f++) for (const p of frusta[f].planes) {
+      if (unionPlanes[k++] !== p.normal.x || unionPlanes[k++] !== p.normal.y || unionPlanes[k++] !== p.normal.z
+        || unionPlanes[k++] !== p.constant) return false;
+    }
+    return true;
+  }
   const viewPos = new V3(), prevBeforeRender = scene.onBeforeRender;
   scene.onBeforeRender = function (renderer, scn, camera, target) {
     prevBeforeRender.call(this, renderer, scn, camera, target);
@@ -1178,8 +1195,15 @@ function createTreeField(scene, sites) {
     if (camera.isOrthographicCamera === true) return;
     if (!scene.visible || renderer?._precompilationState != null) return;
     if (camera.isArrayCamera === true) { retireStandins(); publish(false); return; }
-    selectLod(viewPos.setFromMatrixPosition(camera.matrixWorld));
-    retireStandins(); publish(camera.isPerspectiveCamera === true && prepareUnion(camera));
+    const changed = selectLod(viewPos.setFromMatrixPosition(camera.matrixWorld));
+    const pending = startupStandins.length > 0;
+    retireStandins();
+    const union = camera.isPerspectiveCamera === true && prepareUnion(camera);
+    // publish() is a pure function of LOD, static spheres and the frusta; with all three unchanged
+    // since the last union publish it would only re-classify every cell to identical drawn state.
+    if (union && !changed && !pending && filtering && sameUnion()) return;
+    publish(union);
+    if (union) rememberUnion(); else unionCount = 0;
   };
   update(new V3(0, 10, 140));
   for (let mi = 0; mi < 30; mi++) {

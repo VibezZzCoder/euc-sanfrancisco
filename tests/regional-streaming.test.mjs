@@ -83,6 +83,8 @@ baselineTest('regional streaming: pinned loader, exact normals and non-terrain a
       const x=ax+dx*(a+b)/2,z=az+dz*(a+b)/2;`,
   '      const a=i*length/n,b=(i+1)*length/n,x=ax+dx*(a+b)/2,z=az+dz*(a+b)/2;');
   undo('      }\n      }\n    }\n  }\n  const roadMeshes=[];', '      }\n    }\n  }\n  const roadMeshes=[];');
+  // Reviewed 4c44b7f edit: bounded transient-error retry for the manifest (data-loader fetchWithRetry).
+  undo("await (window.NYC.fetchWithRetry || fetch)('data/region/manifest.json')", "await fetch('data/region/manifest.json')");
   // Core/city installation, collar clipping and boundary LOD now intentionally differ. Keep exact guards on the
   // unchanged decoder, normal arithmetic and actors/paint instead of asserting the old broken hard handoff.
   for(const [start,end] of [['function decodeRegionRLE','function installRegionTerrain'],

@@ -176,7 +176,7 @@ function decodeRegionRLE(runs, count) {
   return mask;
 }
 async function loadSFRegion(fetchBin) {
-  const response = await fetch('data/region/manifest.json');
+  const response = await (window.NYC.fetchWithRetry || fetch)('data/region/manifest.json');
   if (!response.ok) throw Error(`Region manifest: HTTP ${response.status}`);
   const manifest = await response.json();
   if (manifest.version !== 1) throw Error('Unsupported region manifest');
@@ -490,19 +490,59 @@ function buildSFRegion(scene, { paintIntervals = null } = {}) {
   let last=-Infinity, buildingDistance=8500, treeDistance=6000;
   const lastRider={x:Infinity,z:Infinity};
   let disposed=false;
+  // Optional deferred camera-distance LOD (host opt-in through setLodBudget; 0 keeps the original fully synchronous
+  // switch). Seam tiles and every tile within the 250 m rider protection still build and publish in the selecting
+  // update. Only camera-threshold variants that are not cached yet are built in later updates, at least one tile and
+  // at most about `lodBudget` ms per call. Each is the exact geometry() output, held privately (never drawn, cached or
+  // uploaded) until the whole outstanding batch is complete; then all deferred tiles publish together. The drawn
+  // previous LOD stays complete meanwhile. Regional meshes are drawing-only: support/physics never read them.
+  // A later selection that changes a deferred tile's target discards that private result (no cache growth).
+  let lodBudget=0,pending=null;
+  const discard=entry=>{entry.geometry?.dispose();};
+  function cancelPending(){if(!pending)return;for(const entry of pending.values())discard(entry);pending=null;}
+  function drainPending(){
+    if(!pending)return;
+    const start=performance.now();
+    for(const [item,entry]of pending){
+      if(entry.geometry)continue;
+      entry.geometry=geometry(item.g,item.t,entry.stride,false);
+      if(performance.now()-start>=lodBudget)break;
+    }
+    for(const entry of pending.values())if(!entry.geometry)return;
+    for(const [item,entry]of pending){item.geometries.set(entry.stride,entry.geometry);item.mesh.geometry=entry.geometry;item.stride=entry.stride;}
+    pending=null;
+  }
+  function selectStride(item,stride,riderNear){
+    let queued=pending?.get(item);
+    if(queued&&queued.stride!==stride){discard(queued);pending.delete(item);queued=null;}
+    if(stride===item.stride)return;
+    if(!item.geometries.has(stride)){
+      if(lodBudget>0&&!item.seam&&!riderNear){if(!queued)(pending??=new Map()).set(item,{stride,geometry:null});return;}
+      // Original immediate path. A completed private result for the same stride is the identical pure output.
+      const ready=queued&&queued.stride===stride?queued.geometry:null;
+      if(queued)pending.delete(item);
+      item.geometries.set(stride,ready||geometry(item.g,item.t,stride,false));
+    }else if(queued)pending.delete(item);
+    item.mesh.geometry=item.geometries.get(stride);item.stride=stride;
+  }
   // Terminal teardown after render/compile readers drain. Scene traversal owns attached geometry;
   // this owner releases the otherwise unreachable visited-stride variants, without double disposal.
   // No runtime eviction: retain exact LOD selection and avoid unmeasured regeneration stalls.
   function disposeTerrainCache(){
     if(disposed)return;
     disposed=true;
+    cancelPending();
     for(const item of terrain){
       for(const cached of item.geometries.values())if(cached!==item.mesh.geometry)cached.dispose();
       item.geometries.clear();
     }
   }
-  return {group,disposeTerrainCache,setQuality(distance, trees){buildingDistance=distance;treeDistance=trees;last=-Infinity;},stats:()=>({buildings:buildingCount,trees:data.trees.length/4,terrainTiles:terrain.length}),update(camera,elapsed,playerPosition=camera.position){
+  return {group,disposeTerrainCache,setQuality(distance, trees){buildingDistance=distance;treeDistance=trees;last=-Infinity;},
+    setLodBudget(ms){if(disposed)return;lodBudget=Number.isFinite(ms)&&ms>0?ms:0;if(!lodBudget)while(pending)drainPending();},
+    pendingTerrain:()=>pending?pending.size:0,
+    stats:()=>({buildings:buildingCount,trees:data.trees.length/4,terrainTiles:terrain.length}),update(camera,elapsed,playerPosition=camera.position){
     if(disposed)return;
+    drainPending();
     for(const b of boats){
       const cycle=(elapsed*b.route.speed+b.length*b.phase)%(2*b.length),forward=cycle<b.length,d=forward?cycle:2*b.length-cycle;
       let i=1;while(i<b.lengths.length-1&&b.lengths[i]<d)i++;
@@ -515,7 +555,8 @@ function buildSFRegion(scene, { paintIntervals = null } = {}) {
     if(elapsed-last<0.75&&!moved)return;last=elapsed;lastRider.x=rider.x;lastRider.z=rider.z;
     for(const item of terrain){if(item.far)continue;const d=Math.hypot(camera.position.x-item.t.x-item.t.size/2,camera.position.z-item.t.z-item.t.size/2);
       const rd=Math.hypot(Math.max(item.t.x-rider.x,0,rider.x-item.t.x-item.t.size),Math.max(item.t.z-rider.z,0,rider.z-item.t.z-item.t.size));
-      const stride=item.seam||rd<250||d<1600?1:d<4500?2:4;if(stride!==item.stride){if(!item.geometries.has(stride))item.geometries.set(stride,geometry(item.g,item.t,stride,false));item.mesh.geometry=item.geometries.get(stride);item.stride=stride;}}
+      const stride=item.seam||rd<250||d<1600?1:d<4500?2:4;selectStride(item,stride,rd<250);}
+    if(pending&&!pending.size)pending=null;
     for(const mesh of roadMeshes){const c=mesh.geometry.boundingSphere.center;mesh.visible=Math.hypot(camera.position.x-c.x,camera.position.z-c.z)<3000;}
     for(const mesh of buildingMeshes){const c=mesh.boundingSphere.center;mesh.visible=Math.hypot(camera.position.x-c.x,camera.position.z-c.z)<buildingDistance;}
     regionTrees.update(camera.position);

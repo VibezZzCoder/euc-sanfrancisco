@@ -94,6 +94,30 @@ export function sweptContactFraction(ax, ay, az, bx, by, bz, rider, tuning = SWI
   return x * x + z * z <= tuning.hitRadius * tuning.hitRadius ? k : null;
 }
 
+// The whole admitted fraction window {from, to} (height band and hit radius), or null. Lets SF
+// try other in-range poses when the closest one is occluded; each sample is re-admitted exactly.
+export function sweptContactWindow(ax, ay, az, bx, by, bz, rider, tuning = SWING, previous = rider, interval = FULL_FRAME) {
+  let lo = Math.max(0, interval.from), hi = Math.min(1, interval.to);
+  if (lo > hi) return null;
+  ax -= previous.x; ay -= previous.bottom; az -= previous.z;
+  bx -= rider.x; by -= rider.bottom; bz -= rider.z;
+  const dx = bx - ax, dy = by - ay, dz = bz - az;
+  const bottom = -PADDLE.headRadius, top = tuning.riderHeight;
+  if (Math.abs(dy) < 1e-12) {
+    if (ay < bottom || ay > top) return null;
+  } else {
+    const a = (bottom - ay) / dy, b = (top - ay) / dy;
+    lo = Math.max(lo, Math.min(a, b)); hi = Math.min(hi, Math.max(a, b));
+    if (lo > hi) return null;
+  }
+  const A = dx * dx + dz * dz, B = 2 * (ax * dx + az * dz), C = ax * ax + az * az - tuning.hitRadius * tuning.hitRadius;
+  if (A <= 1e-12) return C <= 0 ? { from: lo, to: hi } : null;
+  const disc = B * B - 4 * A * C;
+  if (disc < 0) return null;
+  const root = Math.sqrt(disc), from = Math.max(lo, (-B - root) / (2 * A)), to = Math.min(hi, (-B + root) / (2 * A));
+  return from <= to ? { from, to } : null;
+}
+
 // Sweep the drawn face and rider over the same active fraction of the frame.
 export function sweptHit(ax, ay, az, bx, by, bz, rider, tuning = SWING, previous = rider, interval = FULL_FRAME) {
   return sweptContactFraction(ax, ay, az, bx, by, bz, rider, tuning, previous, interval) !== null;

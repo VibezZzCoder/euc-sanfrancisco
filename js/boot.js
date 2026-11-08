@@ -22,6 +22,17 @@
     window.removeEventListener('error', onError);
     window.removeEventListener('unhandledrejection', onRejection);
   };
+  // A previously hidden overlay is still visibility:hidden while its 0.6 s fade starts, so an
+  // immediate focus() is silently refused. Retry each frame (bounded) until Retry actually holds
+  // focus, without stealing focus the player has already moved elsewhere.
+  const focusRetry = (frame, from = null) => {
+    const active = document.activeElement;
+    if (active === retry || (frame > 0 && active !== from && active && active !== document.body)) return;
+    retry.focus({ preventScroll: true });
+    if (document.activeElement !== retry && frame < 120) {
+      requestAnimationFrame(() => focusRetry(frame + 1, frame ? from : active));
+    }
+  };
   const fail = (error) => {
     if (failed) return false;
     failed = true;
@@ -46,7 +57,7 @@
     try { detail = String(error?.message || error || detail); } catch { /* Error values may be unprintable. */ }
     document.getElementById('startup-detail').textContent = detail;
     panel.hidden = false;
-    retry.focus({ preventScroll: true });
+    focusRetry(0);
     return true;
   };
   // Automatic error capture is startup-only. Main may explicitly call startup.fail after

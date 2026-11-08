@@ -84,10 +84,12 @@ For optional read-only rendering diagnostics, open the game with
 draw calls/triangles, frame-interval mean/p95 and intervals over 50 ms. It samples the last five seconds, up to 600
 intervals, and resets when riding is suspended. These intervals are not GPU timings or proof of displayed FPS.
 
-The latest rendering update reduces offscreen tree/paint submissions and tightens shadow-caster culling. Matched
-desktop views submit about 28–32% fewer triangles at Market and the rooftops, with nearly identical rendered output.
-That percentage is not an FPS gain: controlled desktop riding timings were generally slightly slower, while the
-owner reports better framerate in playtesting. Integrated-GPU and physical-phone benefits remain unverified.
+Recent rendering updates reduce offscreen tree/paint submissions and tighten shadow-caster culling. The latest
+update also stops road markings from being re-copied on almost every moving frame (desktop moving-camera CPU time
+about 11.7→10.0 ms per frame in a controlled test, GPU unchanged) and spreads the first build of distant Golden Gate /
+Twin Peaks scenery over a few frames, removing a 70–140 ms hitch on first arrival (distant scenery may appear a
+moment later). The owner reports a clearly better framerate playing at night with a PS5 controller. Results vary by
+device; integrated-GPU and physical-phone benefits remain unverified.
 
 ## Officer Dorkins
 
@@ -101,9 +103,9 @@ officer appears at the radar's edge to indicate his direction. The marker shows 
 on another level; it disappears when the chase ends and is not a waypoint or arrival target. See the
 [player guide](PLAYER_GUIDE.md#officer-dorkins-experimental) for booking and controller details.
 
-The chase and booking are experimental. The owner has playtested on Ubuntu Chrome with an Xbox controller, Seal
-on a Wheel and blue-hour lighting; broader routes, devices, long sessions and booking fallback transitions still
-need review.
+The chase and booking are experimental. The owner has playtested on Ubuntu Chrome with Xbox and PS5 controllers
+(Seal on a Wheel at blue hour; Wyldist at night). Booking pauses correctly when the window loses focus. Broader
+routes, devices, long sessions and booking fallback transitions still need review.
 
 ## Skateparks
 
@@ -124,8 +126,8 @@ sidewalk access, with smoother vertical joins. The bridge now has connected susp
 supports, lower-tower bracing and an approximate Fort Point arch. Visit **Fort Point** for a view from below.
 
 The bridge's adapted structural details and approach heights are estimates, not a surveyed replica. Owner playtesting
-and focused WebGPU/WebGL2 riding checks cover the repaired approaches and selected sidewalk routes; complete
-automated crossings, night-specific review and physical-device performance remain broader testing work.
+and automated WebGPU/WebGL2 steered crossings of the full roadway centreline in both directions pass; other lanes,
+walkways, night-specific review and physical-device performance remain broader testing work.
 
 ## Known rough spots
 
@@ -140,7 +142,8 @@ This is an early release. Known issues include:
 - **Union Square, Dragon Gate and Fisherman's Wharf** still lack their real character.
 - **Alcatraz and Yerba Buena Island** are undercooked.
 - **Golden Gate Park** has sparse trees.
-- **Long first load:** around 30 seconds on a desktop, longer on slower devices.
+- **Long first load:** around 30 seconds on a desktop, longer on slower devices. Brief hosting errors while
+  downloading city data are now retried automatically.
 - **Dorkins:** chase, booking and map-marker behavior are still being tested across routes and devices; the map
   cannot show whether the officer is on a different elevation.
 - **Phones, tablets and foldables:** touch layouts are tested in desktop browser emulation, but physical phones and

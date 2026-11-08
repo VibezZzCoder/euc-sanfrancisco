@@ -22,6 +22,13 @@ const STEP = 1; // metres between the vertex pairs of a strip
 // Shader-expanded bounds: NYC @9c4cfc9 (MIT, © 2026 Mr.doob).
 const MAX_WIDEN = 16; // createRoadPaintMaterial's screen-space clamp
 const PAINT_LEAF_TRIANGLES = 256;
+// Re-selection slack: draw an ordered superset selected with frustum planes pushed out this far, and keep it
+// while it still covers every leaf the tight frustum needs. Leaves fully outside the tight frustum add no
+// pixels (bounds already include the 16x widening), so output is unchanged while index copies/uploads drop
+// from ~every moving frame to once per this much travel/turn (measured: per-frame re-copy cost 1–2.5 ms CPU).
+const PAINT_MARGIN = 24;
+// Above this share of all leaves, drawing the complete stream beats compacting it.
+const PAINT_FULL_SHARE = 0.8;
 
 // One transparent render item, original vertices and original primitive order. Only its index prefix changes.
 // Defined outside buildRoadPaint so the render hook cannot retain the large temporary construction arrays.
@@ -33,7 +40,7 @@ function installOrderedPaintCulling(mesh) {
   let base = 1;
   while (base < leaves) base *= 2;
   let bounds = new Float64Array(base * 2 * 6);
-  let selected = new Uint32Array(leaves), previous = new Uint32Array(leaves);
+  let selected = new Uint32Array(leaves), previous = new Uint32Array(leaves), member = new Uint8Array(leaves).fill(1);
   let sourceViews = new Array(leaves);
   const positions = geometry.attributes.position.array, sides = geometry.attributes.side.array;
   for (let node = 0; node < base * 2; node++) {
@@ -69,19 +76,24 @@ function installOrderedPaintCulling(mesh) {
   const clip = new THREE.Matrix4(), previousClip = new THREE.Matrix4(), frustum = new THREE.Frustum();
   const uploadRange = { start: 0, count: 0 }; // native backends clear the array; reuse the range object too
   let previousCount = leaves, selectedCount = 0, validClip = false, coordinateSystem, reversedDepth, disposed = false;
+  let neededAtSelect = leaves; // tight leaf count when the drawn superset was chosen
   const before = mesh.onBeforeRender;
-  function dirtyPrefix(end) {
+  // Pending ranges survive skipped consumption: merge into one covering [start, end) range.
+  function dirtyRange(start, end) {
     for (let i = 0; i < index.updateRanges.length; i++) {
-      const range = index.updateRanges[i]; end = Math.max(end, range.start + range.count);
+      const range = index.updateRanges[i];
+      start = Math.min(start, range.start); end = Math.max(end, range.start + range.count);
     }
-    index.clearUpdateRanges(); uploadRange.count = end; index.updateRanges.push(uploadRange); index.needsUpdate = true;
+    index.clearUpdateRanges(); uploadRange.start = start; uploadRange.count = end - start;
+    index.updateRanges.push(uploadRange); index.needsUpdate = true;
   }
   function fullStream() {
     if (previousCount !== leaves) {
-      target.set(original); dirtyPrefix(count);
+      target.set(original); dirtyRange(0, count);
       for (let i = 0; i < leaves; i++) previous[i] = i;
       previousCount = leaves;
     }
+    member.fill(1); neededAtSelect = leaves;
     geometry.setDrawRange(0, count);
     validClip = false;
   }
@@ -123,17 +135,33 @@ function installOrderedPaintCulling(mesh) {
     previousClip.copy(clip); coordinateSystem = camera.coordinateSystem; reversedDepth = camera.reversedDepth; validClip = true;
     frustum.setFromProjectionMatrix(clip, coordinateSystem, reversedDepth);
     selectedCount = 0; visit(1, 0, base);
-    let changed = selectedCount !== previousCount;
-    for (let i = 0; !changed && i < selectedCount; i++) if (selected[i] !== previous[i]) changed = true;
-    if (!changed) return; // different camera/projection, identical surviving leaves: no copying or upload
-    let written = 0;
-    for (let i = 0; i < selectedCount; i++) {
+    const needed = selectedCount;
+    let covered = true;
+    for (let i = 0; covered && i < needed; i++) if (!member[selected[i]]) covered = false;
+    // The drawn superset still covers the view and is not mostly waste: no copying or upload.
+    if (covered && needed * 2 >= neededAtSelect) return;
+    for (let i = 0; i < 6; i++) frustum.planes[i].constant += PAINT_MARGIN;
+    selectedCount = 0; visit(1, 0, base);
+    if (selectedCount >= leaves * PAINT_FULL_SHARE) { for (let i = 0; i < leaves; i++) selected[i] = i; selectedCount = leaves; }
+    neededAtSelect = needed;
+    for (let i = 0; i < previousCount; i++) member[previous[i]] = 0;
+    for (let i = 0; i < selectedCount; i++) member[selected[i]] = 1;
+    // Unchanged leading leaves keep their bytes; copy/upload only from the first difference. Every leaf
+    // before that position is full-size (the short last leaf can only be the final entry).
+    let first = 0;
+    while (first < selectedCount && first < previousCount && selected[first] === previous[first]) first++;
+    if (first === selectedCount && first === previousCount) return;
+    let written = first * leafSize;
+    if (first === selectedCount && first > 0) written = (first - 1) * leafSize + sourceViews[selected[first - 1]].length;
+    const start = written;
+    for (let i = first; i < selectedCount; i++) {
       const leaf = selected[i], source = sourceViews[leaf];
       target.set(source, written); written += source.length; previous[i] = leaf;
     }
     previousCount = selectedCount;
     geometry.setDrawRange(0, written);
-    if (written > 0) dirtyPrefix(written); // empty selection changes only drawRange; pending bytes remain pending
+    // An empty or pure-truncation selection changes only drawRange; pending bytes remain pending.
+    if (written > start) dirtyRange(start, written);
   }
   mesh.onBeforeRender = onBeforeRender;
   function dispose() {
@@ -143,7 +171,7 @@ function installOrderedPaintCulling(mesh) {
     fullStream(); disposed = true;
     if (mesh.onBeforeRender === onBeforeRender) mesh.onBeforeRender = before;
     geometry.removeEventListener('dispose', dispose);
-    original = bounds = selected = previous = sourceViews = null;
+    original = bounds = selected = previous = member = sourceViews = null;
   }
   geometry.addEventListener('dispose', dispose);
 }

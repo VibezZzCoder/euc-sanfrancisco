@@ -11,8 +11,20 @@ const { GEO } = window.NYC;
 // Generated URLs name the committed SFB1 bytes; delivery is their lossless `${url}.gz` copy
 // (tools/compress-data.mjs). Sniff the gzip magic: a host that adds Content-Encoding: gzip hands
 // back bytes the browser already inflated (pattern: mrdoob/slop-newyork 062c4a9 + 2813f08, MIT).
+// Static hosts (GitHub Pages) occasionally answer a single file with a transient 5xx/429 or drop the
+// connection. Retry only those, a bounded three attempts with short backoff; 404 and bad bytes fail at once.
+const TRANSIENT = new Set([408, 425, 429, 500, 502, 503, 504]);
+async function fetchWithRetry(url, attempts = 3) {
+  for (let i = 1; ; i++) {
+    let res;
+    try { res = await fetch(url); } catch (error) { if (i >= attempts) throw error; }
+    if (res && (res.ok || !TRANSIENT.has(res.status) || i >= attempts)) return res;
+    await new Promise(resolve => setTimeout(resolve, 400 * 3 ** (i - 1)));
+  }
+}
+
 async function fetchBin(url, onBytes) {
-  const res = await fetch(`${url}.gz`);
+  const res = await fetchWithRetry(`${url}.gz`);
   if (!res.ok) throw new Error(`${url}.gz: HTTP ${res.status}`);
   let buf = await res.arrayBuffer();
   const lead = new Uint8Array(buf, 0, Math.min(2, buf.byteLength));
@@ -50,5 +62,5 @@ async function loadCityData(onProgress) {
   return DATA;
 }
 
-Object.assign(window.NYC, { loadCityData });
+Object.assign(window.NYC, { loadCityData, fetchWithRetry });
 })();

@@ -263,3 +263,44 @@ test('swoop commitment never reads a hidden target and leave respects tunnel cei
   }
   assert.equal(brain.state.mode, 'leave');
 });
+
+test('graph pursuit reaches cruise on a clear straight and closes on a 12 m/s rider', () => {
+  const graph = buildSfPursuitGraph(network([road({ x: 0, z: 0 }, { x: 2000, z: 0 }, 0, 0)]));
+  const brain = createSfFlightBrain({ graph, clearFlight: () => true, supportAt: () => ({ height: 0 }) });
+  assert.ok(brain.place({ x: 0, y: 1.1, z: 0 }));
+  let rider = 80, top = 0, modes = new Set();
+  for (let i = 0; i < 100; i++) {
+    rider += 12 * 0.05;
+    brain.update(0.05, { x: rider, y: 0, z: 0, heading: Math.PI / 2 }, true);
+    top = Math.max(top, brain.state.speed); modes.add(brain.state.mode);
+  }
+  assert.ok(modes.has('path'));
+  assert.ok(top > 20, `top speed ${top}`);
+  assert.ok(rider - brain.state.x < 80, `gap ${rider - brain.state.x}`);
+});
+
+test('graph pursuit still slows for a right-angle junction turn', () => {
+  const corner = { x: 200, z: 0 };
+  const graph = buildSfPursuitGraph(network([road({ x: 0, z: 0 }, corner, 0, 0), road(corner, { x: 200, z: 200 }, 0, 0)]));
+  const brain = createSfFlightBrain({ graph, clearFlight: () => true, supportAt: () => ({ height: 0 }) });
+  assert.ok(brain.place({ x: 0, y: 1.1, z: 0 }));
+  let atCorner = Infinity;
+  for (let i = 0; i < 400 && brain.state.z < 20; i++) {
+    brain.update(0.05, { x: 200, y: 0, z: 200, heading: 0 }, true);
+    if (Math.hypot(brain.state.x - 200, brain.state.z) < 4) atCorner = Math.min(atCorner, brain.state.speed);
+  }
+  assert.ok(atCorner <= 10, `corner speed ${atCorner}`);
+  assert.ok(brain.state.z > 10, 'turned onto the cross street');
+});
+
+test('a close visible rider is chased directly instead of finishing a stale road route', () => {
+  const graph = buildSfPursuitGraph(network([road({ x: 0, z: 0 }, { x: 400, z: 0 }, 0, 0)]));
+  const brain = createSfFlightBrain({ graph, clearFlight: () => true, supportAt: () => ({ height: 0 }) });
+  assert.ok(brain.place({ x: 0, y: 1.1, z: 0 }));
+  for (let i = 0; i < 20; i++) brain.update(0.05, { x: 120, y: 0, z: 0, heading: 0 }, true);
+  assert.equal(brain.state.mode, 'path');
+  // Rider now 20 m away beside the road: direct pursuit, not the remaining route.
+  const near = { x: brain.state.x + 12, y: 0, z: 16, heading: 0 };
+  brain.update(0.05, near, true);
+  assert.equal(brain.state.mode, 'pursuit');
+});

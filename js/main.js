@@ -171,9 +171,15 @@ export async function initApp(startup) {
   await stage('Building hills, streets and waterfronts…', 'ground');
   const cityGrid = city.buildSFGround(scene, { deferCurbSurfaces: true });
   ownedDisposals.push(() => cityGrid.terrain?.dispose());
+  // Leaving the core (a regional arrival): pure-coarsening tile rebuilds run over later frames (~4 ms per call, one
+  // tile minimum); any tile needing a finer level still rebuilds at once. Drawing-only; physics is unaffected.
+  cityGrid.terrain?.setLodBudget?.(4);
   await stage('Building the regional landscape…', 'region');
   const region = city.buildSFRegion(scene, { paintIntervals: skateparkPaintIntervals });
   ownedDisposals.push(() => region.disposeTerrainCache());
+  // Cold arrivals: uncached camera-threshold regional LODs build over later frames (~4 ms each, one tile minimum) and
+  // publish together when complete; rider-near/seam tiles stay synchronous. Drawing-only; physics is unaffected.
+  region.setLodBudget?.(4);
   await stage('Building landmarks and bridges…', 'landmarks');
   const landmarks = city.buildLandmarks(scene);
   const bridges = city.buildSFBridges(scene);

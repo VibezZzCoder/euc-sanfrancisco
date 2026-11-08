@@ -53,6 +53,8 @@ export function createChaseDirector({ rules = CHASE_RULES, random = Math.random 
       return true;
     },
     soon() { if (state.phase === 'waiting') { state.wait = 0; state.calm = 0; } },
+    // The host holds a still-visible departure; only presentation time (banner age) advances.
+    hold(dt) { if (dt > 0 && state.phase === 'leaving') state.eventAge += dt; },
     update(dt, { riding = false, crashed = false, recovered = false,
       distance = Infinity, sees = false, inView = false } = {}) {
       observePlayer({ crashed, recovered });

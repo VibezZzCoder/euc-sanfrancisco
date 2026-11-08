@@ -483,14 +483,26 @@ function drawOfficerMarker(ctx, x, y) {
 
 // Try four sides without covering cached place/road labels or pins. Boxes share the static
 // canvas's centred CSS-pixel coordinates; a small margin protects their antialiased edges.
-function drawOfficerLabel(ctx, marker, px, py, w, h, textWidth, placed) {
+// The live waypoint circle (wr > 0) is drawn earlier and is not cached; keep the opaque label off it.
+function drawOfficerLabel(ctx, marker, px, py, w, h, textWidth, placed, wx = 0, wy = 0, wr = 0) {
   const width = Math.ceil(textWidth) + 8, height = 18, gap = 10;
-  for (let side = 0; side < 4; side++) {
-    const x = side === 0 ? marker.x + gap : side === 1 ? marker.x - gap - width : marker.x - width / 2;
-    const y = side < 2 ? marker.y - height / 2 : side === 2 ? marker.y - gap - height : marker.y + gap;
+  // Right, left, top, bottom, then the four diagonals before giving up on the label.
+  for (let side = 0; side < 8; side++) {
+    let x, y;
+    if (side < 4) {
+      x = side === 0 ? marker.x + gap : side === 1 ? marker.x - gap - width : marker.x - width / 2;
+      y = side < 2 ? marker.y - height / 2 : side === 2 ? marker.y - gap - height : marker.y + gap;
+    } else {
+      x = side & 1 ? marker.x - gap - width : marker.x + gap;
+      y = side < 6 ? marker.y - gap - height : marker.y + gap;
+    }
     if (x < -w / 2 || x + width > w / 2 || y < -h / 2 || y + height > h / 2) continue;
     if (x < px + 14 && x + width > px - 14 && y < py + 14 && y + height > py - 14) continue;
     if (overlaps(placed, [x - 2, y - 2, x + width + 2, y + height + 2])) continue;
+    if (wr > 0) {
+      const dx = Math.max(x - wx, 0, wx - x - width), dy = Math.max(y - wy, 0, wy - y - height);
+      if (dx * dx + dy * dy < (wr + 2) ** 2) continue;
+    }
     ctx.save(); ctx.fillStyle = '#0a1118'; ctx.fillRect(x, y, width, height);
     ctx.font = `700 11px ${FONT}`; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
     ctx.fillStyle = '#ffffff'; ctx.fillText('Dorkins', x + 4, y + 13); ctx.restore();
@@ -1578,7 +1590,8 @@ class NYCMapSystem {
     if (officerMarker) {
       ctx.save(); ctx.font = `700 11px ${FONT}`;
       const width = this.textWidth(ctx, 'Dorkins'); ctx.restore();
-      drawOfficerLabel(ctx, officerMarker, px, py, w, h, width, this.fullStaticPlaced || []);
+      drawOfficerLabel(ctx, officerMarker, px, py, w, h, width, this.fullStaticPlaced || [],
+        this.waypoint ? toX(this.waypoint.x) : 0, this.waypoint ? toY(this.waypoint.z) : 0, this.waypoint ? 9 : 0);
       drawOfficerMarker(ctx, officerMarker.x, officerMarker.y);
     }
 

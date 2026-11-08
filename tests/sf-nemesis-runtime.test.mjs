@@ -223,3 +223,63 @@ test('four separately recovered posed hits reach captured state through the runt
   assert.equal(cop.director.state.knockdowns, 4); assert.equal(cop.audioView.hit, 4);
   cop.dispose();
 });
+
+test('transparent high shadow cannot hold a departure; held departure still ages the banner', () => {
+  const { cop, scene, camera } = fixture();
+  cop.ambushSoon(); cop.update(0.05, true);
+  const rig = scene.getObjectByName('nemesis-hover-wheel'), shadow = scene.getObjectByName('nemesis-shadow');
+  const gx = rig.position.x, gz = rig.position.z;
+  camera.position.set(gx, 2, gz + 20); camera.lookAt(rig.position); camera.updateMatrixWorld(true);
+  Object.assign(cop.director.state, { phase: 'leaving', leaveTime: 0, lastEvent: 'escaped', eventAge: 0 });
+  cop.update(0.05, true);
+  // Then keep the camera on the original ground spot while the officer climbs away.
+  camera.lookAt(gx, 0, gz); camera.updateMatrixWorld(true);
+  assert.equal(cop.director.state.leaveTime, 0, 'visible departure is held');
+  assert.ok(cop.director.state.eventAge > 0, 'banner ages while held');
+  let frames = 0;
+  for (; frames < 800 && rig.visible; frames++) {
+    cop.update(0.05, true);
+    if (rig.visible && shadow.visible) assert.ok(rig.position.y - 0 < 12.5, 'shadow hidden once fully faded');
+  }
+  assert.equal(rig.visible, false, 'departure retired');
+  assert.equal(cop.director.state.phase, 'waiting');
+  for (let i = 0; i < 60; i++) cop.update(0.05, true);
+  assert.equal(cop.hudView.banner, null, 'escape banner ages out');
+  cop.dispose();
+});
+
+test('open-sky vertical departure does not re-sweep a climb check every frame', () => {
+  let volumes = 0;
+  const { cop, scene, camera } = fixture({ volume: () => { volumes++; return true; } });
+  cop.ambushSoon(); cop.update(0.05, true);
+  const rig = scene.getObjectByName('nemesis-hover-wheel');
+  camera.position.set(rig.position.x, 2, rig.position.z + 60);
+  cop.director.state.phase = 'leaving'; volumes = 0;
+  for (let i = 0; i < 100; i++) {
+    camera.lookAt(rig.position.x, rig.position.y, rig.position.z); camera.updateMatrixWorld(true);
+    cop.update(0.05, true);
+  }
+  assert.equal(cop.director.state.phase, 'leaving');
+  assert.ok(rig.position.y > 20, `climbed ${rig.position.y}`);
+  assert.ok(volumes < 300, `volume checks ${volumes}`);
+  cop.dispose();
+});
+
+test('a watched, sealed departure retires once held long and far from the camera, never close', () => {
+  let sealed = false;
+  const { cop, scene, camera } = fixture({ volume: () => !sealed });
+  cop.ambushSoon(); cop.update(0.05, true);
+  const rig = scene.getObjectByName('nemesis-hover-wheel');
+  sealed = true; cop.director.state.phase = 'leaving';
+  const watch = distance => {
+    camera.position.set(rig.position.x, rig.position.y, rig.position.z + distance);
+    camera.lookAt(rig.position); camera.updateMatrixWorld(true);
+  };
+  watch(20);
+  for (let i = 0; i < 800; i++) cop.update(0.05, true);
+  assert.equal(rig.visible, true, 'close watched departure never pops away');
+  watch(200);
+  for (let i = 0; i < 100 && rig.visible; i++) cop.update(0.05, true);
+  assert.equal(rig.visible, false, 'distant long-held departure retires');
+  cop.dispose();
+});

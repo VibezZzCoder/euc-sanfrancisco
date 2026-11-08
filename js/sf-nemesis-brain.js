@@ -12,6 +12,9 @@ export const SF_HOVER = Object.freeze({
   swoopGain: 3, swoopSpeed: 22, swoopAcceleration: 20, swoopTurnRate: 8,
 });
 
+// Route vertex speeds: the former blanket waypoint cap now applies only at the route's end;
+// sharp junction turns may slow further, never below ROUTE_TURN_MIN.
+const ROUTE_END_SPEED = 9, ROUTE_TURN_MIN = 4;
 const clamp = (x, min, max) => Math.max(min, Math.min(max, x));
 const wrap = x => x - Math.PI * 2 * Math.floor((x + Math.PI) / (Math.PI * 2));
 const finitePoint = p => p && [p.x, p.y, p.z].every(Number.isFinite);
@@ -289,6 +292,7 @@ export function createSfFlightBrain(queries, tuning = SF_HOVER) {
     return target;
   }
 
+  const moveFrom = { x: 0, y: 0, z: 0 }, moveCandidates = [{ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }];
   function move(dt, wantVx, wantVz, aimY, acceleration, turnRate, face) {
     const desiredVy = clamp((aimY - state.y) * 2.5, -tuning.climbSpeed, tuning.climbSpeed);
     const vy = state.vy + clamp(desiredVy - state.vy, -tuning.climbAcceleration * dt, tuning.climbAcceleration * dt);
@@ -296,13 +300,14 @@ export function createSfFlightBrain(queries, tuning = SF_HOVER) {
     const change = Math.hypot(ax, az), maxChange = acceleration * dt;
     if (change > maxChange) { ax *= maxChange / change; az *= maxChange / change; }
     const vx = state.vx + ax, vz = state.vz + az;
-    const from = { x: state.x, y: state.y, z: state.z };
-    const candidates = [
-      { x: state.x + vx * dt, y: state.y + vy * dt, z: state.z + vz * dt },
-      { x: state.x + vx * dt, y: state.y, z: state.z + vz * dt },
-      { x: state.x, y: state.y + vy * dt, z: state.z },
-    ];
-    const next = candidates.find(p => queries.clearFlight(from, p));
+    const from = moveFrom; from.x = state.x; from.y = state.y; from.z = state.z;
+    // Full, horizontal-only, then vertical-only candidates (reused scratch, checked in order).
+    const c0 = moveCandidates[0], c1 = moveCandidates[1], c2 = moveCandidates[2];
+    c0.x = state.x + vx * dt; c0.y = state.y + vy * dt; c0.z = state.z + vz * dt;
+    c1.x = c0.x; c1.y = state.y; c1.z = c0.z;
+    c2.x = state.x; c2.y = c0.y; c2.z = state.z;
+    let next = null;
+    for (let i = 0; i < 3 && !next; i++) if (queries.clearFlight(from, moveCandidates[i])) next = moveCandidates[i];
     if (next) {
       state.vx = (next.x - state.x) / dt; state.vy = (next.y - state.y) / dt;
       state.vz = (next.z - state.z) / dt;
@@ -318,6 +323,48 @@ export function createSfFlightBrain(queries, tuning = SF_HOVER) {
     return state;
   }
 
+  // Speed that can still brake to each upcoming route vertex's turn speed (lateral-acceleration
+  // limited, ROUTE_TURN_MIN..cruise) and ROUTE_END_SPEED at the route's end. Bounded look-ahead;
+  // beyond ~128 m the braking envelope exceeds cruise anyway.
+  function routeSpeed() {
+    const decel2 = 2 * tuning.arriveDeceleration;
+    let cap = tuning.cruiseSpeed, prev = null;
+    // Junction duplicates share a location; the incoming direction comes from the last distinct point.
+    for (let i = routeIndex - 1; i >= 0 && i >= routeIndex - 4 && !prev; i--) {
+      if (Math.hypot(route[i].x-route[routeIndex].x, route[i].z-route[routeIndex].z) > 1e-6) prev = route[i];
+    }
+    let d = Math.hypot(route[routeIndex].x-state.x, route[routeIndex].z-state.z);
+    for (let i = routeIndex; i < route.length && i < routeIndex + 16; i++) {
+      const p = route[i], n = route[i + 1];
+      let v = ROUTE_END_SPEED;
+      if (n) {
+        const bx = n.x-p.x, bz = n.z-p.z, lb = Math.hypot(bx, bz);
+        if (lb <= 1e-6) continue; // duplicate junction point: measure the turn across it
+        v = tuning.cruiseSpeed;
+        if (prev) {
+          const ax = p.x-prev.x, az = p.z-prev.z, la = Math.hypot(ax, az);
+          const angle = la > 1e-6 ? Math.acos(clamp((ax*bx + az*bz) / (la*lb), -1, 1)) : 0;
+          if (angle > 1e-3) v = clamp(Math.sqrt(tuning.acceleration * Math.min(la, lb) / angle), ROUTE_TURN_MIN, tuning.cruiseSpeed);
+        }
+        cap = Math.min(cap, Math.sqrt(v*v + decel2*d));
+        d += lb;
+      } else cap = Math.min(cap, Math.sqrt(v*v + decel2*d));
+      if (cap <= ROUTE_TURN_MIN) break;
+      prev = p;
+    }
+    return cap;
+  }
+
+  // Faster straight-line flight can pass beside a vertex; accept it once beyond the vertex
+  // along the next segment with a checked sweep onward, instead of turning back for it.
+  function reachedWaypoint(p, n) {
+    if (Math.abs(p.y + tuning.routeHeight-state.y) >= 3) return false;
+    const h = Math.hypot(p.x-state.x, p.z-state.z);
+    if (h < 2) return true;
+    return !!n && h < 6 && (state.x-p.x)*(n.x-p.x) + (state.z-p.z)*(n.z-p.z) > 0
+      && clearSegment(state, { x: n.x, y: n.y + tuning.routeHeight, z: n.z });
+  }
+
   function update(dt, observation, visible) {
     if (!placed || !Number.isFinite(dt) || dt <= 0) return state;
     dt = Math.min(dt, tuning.maxStep); swoopAim = null;
@@ -327,23 +374,27 @@ export function createSfFlightBrain(queries, tuning = SF_HOVER) {
     const directProbe = { x: state.x + (target.x-state.x) * Math.min(1, tuning.lookAhead/(directDistance || 1)),
       y: state.y, z: state.z + (target.z-state.z) * Math.min(1, tuning.lookAhead/(directDistance || 1)) };
     const blocked = !queries.clearFlight(state, directProbe);
-    const wantRoute = !!queries.graph && (directDistance > tuning.routeRange || blocked || routeIndex < route.length);
+    // A visible (line-of-sight checked) rider well inside route range with a clear probe is chased
+    // directly, instead of finishing a stale road route; 0.8 gives hysteresis against routeRange.
+    const closeAndClear = visible && !searching && !blocked && directDistance < tuning.routeRange * 0.8;
+    const wantRoute = !!queries.graph && !closeAndClear
+      && (directDistance > tuning.routeRange || blocked || routeIndex < route.length);
     replanIn -= dt;
     if (wantRoute && (replanIn <= 0 || !routeGoal || Math.hypot(target.x-routeGoal.x, target.y-routeGoal.y, target.z-routeGoal.z) > 15)) {
       route = plan(target); routeIndex = advanceReplannedStart(route);
       replanIn = tuning.routeInterval; routeGoal = { ...target };
     }
     if (!wantRoute) { route = []; routeIndex = 0; }
-    while (routeIndex < route.length && Math.hypot(route[routeIndex].x-state.x, route[routeIndex].z-state.z) < 2
-      && Math.abs(route[routeIndex].y + tuning.routeHeight-state.y) < 3) routeIndex++;
+    while (routeIndex < route.length && reachedWaypoint(route[routeIndex], route[routeIndex + 1])) routeIndex++;
     const waypoint = routeIndex < route.length ? route[routeIndex] : null;
     const aim = waypoint || target;
     const dx = aim.x-state.x, dz = aim.z-state.z, distance = Math.hypot(dx, dz);
     const ux = distance > 1e-6 ? dx/distance : Math.sin(state.heading);
     const uz = distance > 1e-6 ? dz/distance : Math.cos(state.heading);
     const gap = Math.max(0, distance - (waypoint || searching ? 0 : tuning.followDistance));
-    let speed = Math.min(tuning.cruiseSpeed, Math.sqrt(2*tuning.arriveDeceleration*gap), 2*gap);
-    if (waypoint) speed = Math.min(speed, 9); // make junctions without cutting through corners
+    // Waypoints brake only for actual turns ahead, not every 8 m sample on a straight.
+    const speed = waypoint ? routeSpeed()
+      : Math.min(tuning.cruiseSpeed, Math.sqrt(2*tuning.arriveDeceleration*gap), 2*gap);
     const mix = clamp((directDistance-tuning.lowFrom)/(tuning.highFrom-tuning.lowFrom), 0, 1);
     const smooth = mix*mix*(3-2*mix);
     const floor = queries.supportAt(state.x, state.z, state.y);

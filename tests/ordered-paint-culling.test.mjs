@@ -86,6 +86,37 @@ function expected(f, c) {
   for (const leaf of leaves) for (let j = leaf * LEAF; j < Math.min((leaf + 1) * LEAF, f.original.length); j++) out.push(f.original[j]);
   return { leaves, array: new f.original.constructor(out) };
 }
+// Large typed arrays: compare without assertion diffs (a failing deepEqual on MBs of indices exhausts memory).
+const same = (a, b) => a.byteLength === b.byteLength && Buffer.compare(bytes(a), bytes(b)) === 0;
+const MARGIN = 24, FULL_SHARE = 0.8;
+// Parse the drawn prefix back into source-ordered whole leaves; null if it is not such a sequence.
+function drawnLeaves(f) {
+  const drawn = prefix(f), leaves = [], total = f.leafBoxes.length;
+  let at = 0, leaf = 0;
+  while (at < drawn.length) {
+    for (; leaf < total; leaf++) {
+      const end = Math.min((leaf + 1) * LEAF, f.original.length), n = end - leaf * LEAF;
+      if (at + n <= drawn.length && same(drawn.subarray(at, at + n), f.original.subarray(leaf * LEAF, end))) break;
+    }
+    if (leaf === total) return null;
+    leaves.push(leaf); at += Math.min((leaf + 1) * LEAF, f.original.length) - leaf * LEAF; leaf++;
+  }
+  return leaves;
+}
+// Drawn = ordered whole-leaf superset of the tight oracle, within the margin-widened oracle (or the full stream).
+function assertCovers(f, c, message = 'ordered superset of the tight frustum leaves') {
+  const tight = expected(f, c).leaves, drawn = drawnLeaves(f);
+  assert.ok(drawn, message + ': drawn prefix is whole source-ordered leaves');
+  const set = new Set(drawn);
+  assert.ok(tight.every(l => set.has(l)), message + ': covers every visible leaf');
+  if (drawn.length !== f.leafBoxes.length) {
+    const clip = new THREE.Matrix4().multiplyMatrices(c.projectionMatrix, c.matrixWorldInverse).multiply(f.mesh.matrixWorld);
+    const frustum = new THREE.Frustum().setFromProjectionMatrix(clip, c.coordinateSystem, c.reversedDepth);
+    for (const plane of frustum.planes) plane.constant += MARGIN;
+    assert.ok(drawn.every(l => frustum.intersectsBox(f.leafBoxes[l])), message + ': nothing beyond the widened frustum');
+  }
+  return { tight, drawn };
+}
 function prefix(f) {
   const g = f.mesh.geometry; return g.index.array.subarray(g.drawRange.start, Math.min(g.index.count, g.drawRange.start + g.drawRange.count));
 }
@@ -103,7 +134,7 @@ test('one paint mesh retains exact full source, attributes, sorting bounds and m
     assert.deepEqual({ ...b, material: null }, { ...a, material: null });
     assert.equal(after.materials, 1); assert.equal(after.scene.children.length, 1); assert.equal(after.mesh.children.length, 0);
     assert.equal(after.mesh.name, 'RoadMarkings'); assert.equal(after.mesh.renderOrder, -1);
-    assert.deepEqual(bytes(after.mesh.geometry.index.array), bytes(before.mesh.geometry.index.array));
+    assert.ok(same(after.mesh.geometry.index.array, before.mesh.geometry.index.array));
     assert.notEqual(after.original.buffer, after.mesh.geometry.index.array.buffer);
     const originalHash = hash(after.original), index = after.mesh.geometry.index, array = index.array;
     hook(after, camera()); assert.ok(prefix(after).length < after.original.length);
@@ -124,7 +155,7 @@ test('hierarchical indices exactly match a flat native-frustum oracle across fix
         parent.position.set(i * 31, 0, -i * 17); parent.rotation.y = i * .13; f.scene.updateMatrixWorld(true);
         const c = camera(x, z, span); c.coordinateSystem = coordinate; c._reversedDepth = reversed; updateCamera(c);
         const want = expected(f, c), version = f.mesh.geometry.index.version;
-        hook(f, c); assert.deepEqual(bytes(prefix(f)), bytes(want.array), 'same ordered subsequence as brute-force leaf tests');
+        hook(f, c); assertCovers(f, c, 'brute-force leaf tests');
         for (let j = 1; j < want.leaves.length; j++) assert.ok(want.leaves[j] > want.leaves[j - 1], 'original primitive ranges never reorder');
         if (want.array.length > 0 && want.array.length < f.original.length) strictSubsets++;
         if (f.mesh.geometry.index.version !== version) changed++;
@@ -133,7 +164,7 @@ test('hierarchical indices exactly match a flat native-frustum oracle across fix
         view.position.set(x, 180, z + 400); view.lookAt(x, 120, z); view.coordinateSystem = coordinate; view._reversedDepth = reversed;
         for (const [yaw, aspect] of [[0, 16 / 9], [Math.PI, 16 / 9], [0, .55]]) {
           view.lookAt(x + Math.sin(yaw) * 400, 120, z + 400 - Math.cos(yaw) * 400); view.aspect = aspect; updateCamera(view);
-          const oracle = expected(f, view); hook(f, view); assert.deepEqual(bytes(prefix(f)), bytes(oracle.array));
+          hook(f, view); assertCovers(f, view, 'turn/aspect');
         }
       }
     }
@@ -165,7 +196,7 @@ test('actual Float32 1–16x widened endpoints fit every hierarchy leaf, includi
             if (edges < 12) {
               const c = camera(p.x, p.z, .001); c.position.y = p.y + 10; c.near = .01; c.far = 20; c.lookAt(p); updateCamera(c);
               const oracle = expected(f, c); assert.ok(oracle.leaves.includes(leaf), 'widened silhouette remains in the real pass frustum');
-              hook(f, c); assert.deepEqual(bytes(prefix(f)), bytes(oracle.array)); edges++;
+              hook(f, c); assertCovers(f, c, 'widened edge'); edges++;
             }
           }
         }
@@ -187,7 +218,7 @@ test('cached or unchanged leaf sequences allocate no arrays/views, copy no indic
     assert.equal(calls.calls(), 0); assert.equal(copies, 0); assert.equal(index.version, version); assert.equal(f.allocated.length, allocations);
     c.position.x += .001; c.lookAt(c.position.x, 0, c.position.z); updateCamera(c);
     assert.deepEqual(expected(f, c).leaves, oracle.leaves, 'a changed view matrix can still select the same partial leaf sequence');
-    hook(f, c); assert.equal(copies, 0); assert.equal(index.version, version); assert.deepEqual(bytes(array), full);
+    hook(f, c); assert.equal(copies, 0); assert.equal(index.version, version); assert.ok(same(array, full));
     delete array.set;
   } finally { f.dispose(); }
 });
@@ -197,11 +228,11 @@ test('compilation, forced warmup and array views use the full stream; disposal r
   try {
     const c = camera(), total = f.original.length, originalHash = hash(f.original), full = Buffer.from(bytes(f.original));
     hook(f, c); assert.ok(prefix(f).length < total);
-    hook(f, c, { _precompilationState: {} }); assert.deepEqual(bytes(prefix(f)), full);
+    hook(f, c, { _precompilationState: {} }); assert.ok(same(prefix(f), full));
     hook(f, c); assert.ok(prefix(f).length < total);
-    f.mesh.frustumCulled = false; hook(f, c); assert.deepEqual(bytes(prefix(f)), full); f.mesh.frustumCulled = true;
-    hook(f, c); hook(f, new THREE.ArrayCamera([c])); assert.deepEqual(bytes(prefix(f)), full);
-    hook(f, c); f.mesh.geometry.dispose(); assert.deepEqual(bytes(f.mesh.geometry.index.array), full);
+    f.mesh.frustumCulled = false; hook(f, c); assert.ok(same(prefix(f), full)); f.mesh.frustumCulled = true;
+    hook(f, c); hook(f, new THREE.ArrayCamera([c])); assert.ok(same(prefix(f), full));
+    hook(f, c); f.mesh.geometry.dispose(); assert.ok(same(f.mesh.geometry.index.array, full));
     assert.equal(f.mesh.geometry.drawRange.count, total); assert.equal(f.mesh.onBeforeRender, THREE.Mesh.prototype.onBeforeRender);
     f.mesh.geometry.dispose(); assert.equal(hash(f.original), originalHash, 'repeat disposal cannot mutate the immutable source');
   } finally { f.dispose(); }
@@ -252,14 +283,14 @@ for (const backend of ['webgl2', 'webgpu']) for (const bits of [16, 32]) test(`$
       _bindings: { updateForRender: noop }, _pipelines: { updateForRender: noop, isReady: () => true },
       backend: { draw(object) {
         draws++; assert.equal(object.drawRange, geometry.drawRange);
-        assert.deepEqual(bytes(gpu.subarray(0, geometry.drawRange.count)), bytes(prefix(f)), 'the GPU prefix is current BEFORE this draw');
+        assert.ok(same(gpu.subarray(0, geometry.drawRange.count), prefix(f)), 'the GPU prefix is current BEFORE this draw');
       } } };
     renderer._handleObjectFunction = THREE.WebGPURenderer.prototype._renderObjectDirect;
     const draw = c => { updateCamera(c); f.scene.updateMatrixWorld(true);
       THREE.WebGPURenderer.prototype.renderObject.call(renderer, f.mesh, f.scene, c, geometry, f.mesh.material, null, null); };
     // Native culling can skip the whole object: no hook/upload is consumed during that interval.
     const wide = camera(-3589, -2402, 1800), narrow = camera();
-    hook(f, wide); const pending = index.updateRanges[0].count;
+    hook(f, wide); const pending = index.updateRanges[0]?.count ?? 0;
     hook(f, narrow); assert.ok(index.updateRanges[0].count >= pending);
     assert.equal(uploads, 0); draw(narrow); assert.ok(uploads > 0); assert.equal(index.updateRanges.length, 0);
     const before = uploads; draw(narrow); assert.equal(uploads, before, 'StaticDrawUsage respects an unchanged index version');
@@ -289,5 +320,18 @@ test('bounded CPU fixture reports retained index/hierarchy bytes and optional co
       }
       t.diagnostic(JSON.stringify({ changingViewPreparationMs: blocks, scope: 'Node hierarchy + prefix copying only; no GPU/upload/whole-frame claim' }));
     }
+  } finally { f.dispose(); }
+});
+
+test('small camera moves reuse the margin-widened superset instead of re-copying every frame', () => {
+  const f = fixture();
+  try {
+    const c = camera(-3589, -2402, 200); hook(f, c);
+    const index = f.mesh.geometry.index, version = index.version;
+    let copies = 0; const set = index.array.set; index.array.set = function (...args) { copies++; return set.apply(this, args); };
+    for (let i = 1; i <= 40; i++) { c.position.x = -3589 + i * 0.5; c.lookAt(c.position.x, 0, c.position.z); updateCamera(c); hook(f, c); assertCovers(f, c, `step ${i}`); }
+    assert.ok(index.version - version <= 2, `uploads over 20 m: ${index.version - version}`);
+    assert.ok(copies <= 2 * f.leafBoxes.length);
+    delete index.array.set;
   } finally { f.dispose(); }
 });

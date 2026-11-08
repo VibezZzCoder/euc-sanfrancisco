@@ -47,7 +47,9 @@ test('layer check is made at the swept contact time, not just frame endpoints', 
   const controller = { hardKnock() { throw new Error('blocked contact'); } };
   contact.frame({ face: face(-1), rider, interval, controller });
   assert.equal(contact.frame({ face: face(1), rider, interval, controller }), false);
-  assert.deepEqual(samples, [[0, 0]]);
+  // Closest pose first, then at most four other in-range poses.
+  assert.deepEqual(samples[0], [0, 0]);
+  assert.ok(samples.length <= 5 && samples.every(([x]) => Math.abs(x) <= 0.51), JSON.stringify(samples));
 });
 
 test('real SF tunnel roof vetoes a drawn-face sweep across its upper floor', () => {
@@ -93,4 +95,17 @@ test('inactive strike frames and crashed riders cannot trigger a knock', () => {
   controller.crashed = false;
   assert.equal(contact.frame({ face: face(-1), rider, interval: { from: 1, to: 0 }, controller }), false);
   assert.equal(calls, 0);
+});
+
+test('a wall at the closest pose does not veto an earlier clear in-range pose', () => {
+  // Thin wall at x=0.39, |z|<=0.1, crossed only by sight lines near the closest pose.
+  const { director, contact } = setup((a, b) => {
+    const s = (0.39 - a.x) / (b.x - a.x);
+    return !(s >= 0 && s <= 1 && Math.abs(a.z + (b.z - a.z) * s) <= 0.1);
+  });
+  let calls = 0;
+  const controller = { crashed: false, hardKnock() { calls++; return true; } };
+  contact.frame({ face: { x: 0.45, y: 1, z: -0.4 }, rider, interval, controller, placementSerial: 1 });
+  assert.equal(contact.frame({ face: { x: 0.45, y: 1, z: 0.4 }, rider, interval, controller, placementSerial: 1 }), true);
+  assert.equal(calls, 1); assert.equal(director.state.knockdowns, 1);
 });

@@ -317,9 +317,45 @@ function buildTerrainMesh(scene) {
     }
   }
 
+  // Optional deferred coarsening (host opt-in through setLodBudget; 0 keeps the original synchronous path). Level
+  // selection is unchanged and still runs every gated update. A tile whose selected levels are only COARSER than the
+  // levels it currently draws (the camera/rider left) keeps drawing its complete finer geometry and is rebuilt in later
+  // updates, in tile order, at least one tile and about `lodBudget` ms per call. Any tile needing a finer level than it
+  // draws (approach, seam, 200 m rider protection) rebuilds in the selecting update as before. A deferred rebuild is the
+  // unchanged rebuildTile at the latest selected levels, so each publication is complete and byte-identical to the
+  // synchronous result for those levels. Drawing-only: physical support/queries never read terrain tiles.
+  let lodBudget = 0;
+  const deferred = new Set();
+  // 1: some member coarser and none finer than drawn; -1: some member finer; 0: drawn levels already match.
+  function change(tile) {
+    let coarser = 0;
+    for (let i = 0; i < tile.members.length; i++) {
+      const drawn = tile.ranges[i * 5], lod = tile.members[i].lod;
+      if (lod < drawn) return -1;
+      if (lod > drawn) coarser = 1;
+    }
+    return coarser;
+  }
+  function drainDeferred(all = false) {
+    if (!deferred.size) return;
+    const start = performance.now();
+    for (const tile of tiles) {
+      if (!deferred.has(tile)) continue;
+      if (rebuildTile(tile)) last.rebuilt++;
+      deferred.delete(tile); // only after success: a failed build keeps its complete drawing and retries
+      if (!all && performance.now() - start >= lodBudget) break;
+    }
+  }
+  function setLodBudget(ms) {
+    if (disposed) return;
+    lodBudget = Number.isFinite(ms) && ms > 0 ? ms : 0;
+    if (!lodBudget) drainDeferred(true);
+  }
+
   const last = { x: Infinity, y: Infinity, z: Infinity, rx: Infinity, rz: Infinity, t: -Infinity, rebuilt: 0 };
   function update(cameraPosition, elapsed, playerPosition = cameraPosition) {
     if (disposed) return;
+    drainDeferred();
     const { x, y, z } = cameraPosition;
     const rider = playerPosition.position || playerPosition;
     const riderMoved = Math.hypot(rider.x - last.rx, rider.z - last.rz) >= UPDATE_MOVE;
@@ -327,7 +363,12 @@ function buildTerrainMesh(scene) {
     if (!riderMoved && Math.hypot(x - last.x, y - last.y, z - last.z) < UPDATE_MOVE) return;
     last.x = x; last.y = y; last.z = z; last.rx = rider.x; last.rz = rider.z; last.t = elapsed;
     chooseLevels(x, y, z, rider);
-    for (const tile of tiles) if (rebuildTile(tile)) last.rebuilt++;
+    for (const tile of tiles) {
+      const delta = change(tile);
+      if (lodBudget > 0 && delta > 0) { deferred.add(tile); continue; }
+      deferred.delete(tile);
+      if (delta && rebuildTile(tile)) last.rebuilt++;
+    }
   }
 
   // Start at the coarsest level everywhere (a first update() refines around the camera)
@@ -340,12 +381,14 @@ function buildTerrainMesh(scene) {
   function rebuild() {
     if (disposed) return;
     for (const tile of tiles) rebuildTile(tile, true);
+    deferred.clear(); // every tile now draws its current selected levels
   }
 
   // Terminal CPU ownership only. The host's drained scene teardown owns geometry/material/texture disposal.
   // Call before that scene walk; repeated calls are safe and cannot resurrect terrain buffers.
   function dispose() {
     disposed = true;
+    deferred.clear(); // pending work holds no buffers: drawn geometry stays owned by the scene teardown
     heights = null;
     chunkPos.dispose(); chunkNrm.dispose(); chunkIdx.dispose();
     stagePos.dispose(); stageNrm.dispose(); stageIdx.dispose();
@@ -358,6 +401,8 @@ function buildTerrainMesh(scene) {
     update,
     rebuild,
     dispose,
+    setLodBudget,
+    deferredTiles: () => deferred.size,
     stats: () => ({
       tiles: tiles.length,
       visibleTiles: tiles.filter((t) => t.mesh.visible).length,
