@@ -46,7 +46,8 @@ const LIGHT_STEP = 8;
 const PARAPET_H = 1.0;
 const DECK_T = 1.4; // deck thickness
 const DECK_H_ESTIMATE = [0, 8, 15, 22]; // m over the ground by OSM layer (0 at grade): an ESTIMATE, the data has no heights
-const DECK_GRADE = 0.05; // freeways climb at most 5% between their estimated heights
+const DECK_GRADE = 0.05; // estimated freeway grade; measured terrain / fixed bridge grades can require more
+const DECK_GROUND_JOIN = 0.06; // omit only the final near-ground layer (5 cm clearance + 1 cm tolerance), never a 60 cm lip
 const FREEWAY_LANE = 3.6;
 const COLUMN_STEP = 30;
 const JUNCTION_REACH = 120; // bounded along each connected freeway arm, including the shallow I-80 / 4th St merge
@@ -711,8 +712,8 @@ function buildGradeSeparation(scene, network, options = {}) {
       });
       return { li, a, b, lanes: Math.max(1, lanes), dir, ramp: (flags & 4) !== 0, pts, target, deckAt };
     });
-    // a junction's height: the highest any freeway meeting there wants, so the decks meet; a ramp meets a street on
-    // the ground
+    // Junction estimates are preferences, not immovable anchors. A short ramp may not have enough run to descend
+    // from its layer estimate to the street: solve that constraint through the connected main line as well.
     const street = new Set();
     RG.links.forEach(([a, b, , , , , , flags]) => { if (!(flags & 1)) street.add(a).add(b); });
     const nodeY = new Map();
@@ -722,8 +723,7 @@ function buildGradeSeparation(scene, network, options = {}) {
     }
     for (const i of nodeY.keys()) if (street.has(i)) nodeY.set(i, ground(node(i).x, node(i).z));
     for (const w of ways) {
-      // dense stations every 2 x STEP m with the target heights, the ends at their junctions', then eased: a few
-      // passes of a moving average, and at most DECK_GRADE either way from each end
+      // Dense stations every 2 x STEP m. Keep the existing eased layer estimates as soft preferences.
       const dense = [];
       for (let k = 0; k + 1 < w.pts.length; k++) {
         const p = w.pts[k], q = w.pts[k + 1];
@@ -743,10 +743,141 @@ function buildGradeSeparation(scene, network, options = {}) {
         for (let i = 1; i + 1 < dense.length; i++) if (!dense[i].bridge) dense[i].y = (dense[i - 1].y + dense[i].y + dense[i + 1].y) / 3;
       }
       for (let i = 1; i < dense.length; i++) dense[i].s = Math.hypot(dense[i].x - dense[i - 1].x, dense[i].z - dense[i - 1].z);
-      for (let i = 1; i + 1 < dense.length; i++) if (!dense[i].bridge) dense[i].y = Math.min(dense[i].y, dense[i - 1].y + DECK_GRADE * dense[i].s);
-      for (let i = dense.length - 2; i > 0; i--) if (!dense[i].bridge) dense[i].y = Math.min(dense[i].y, dense[i + 1].y + DECK_GRADE * dense[i + 1].s);
-      for (const d of dense) d.y = Math.max(d.y, ground(d.x, d.z) + 0.05);
       w.dense = dense;
+    }
+
+    // One elevation graph, including shared endpoints, for drawing, registered support/slabs and highway traffic.
+    // Multi-source distance envelopes solve |yA-yB| <= allowance on EVERY final segment. The anchor ceiling lowers
+    // incompatible junction estimates through connected main lines; the target majorant extends their approach
+    // into ramps instead of treating an interior layer-0 estimate as another street arrival. Their minimum keeps
+    // the same bound, with clearance already included in the constraints (unlike a final ground clamp).
+    // Fit immutable street/physical-bridge anchors. The Bay Bridge's lower deck and its short E on-ramps cannot
+    // meet at 5%: distribute the missing rise over the entire conflicting anchor-to-anchor path, not its final
+    // segment, leaving other arms at 5%. A bounded component fit handles unusually multiply-connected graphs.
+    // Only terrain above the resulting reachable ceiling can further enlarge a local allowance. A steep DEM
+    // sample under a viaduct therefore does NOT arbitrarily
+    // permit a steep deck; an unavoidable hill at a street arrival remains intact instead of flattening SF terrain.
+    const vertices = [], endpoints = new Map();
+    for (const w of ways) for (let i = 0; i < w.dense.length; i++) {
+      const d = w.dense[i], id = i === 0 ? w.a : i === w.dense.length - 1 ? w.b : null;
+      let v = id === null ? null : endpoints.get(id);
+      const g = ground(d.x, d.z) + 0.05;
+      if (!v) {
+        v = { index: vertices.length, low: g, target: d.y, adjacent: [] };
+        vertices.push(v);
+        if (id !== null) endpoints.set(id, v);
+      }
+      v.target = Math.max(v.target, d.y);
+      if (d.bridge) v.fixed = Math.max(g, d.y);
+      else if (id !== null && street.has(id) && v.fixed === undefined) v.fixed = g;
+      if (v.fixed !== undefined) v.low = v.target = v.fixed;
+      else v.target = Math.max(v.target, v.low);
+      d.vertex = v.index;
+    }
+    for (const w of ways) w.constraints = [];
+    for (const w of ways) for (let i = 1; i < w.dense.length; i++) {
+      const p = w.dense[i - 1], q = w.dense[i], a = vertices[p.vertex], b = vertices[q.vertex];
+      const allowance = Math.max(DECK_GRADE * q.s, p.bridge && q.bridge ? Math.abs(a.low - b.low) : 0);
+      const length = q.s, bridgeRise = p.bridge && q.bridge ? Math.abs(a.low - b.low) : 0;
+      const forward = { to: b.index, allowance, length, bridgeRise }, reverse = { to: a.index, allowance, length, bridgeRise };
+      forward.reverse = reverse; reverse.reverse = forward;
+      a.adjacent.push(forward); b.adjacent.push(reverse); w.constraints.push(forward);
+    }
+    function envelope(key, sign, trace = false) {
+      const values = vertices.map(v => sign * v[key]), heap = [], parents = trace ? [] : null;
+      const push = (index, value) => {
+        let i = heap.length; heap.push({ index, value });
+        while (i > 0) {
+          const parent = (i - 1) >> 1;
+          if (heap[parent].value <= value) break;
+          heap[i] = heap[parent]; i = parent;
+        }
+        heap[i] = { index, value };
+      };
+      for (let i = 0; i < values.length; i++) push(i, values[i]);
+      while (heap.length) {
+        const first = heap[0], last = heap.pop();
+        if (heap.length) {
+          let i = 0;
+          while (2 * i + 1 < heap.length) {
+            let child = 2 * i + 1;
+            if (child + 1 < heap.length && heap[child + 1].value < heap[child].value) child++;
+            if (heap[child].value >= last.value) break;
+            heap[i] = heap[child]; i = child;
+          }
+          heap[i] = last;
+        }
+        if (first.value !== values[first.index]) continue;
+        for (const edge of vertices[first.index].adjacent) {
+          const { to, allowance } = edge;
+          const value = first.value + allowance;
+          if (value < values[to]) {
+            values[to] = value; push(to, value);
+            if (parents) parents[to] = { from: first.index, edge };
+          }
+        }
+      }
+      const result = values.map(value => sign * value);
+      return trace ? { values: result, parents } : result;
+    }
+    for (const v of vertices) v.ceiling = v.fixed ?? Infinity;
+    let ceiling;
+    for (let pass = 0; pass < 32; pass++) {
+      const result = envelope('ceiling', 1, true);
+      ceiling = result.values;
+      const worst = vertices.reduce((a, v) => v.fixed !== undefined && v.fixed - ceiling[v.index] > (a ? a.fixed - ceiling[a.index] : 1e-9) ? v : a, null);
+      if (!worst) break;
+      const path = []; let at = worst.index, length = 0;
+      while (result.parents[at]) {
+        const { from, edge } = result.parents[at]; path.push(edge); length += edge.length; at = from;
+      }
+      if (length < 1e-6) break;
+      const missing = worst.fixed - ceiling[worst.index] + 1e-8;
+      for (const edge of path) edge.reverse.allowance = edge.allowance += missing * edge.length / length;
+    }
+    const components = [];
+    for (const v of vertices) if (v.component === undefined) {
+      const component = { grade: DECK_GRADE, lo: DECK_GRADE, hi: DECK_GRADE }, queue = [v];
+      components.push(component); v.component = component;
+      for (let i = 0; i < queue.length; i++) for (const { to } of queue[i].adjacent) {
+        const next = vertices[to];
+        if (next.component === undefined) { next.component = component; queue.push(next); }
+      }
+    }
+    const setGrades = () => {
+      for (const v of vertices) for (const edge of v.adjacent)
+        edge.allowance = Math.max(v.component.grade * edge.length, edge.bridgeRise);
+    };
+    const conflicts = values => new Set(vertices.filter(v => v.fixed !== undefined && values[v.index] < v.fixed - 1e-9).map(v => v.component));
+    ceiling = envelope('ceiling', 1);
+    let bad = conflicts(ceiling);
+    while (bad.size) {
+      for (const c of bad) { c.fit = true; c.grade = c.hi *= 2; }
+      setGrades(); ceiling = envelope('ceiling', 1); bad = conflicts(ceiling);
+    }
+    const fitting = components.filter(c => c.fit);
+    if (fitting.length) {
+      // Twenty bisections bound the inferred grade to better than one millionth for the committed graph.
+      for (let pass = 0; pass < 20; pass++) {
+        for (const c of fitting) c.grade = (c.lo + c.hi) / 2;
+        setGrades(); bad = conflicts(envelope('ceiling', 1));
+        for (const c of fitting) if (bad.has(c)) c.lo = c.grade; else c.hi = c.grade;
+      }
+      for (const c of fitting) c.grade = c.hi;
+      setGrades(); ceiling = envelope('ceiling', 1);
+    }
+    for (const w of ways) w.grade = w.constraints.reduce((grade, edge) => edge.length > 1e-6 ? Math.max(grade, edge.allowance / edge.length) : grade, DECK_GRADE);
+    for (const v of vertices) v.reachable = Number.isFinite(ceiling[v.index]) ? Math.max(v.low, ceiling[v.index]) : null;
+    for (const v of vertices) if (v.reachable !== null) for (const edge of v.adjacent)
+      edge.allowance = Math.max(edge.allowance, Math.abs(v.reachable - vertices[edge.to].reachable));
+    const upper = envelope('ceiling', 1), preferred = envelope('target', -1);
+    for (const w of ways) for (const d of w.dense) {
+      d.y = Math.min(upper[d.vertex], preferred[d.vertex]);
+      delete d.vertex;
+    }
+    for (const w of ways) {
+      const dense = w.dense;
+      delete w.constraints;
       const width = w.lanes * FREEWAY_LANE + 2;
       w.half = width / 2;
       let distance = 0;
@@ -755,7 +886,7 @@ function buildGradeSeparation(scene, network, options = {}) {
         const start = distance;
         distance += length;
         return { p, q, length, start, end: distance,
-          drawn: length > 1e-6 && !(p.y - ground(p.x, p.z) < 0.6 && q.y - ground(q.x, q.z) < 0.6) };
+          drawn: length > 1e-6 && !(p.y - ground(p.x, p.z) < DECK_GROUND_JOIN && q.y - ground(q.x, q.z) < DECK_GROUND_JOIN) };
       });
       w.length = distance;
     }
@@ -769,6 +900,36 @@ function buildGradeSeparation(scene, network, options = {}) {
       if (!incident.has(id)) incident.set(id, []);
       incident.get(id).push(w);
     }
+    // Consecutive rectangles leave an outside-corner hole at a bend (including link260 ->261). Use the shared
+    // intersection of their offset lines for BOTH strips, their support/slabs and their parapet ends. Junctions
+    // with more than two arms or changing widths retain the existing bounded pavement-union treatment.
+    const tangent = s => ({ x: (s.q.x - s.p.x) / s.length, z: (s.q.z - s.p.z) / s.length });
+    for (const w of ways) {
+      w.sides = w.dense.map((p, i) => {
+        const before = w.segments[i - 1], after = w.segments[i], directions = [];
+        if (before?.length > 1e-6) directions.push(tangent(before));
+        if (after?.length > 1e-6) directions.push(tangent(after));
+        if (directions.length === 1 && (i === 0 || i === w.dense.length - 1)) {
+          const id = i === 0 ? w.a : w.b, arms = incident.get(id);
+          const other = arms.length === 2 ? arms.find(arm => arm !== w) : null;
+          if (other && Math.abs(other.half - w.half) < 1e-9) {
+            const s = id === other.a ? other.segments[0] : other.segments.at(-1);
+            if (s?.drawn && (before || after).drawn) {
+              const t = tangent(s), sign = (i === 0 ? -1 : 1) * (id === other.a ? 1 : -1);
+              directions.push({ x: t.x * sign, z: t.z * sign });
+            }
+          }
+        }
+        const a = directions[0] || { x: 0, z: 1 }, b = directions[1] || a, dot = a.x * b.x + a.z * b.z;
+        // Bounded mitres only: a sharp/reversing arm must not create a long artificial roadway spur.
+        return dot > 0 ? { x: -(a.z + b.z) / (1 + dot), z: (a.x + b.x) / (1 + dot) } : null;
+      });
+      for (let i = 0; i < w.segments.length; i++) {
+        const s = w.segments[i], t = s.length > 1e-6 ? tangent(s) : { x: 0, z: 1 };
+        const normal = { x: -t.z, z: t.x };
+        s.pSide = w.sides[i] || normal; s.qSide = w.sides[i + 1] || normal;
+      }
+    }
     const nearNode = (w, s, id) => id === w.a ? s.start < JUNCTION_REACH : w.length - s.end < JUNCTION_REACH;
     const candidates = new Map();
     for (const w of ways) {
@@ -781,8 +942,8 @@ function buildGradeSeparation(scene, network, options = {}) {
     }
     function freewayParapet(w, i, offset, dx, dz) {
       const own = w.segments[i], rx = -dz, rz = dx;
-      const a = [own.p.x + rx * offset, own.p.y, own.p.z + rz * offset];
-      const b = [own.q.x + rx * offset, own.q.y, own.q.z + rz * offset];
+      const a = [own.p.x + own.pSide.x * offset, own.p.y, own.p.z + own.pSide.z * offset];
+      const b = [own.q.x + own.qSide.x * offset, own.q.y, own.q.z + own.qSide.z * offset];
       const cuts = [];
       for (const { id, other, s } of candidates.get(w)) {
         if (!nearNode(w, own, id)) continue;
@@ -792,6 +953,7 @@ function buildGradeSeparation(scene, network, options = {}) {
         const ta = along(a), tb = along(b);
         // Full rail width plus 5 cm inside the other pavement, never an exposed outer edge.
         const half = other.half - 0.15 * Math.abs(rx * -tz + rz * tx) - 0.05;
+        const startSkew = s.pSide.x * tx + s.pSide.z * tz, endSkew = s.qSide.x * tx + s.qSide.z * tz;
         const rise = (s.q.y - s.p.y) / s.length;
         let lo = 0, hi = 1;
         const clip = (v0, v1, min, max) => {
@@ -805,7 +967,8 @@ function buildGradeSeparation(scene, network, options = {}) {
         const otherStart = id === other.a ? 0 : other.length - JUNCTION_REACH, otherEnd = id === other.a ? JUNCTION_REACH : other.length;
         if (clip(own.start, own.end, ownStart, ownEnd) &&
             clip(s.start + ta, s.start + tb, otherStart, otherEnd) &&
-            clip(ta, tb, 0, s.length) && clip(side(a), side(b), -half, half) &&
+            clip(ta - startSkew * side(a), tb - startSkew * side(b), 0, Infinity) &&
+            clip(ta - endSkew * side(a), tb - endSkew * side(b), -Infinity, s.length) && clip(side(a), side(b), -half, half) &&
             clip(a[1] - s.p.y - ta * rise, b[1] - s.p.y - tb * rise, -JUNCTION_HEIGHT, JUNCTION_HEIGHT)) cuts.push([lo, hi]);
       }
       cuts.sort((a, b) => a[0] - b[0]);
@@ -826,9 +989,12 @@ function buildGradeSeparation(scene, network, options = {}) {
         const L = Math.hypot(q.x - p.x, q.z - p.z) || 1;
         const dx = (q.x - p.x) / L, dz = (q.z - p.z) / L, rx = -dz, rz = dx;
         const gp = p.y - ground(p.x, p.z), gq = q.y - ground(q.x, q.z);
-        if (gp < 0.6 && gq < 0.6) continue; // at grade: the terrain is its road
+        if (!w.segments[i].drawn) continue; // same near-ground handoff used by the junction union
         const h = width / 2;
-        const at = (r, o, dy = 0) => [r.x + rx * o, r.y + dy, r.z + rz * o];
+        const at = (r, o, dy = 0) => {
+          const side = r === p ? w.segments[i].pSide : w.segments[i].qSide;
+          return [r.x + side.x * o, r.y + dy, r.z + side.z * o];
+        };
         floorQuad(at(p, -h), at(p, h), at(q, h), at(q, -h), { source: 'grade:freeway' }, p.bridge && q.bridge ? 0.6 : DECK_T);
         if (p.bridge && q.bridge) continue; // the bridge's truss carries it (sf-bridges.js)
         quad(geo.concrete, at(p, h, -DECK_T), at(p, -h, -DECK_T), at(q, -h, -DECK_T), at(q, h, -DECK_T));

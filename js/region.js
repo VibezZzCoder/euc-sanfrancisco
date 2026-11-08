@@ -208,7 +208,11 @@ function installRegionTerrain(data) {
   const h=data.manifest.horizon;
   window.NYC.FLIGHT_BOUNDS={minX:h.x0,maxX:h.x1,minZ:h.z0,maxZ:h.z1};
   // Fine landmark patches precede these. Core sampling remains authoritative inside its own grid.
-  for (const g of [data.city,data.horizon]) Terrain.addPatch({x0:g.x0,z0:g.z0,step:g.step,nx:g.w,nz:g.h,h:g.heights,rect:true});
+  for (const g of [data.city,data.horizon]) {
+    const patch={x0:g.x0,z0:g.z0,step:g.step,nx:g.w,nz:g.h,h:g.heights,rect:true};
+    if(g===data.city)Terrain.installCoreTransition?.(patch);
+    Terrain.addPatch(patch);
+  }
 }
 // Specialized for this builder's indexed, non-normalized, non-interleaved Float32 XYZ geometry.
 // Arithmetic/order from Three e27dfa95ae7f453b5d7a9a36ffdb563f7c9b529b (MIT, vendor/three/LICENSE):
@@ -281,10 +285,12 @@ function buildSFRegion(scene, { paintIntervals = null } = {}) {
   const farMat=new THREE.MeshStandardNodeMaterial({vertexColors:true,roughness:1});
   const core={x0:Terrain.originX,z0:Terrain.originZ,x1:Terrain.originX+(Terrain.w-1)*Terrain.cell,z1:Terrain.originZ+(Terrain.h-1)*Terrain.cell};
   const innerCore=core;
-  const finePatches=(Terrain.patches||[]).filter(p=>p.rect&&p.step<C.step).map(p=>({
+  const transitions=Terrain.coreTransition?.patches||[];
+  const finePatches=(Terrain.patches||[]).filter(p=>p.rect&&p.step<C.step&&!p.coreTransition).map(p=>({
     x0:p.x0,z0:p.z0,x1:p.x0+(p.nx-1)*p.step,z1:p.z0+(p.nz-1)*p.step
   }));
-  const cutRects=[core,...finePatches];
+  const transitionCuts=[core,...finePatches];
+  const cutRects=[...transitionCuts,...transitions.map(p=>({x0:p.x0,z0:p.z0,x1:p.x0+(p.nx-1)*p.step,z1:p.z0+(p.nz-1)*p.step}))];
   const inRect=(x,z,b)=>x>=b.x0&&x<=b.x1&&z>=b.z0&&z<=b.z1;
   const sample=(g,x,z)=>{
     const u=Math.max(0,Math.min(g.w-1,(x-g.x0)/g.step)),v=Math.max(0,Math.min(g.h-1,(z-g.z0)/g.step));
@@ -292,15 +298,15 @@ function buildSFRegion(scene, { paintIntervals = null } = {}) {
     return(q[k]*(1-a)+q[k+1]*a)*(1-b)+(q[k+g.w]*(1-a)+q[k+g.w+1]*a)*b;
   };
   const terrain=[];
-  function geometry(g,t,stride,far){
-    const n=Math.ceil((t.w-1)/stride),row=n+1,vertices=row*row;
+  function geometry(g,t,stride,far,transition=false){
+    const n=Math.ceil((t.w-1)/stride),nz=Math.ceil((t.h-1)/stride),row=n+1,vertices=row*(nz+1);
     // Construction stays Float64 through clipping; round only at the original final conversion.
     // These are call-local workspaces, not retained LOD caches. Grow only for clipped polygons.
-    let pos=new Float64Array((vertices+row*4)*3),idx=new Uint32Array(n*n*6+n*24),
+    let pos=new Float64Array((vertices+2*row+2*(nz+1))*3),idx=new Uint32Array(n*nz*6+(n+nz)*12),
       positionCount=0,indexCount=0,maxIndex=0;
-    const endX=t.x+Math.min(n*stride,t.w-1)*g.step,endZ=t.z+Math.min(n*stride,t.h-1)*g.step;
+    const endX=t.x+Math.min(n*stride,t.w-1)*g.step,endZ=t.z+Math.min(nz*stride,t.h-1)*g.step;
     // A cut disjoint from the entire grid cannot affect any of its triangles or clipped pieces.
-    const tileCuts=far?[]:cutRects.filter(r=>endX>r.x0&&t.x<r.x1&&endZ>r.z0&&t.z<r.z1);
+    const tileCuts=far?[]:(transition?transitionCuts:cutRects).filter(r=>endX>r.x0&&t.x<r.x1&&endZ>r.z0&&t.z<r.z1);
     const color=far?new Float32Array(pos.length):null;
     const reservePositions=count=>{
       if(count<=pos.length)return;
@@ -313,7 +319,7 @@ function buildSFRegion(scene, { paintIntervals = null } = {}) {
     };
     const green=new THREE.Color(0x667553),rock=new THREE.Color(0x797569),shade=new THREE.Color();
     const ys=new Uint8Array(vertices),hide=new Uint8Array(vertices);
-    for(let j=0;j<=n;j++)for(let i=0;i<=n;i++){
+    for(let j=0;j<=nz;j++)for(let i=0;i<=n;i++){
       const x=t.x+Math.min(i*stride,t.w-1)*g.step,z=t.z+Math.min(j*stride,t.h-1)*g.step;
       let y=sample(g,x,z);const insideCity=inRect(x,z,C);
       if(far&&insideCity)y=sample(C,x,z)-0.2;
@@ -364,19 +370,19 @@ function buildSFRegion(scene, { paintIntervals = null } = {}) {
         for(let i=1;i+1<outside.length;i++)indices(base,base+i,base+i+1);
       }
     };
-    for(let j=0;j<n;j++)for(let i=0;i<n;i++){
+    for(let j=0;j<nz;j++)for(let i=0;i<n;i++){
       const k=j*row+i,a=k+1,b=k+row,c=b+1;
       if((ys[k]&&ys[a]&&ys[b]&&ys[c])||(hide[k]&&hide[a]&&hide[b]&&hide[c]))continue;
       triangle(k,b,a);triangle(a,b,c);
     }
     // Skirts hide the cracks between neighboring levels of detail.
-    for(const edge of [Array.from({length:row},(_,i)=>i),Array.from({length:row},(_,i)=>n*row+i),Array.from({length:row},(_,i)=>i*row),Array.from({length:row},(_,i)=>i*row+n)]){
-      const base=positionCount/3;reservePositions(positionCount+row*3);
+    for(const edge of transition?[]:[Array.from({length:row},(_,i)=>i),Array.from({length:row},(_,i)=>nz*row+i),Array.from({length:nz+1},(_,i)=>i*row),Array.from({length:nz+1},(_,i)=>i*row+n)]){
+      const base=positionCount/3;reservePositions(positionCount+edge.length*3);
       for(const k of edge){
         const offset=positionCount;pos[positionCount++]=pos[k*3];pos[positionCount++]=pos[k*3+1]-Math.max(3,g.step*stride/2);pos[positionCount++]=pos[k*3+2];
         if(far){color[offset]=color[k*3];color[offset+1]=color[k*3+1];color[offset+2]=color[k*3+2];}
       }
-      for(let i=0;i<n;i++){indices(edge[i],base+i,edge[i+1]);indices(edge[i+1],base+i,base+i+1);}
+      for(let i=0;i<edge.length-1;i++){indices(edge[i],base+i,edge[i+1]);indices(edge[i+1],base+i,base+i+1);}
     }
     const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(pos.subarray(0,positionCount),3));
     // Match Three's arrayNeedsUint32 (65535 itself also selects Uint32); keep exact-sized owned outputs.
@@ -386,8 +392,18 @@ function buildSFRegion(scene, { paintIntervals = null } = {}) {
   for(const [g,far]of[[C,false],[H,true]])for(const t of g.tiles){
     const bounds={x0:t.x,z0:t.z,x1:t.x+t.size,z1:t.z+t.size},exclude=far?C:innerCore;
     if(inRect(bounds.x0,bounds.z0,exclude)&&inRect(bounds.x1,bounds.z1,exclude))continue;
-    const stride=far?1:4,mesh=new THREE.Mesh(geometry(g,t,stride,far),far?farMat:groundMat);
-    mesh.name=far?'SFHorizonTerrain':'SFRegionTerrain';mesh.receiveShadow=!far;mesh.castShadow=false;group.add(mesh);terrain.push({g,t,far,stride,mesh,geometries:new Map([[stride,mesh.geometry]])});
+    const o=Terrain.coreTransition?.outer;
+    const seam=!far&&o&&bounds.x1>=o.x0&&bounds.x0<=o.x1&&bounds.z1>=o.z0&&bounds.z0<=o.z1;
+    const stride=far||seam?1:4,mesh=new THREE.Mesh(geometry(g,t,stride,far),far?farMat:groundMat);
+    mesh.name=far?'SFHorizonTerrain':'SFRegionTerrain';mesh.receiveShadow=!far;mesh.castShadow=false;group.add(mesh);terrain.push({g,t,far,seam,stride,mesh,geometries:new Map([[stride,mesh.geometry]])});
+  }
+  // No skirts or overlapping support lids: the collar itself is the authoritative fine surface. It has one
+  // scene-owned geometry per strip and no historical LOD variants. Adjacent city tiles remain on their native 8 m
+  // grid so their outer join cannot reopen when the camera selects a 16/32 m regional LOD.
+  for(const p of transitions){
+    const g={x0:p.x0,z0:p.z0,w:p.nx,h:p.nz,step:p.step,heights:p.h};
+    const mesh=new THREE.Mesh(geometry(g,{x:p.x0,z:p.z0,w:p.nx,h:p.nz},1,false,true),groundMat);
+    mesh.name='SFRegionTerrainTransition';mesh.receiveShadow=true;mesh.castShadow=false;group.add(mesh);
   }
   // Dashed centre paint follows measured centreline geometry. Marking style is an estimate at this tier.
   const roadCells=new Map(),paintMat=new THREE.MeshBasicNodeMaterial({color:0xc6b67d,alphaTest:.5});
@@ -499,7 +515,7 @@ function buildSFRegion(scene, { paintIntervals = null } = {}) {
     if(elapsed-last<0.75&&!moved)return;last=elapsed;lastRider.x=rider.x;lastRider.z=rider.z;
     for(const item of terrain){if(item.far)continue;const d=Math.hypot(camera.position.x-item.t.x-item.t.size/2,camera.position.z-item.t.z-item.t.size/2);
       const rd=Math.hypot(Math.max(item.t.x-rider.x,0,rider.x-item.t.x-item.t.size),Math.max(item.t.z-rider.z,0,rider.z-item.t.z-item.t.size));
-      const stride=rd<250||d<1600?1:d<4500?2:4;if(stride!==item.stride){if(!item.geometries.has(stride))item.geometries.set(stride,geometry(item.g,item.t,stride,false));item.mesh.geometry=item.geometries.get(stride);item.stride=stride;}}
+      const stride=item.seam||rd<250||d<1600?1:d<4500?2:4;if(stride!==item.stride){if(!item.geometries.has(stride))item.geometries.set(stride,geometry(item.g,item.t,stride,false));item.mesh.geometry=item.geometries.get(stride);item.stride=stride;}}
     for(const mesh of roadMeshes){const c=mesh.geometry.boundingSphere.center;mesh.visible=Math.hypot(camera.position.x-c.x,camera.position.z-c.z)<3000;}
     for(const mesh of buildingMeshes){const c=mesh.boundingSphere.center;mesh.visible=Math.hypot(camera.position.x-c.x,camera.position.z-c.z)<buildingDistance;}
     regionTrees.update(camera.position);

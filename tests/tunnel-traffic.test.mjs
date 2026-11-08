@@ -21,7 +21,7 @@ const typed = a => Buffer.from(a.buffer, a.byteOffset, a.byteLength).toString('h
 const digest = value => sha(JSON.stringify(value, (_, v) => typeof v === 'number' && !Number.isFinite(v) ? String(v) : v));
 const FROZEN = Object.freeze({
   roadSource: 'bb55891475d2a06bdf16d6475cdad80b99d73b783960a8f0d56a4861d7ab81fb',
-  gradeSource: '9ff431f3790e84843cf978907e6afed8eb575c091b5b16e9e5e2beb702c8fb09',
+  gradeSource: '685429a840680e45ef6fd9ef862653f44ed0322e6dd404d4d618c6aec32d6ebc',
   // Booking adds spawn-only exclusions and pedestrian draw clearance; routing and pose checks remain frozen below.
   trafficSource: 'c6e9beb14bc82d67fd9d1e7482c45803e7fe301621b1f0ea7261e141c91fa5f3',
   graph: 'f702c29efb17b09eb0d9024391f1b2545d55dca22a2b21f8ad27cf2cb5c18c8d',

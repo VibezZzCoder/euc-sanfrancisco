@@ -97,7 +97,10 @@ function buildTerrainMesh(scene) {
           hi = Math.max(hi, y);
         }
       }
-      chunks.push({ cx, cz, lo, hi, land, lod: LOD_STEPS.length - 1 });
+      // The shared regional collar meets every measured 2 m edge vertex. Coarsening this boundary would reopen
+      // the crack even though the collar/support stayed correct. Interior chunks keep their existing LOD policy.
+      const seam = !!T.coreTransition && (cx === 0 || cz === 0 || cx === nx - 1 || cz === nz - 1);
+      chunks.push({ cx, cz, lo, hi, land, seam, lod: seam ? 0 : LOD_STEPS.length - 1 });
     }
   }
 
@@ -307,7 +310,7 @@ function buildTerrainMesh(scene) {
       while (lod < LOD_DIST.length && d > LOD_DIST[lod]) lod++;
       const rd = Math.hypot(Math.max(x0 - rider.x, 0, rider.x - x0 - CHUNK),
         Math.max(z0 - rider.z, 0, rider.z - z0 - CHUNK));
-      if (rd < 200) lod = 0; // physical profile is always the 2 m diagonal, regardless of camera distance/height
+      if (c.seam || rd < 200) lod = 0; // collar boundary and rider-near physical profile stay on the 2 m diagonal
       // stay finer while within the hysteresis band of the threshold just crossed outwards
       if (lod > c.lod && d < LOD_DIST[lod - 1] * (1 + HYSTERESIS)) lod = c.lod;
       c.lod = lod;

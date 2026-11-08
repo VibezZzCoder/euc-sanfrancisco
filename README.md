@@ -39,7 +39,7 @@ owner-approved exception. Street, district and landmark names are kept as place 
   <a href="screenshots/stockton-tunnel.webp"><img src="screenshots/stockton-tunnel.webp" width="420" alt="Cool Rider facing Stockton Tunnel's south masonry portal and illuminated bore, with the riding HUD visible." /></a>
 </p>
 
-*In-game screenshots from the Early Access build: WebGPU, High graphics, 100% 3D resolution, Golden Hour,
+*In-game screenshots from Early Access builds: WebGPU, High graphics, 100% 3D resolution, Golden Hour,
 1280×720. Three views use the game's hide-HUD control. Click any image for full size.*
 
 ## Play
@@ -133,9 +133,9 @@ This is an early release. Known issues include:
 
 - **Tunnel approaches:** some approach ramps sit awkwardly behind the newer tunnel portal walls.
 - **Bay Bridge:** upper-west traffic may extend beyond the visible deck.
-- **I-80 W off-ramp near Clementina St:** an owner-reported approach cannot be climbed; investigation is pending.
-- **Vermont St / Potrero Hill:** an owner-reported separation at the built-city/outer-land boundary needs investigation.
-- **Lombard/Hyde gallery view:** a reported green/pink road artifact awaits investigation; its cause is unconfirmed.
+- **Recent local repairs:** the I-80 W off-ramp near Clementina, a terrain step near Vermont St, and Lombard's
+  conspicuous planting boxes have been improved. Selected riding segments were tested on both graphics backends;
+  complete routes, other boundary locations and physical devices still need broader review.
 - **Outer neighbourhoods** look bland and low in detail.
 - **Union Square, Dragon Gate and Fisherman's Wharf** still lack their real character.
 - **Alcatraz and Yerba Buena Island** are undercooked.

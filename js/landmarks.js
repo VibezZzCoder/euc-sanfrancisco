@@ -941,7 +941,7 @@ function buildLandmarks(scene) {
   // ---------------------------------------------------------------------------------------------------------------
   // Lombard Street's crooked block (P5.5, provenance/landmarks/lombard-street.md): red brick paving (OSM surface=bricks)
   // along the switchbacks the road graph drives (PLAN P3-6), terraced flower beds in the rest of its 10 m between the
-  // curbs, steps down both sidewalks. ESTIMATES: the paved width (5.6 m), the beds' terraces (1 m cells, 0.25 m proud),
+  // curbs, steps down both sidewalks. ESTIMATES: the paved width (5.6 m), low planted beds on 1 m cells,
   // the flowers' colours, the steps (0.6 m treads)
   // ---------------------------------------------------------------------------------------------------------------
   function buildLombard() {
@@ -975,8 +975,9 @@ function buildLandmarks(scene) {
       }
       return d;
     };
-    const P = createParts({ surfaceOf: (mat) => mat === brickMat ? 'brick' : 'pavement' });
+    const P = createParts({ surfaceOf: (mat) => mat === brickMat ? 'brick' : mat === soilMat ? 'grass' : 'pavement' });
     const brickMat = std(0x93503c, 0.92, 0.0);
+    const soilMat = std(0x514738, 1, 0);
     brickMat.polygonOffset = true; brickMat.polygonOffsetFactor = -2; brickMat.polygonOffsetUnits = -2;
     // paving: a ribbon 5.6 m wide along each link, 1 m stations, 5 cm over the ground
     const HALF = 2.8;
@@ -1006,28 +1007,58 @@ function buildLandmarks(scene) {
       for (let k = 0; k < nrm.count; k++) if (nrm.getY(k) < 0) nrm.setXYZ(k, -nrm.getX(k), -nrm.getY(k), -nrm.getZ(k));
       P.add(brickMat, g, null, null, { doubleSided: true, replacesTerrain: true, layered: false });
     }
-    // flower beds: 1 m cells between the curbs (corridor / 2 off the axis) farther than the paving from the road
+    // Conforming soil and low rounded planting, not tall candy-coloured box walls. The entire cell (including its
+    // corners) stays beyond the swept road ribbon with 25 cm clearance. Grounded soil facets own contact; soft leaves
+    // and small flower heads are decoration, so no invisible old box bodies remain above the sloping beds.
     const beds = [];
+    const BED_HALF = 0.46, soilPositions = [];
     for (let t = 8; t < L - 8; t += 1) {
       for (let s = -corridor / 2 + 0.7; s <= corridor / 2 - 0.7; s += 1) {
         const x = A[0] + ux * t - uz * s, z = A[1] + uz * t + ux * s;
-        if (distToRoad(x, z) < HALF + 0.6) continue;
+        if (distToRoad(x, z) < HALF + Math.SQRT2 * BED_HALF + 0.25) continue;
         beds.push([x, T.heightAt(x, z), z]);
+        const corner = (a, b) => {
+          const xx = x + ux * a - uz * b, zz = z + uz * a + ux * b;
+          return [xx, T.heightAt(xx, zz) + 0.025, zz];
+        };
+        const a = corner(-BED_HALF, -BED_HALF), b = corner(-BED_HALF, BED_HALF);
+        const c = corner(BED_HALF, -BED_HALF), d = corner(BED_HALF, BED_HALF);
+        soilPositions.push(...a, ...b, ...c, ...b, ...d, ...c);
       }
     }
-    const bedMesh = new THREE.InstancedMesh(UNIT_BOX, new THREE.MeshStandardNodeMaterial({ roughness: 0.9, metalness: 0 }), Math.max(1, beds.length));
-    const flowers = [0x3f6a2a, 0x46722e, 0x3a5f28, 0x507a34, 0x9c3d6a, 0xb05a82, 0x6d4f92, 0x3f6a2a, 0x46722e];
-    const m4 = new THREE.Matrix4(), col = new THREE.Color();
+    const soil = new THREE.BufferGeometry();
+    soil.setAttribute('position', new THREE.Float32BufferAttribute(soilPositions, 3));
+    soil.computeVertexNormals();
+    P.add(soilMat, soil, null, null, { layered: false });
+    const plantingMaterial = new THREE.MeshStandardNodeMaterial({ roughness: 0.96, metalness: 0 });
+    const canopy = new THREE.SphereGeometry(1, 8, 4);
+    const bedMesh = new THREE.InstancedMesh(canopy, plantingMaterial, Math.max(1, beds.length));
+    const flowerMesh = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 0), plantingMaterial, Math.max(1, beds.length * 3));
+    const foliage = [0x405c38, 0x4c653e, 0x3c5735, 0x536c43];
+    const flowers = [0xa66b83, 0xc48a9b, 0xa68bb2, 0xc5bca1];
+    const m4 = new THREE.Matrix4(), col = new THREE.Color(), normal = new THREE.Vector3();
+    const rotation = new THREE.Quaternion();
     beds.forEach(([x, y, z], i) => {
-      m4.compose(new THREE.Vector3(x, y + 0.05, z), new THREE.Quaternion().setFromAxisAngle(UP, -Math.atan2(uz, ux)), new THREE.Vector3(1.02, 0.6, 1.02));
+      normal.set(T.heightAt(x - 0.25, z) - T.heightAt(x + 0.25, z), 0.5,
+        T.heightAt(x, z - 0.25) - T.heightAt(x, z + 0.25)).normalize();
+      rotation.setFromUnitVectors(UP, normal);
+      m4.compose(new THREE.Vector3(x, y + 0.04, z), rotation, new THREE.Vector3(0.47, 0.19, 0.47));
       bedMesh.setMatrixAt(i, m4);
-      bedMesh.setColorAt(i, col.setHex(flowers[Math.floor(Math.abs(Math.sin(x * 12.99 + z * 78.23) * 43758.5) % flowers.length)]));
-      window.NYC.RideGeometry?.addBox({ x, y: y + 0.05, z }, { x: 0.51, y: 0.3, z: 0.51 }, -Math.atan2(uz, ux),
-        { surface: 'grass', top: true });
+      bedMesh.setColorAt(i, col.setHex(foliage[i % foliage.length]));
+      for (let k = 0; k < 3; k++) {
+        const phase = i * 2.39996 + k * 2.0944;
+        const xx = x + Math.cos(phase) * 0.23, zz = z + Math.sin(phase) * 0.23;
+        m4.compose(new THREE.Vector3(xx, T.heightAt(xx, zz) + 0.19, zz), rotation, new THREE.Vector3(0.115, 0.055, 0.115));
+        flowerMesh.setMatrixAt(i * 3 + k, m4);
+        flowerMesh.setColorAt(i * 3 + k, col.setHex(flowers[(i + k) % flowers.length]));
+      }
     });
     bedMesh.count = beds.length;
     bedMesh.name = 'landmark:lombard-beds';
     bedMesh.receiveShadow = true;
+    flowerMesh.count = beds.length * 3;
+    flowerMesh.name = 'landmark:lombard-flowers';
+    flowerMesh.receiveShadow = true;
     // steps down the middle of both sidewalks: 0.6 m treads, each from its own ground
     const steps = [];
     for (const sg of [-1, 1]) {
@@ -1040,9 +1071,10 @@ function buildLandmarks(scene) {
     const g = new THREE.Group();
     g.name = 'landmark:lombard';
     const st = P.build(g, 'landmark:lombard', { shadow: false });
-    g.add(bedMesh);
+    g.add(bedMesh, flowerMesh);
     group.add(g);
-    return { name: 'Lombard Street', slug: 'lombard-street', tris: st.tris + beds.length * 12, draws: st.draws + 1 };
+    return { name: 'Lombard Street', slug: 'lombard-street',
+      tris: st.tris + beds.length * (canopy.index.count / 3 + 3 * 20), draws: st.draws + 2 };
   }
 
   // ---------------------------------------------------------------------------------------------------------------

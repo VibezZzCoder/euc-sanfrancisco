@@ -66,7 +66,7 @@ function same(a, b) {
   for (const key of ['boundingSphere', 'boundingBox', 'groups', 'drawRange']) assert.deepEqual(b[key], a[key], key);
 }
 
-baselineTest('regional streaming: pinned baseline, exact normals, sampler, thresholds and resource ownership remain unchanged', () => {
+baselineTest('regional streaming: pinned loader, exact normals and non-terrain actors remain unchanged outside the shared collar repair', () => {
   assert.equal(hash(before), '84769163b43edc90e5cc2640154e62ebfe1b29b041c25b3ecf2302954b6a6907');
   // Undo only exact reviewed paint-hook edits, alongside the scoped tree/material edits.
   // Never remove the whole road builder: its sampling, UVs and ownership remain guarded.
@@ -83,8 +83,11 @@ baselineTest('regional streaming: pinned baseline, exact normals, sampler, thres
       const x=ax+dx*(a+b)/2,z=az+dz*(a+b)/2;`,
   '      const a=i*length/n,b=(i+1)*length/n,x=ax+dx*(a+b)/2,z=az+dz*(a+b)/2;');
   undo('      }\n      }\n    }\n  }\n  const roadMeshes=[];', '      }\n    }\n  }\n  const roadMeshes=[];');
-  assert.equal(guarded.slice(0, guarded.indexOf('  function geometry(')), before.slice(0, before.indexOf('  function geometry(')));
-  assert.equal(guarded.slice(guarded.indexOf('  for(const [g,far]')), before.slice(before.indexOf('  for(const [g,far]')));
+  // Core/city installation, collar clipping and boundary LOD now intentionally differ. Keep exact guards on the
+  // unchanged decoder, normal arithmetic and actors/paint instead of asserting the old broken hard handoff.
+  for(const [start,end] of [['function decodeRegionRLE','function installRegionTerrain'],
+    [normalStart,'function buildSFRegion('],['  // Dashed centre paint','  let last=']])
+    assert.equal(section(guarded,start,end),section(before,start,end));
 });
 
 baselineTest('regional streaming: all committed tile/stride outputs, clipping, skirts and seam endpoints match fc9826b', t => {
