@@ -444,6 +444,28 @@ function makeMaskTexture() {
 }
 
 // Hills' shadows: the surface at SHADOW_STEP m, cut into SHADOW_CELL m cells on the shadow proxy layer
+// Like scene-culling.js's static stand-ins, use a private actual-position box without changing shared geometry
+// bounds or layout. Keep this builder standalone; scene-culling is evaluated later in the classic-script seam.
+function setTerrainShadowBoxCulling(mesh) {
+  const local = new THREE.Box3().setFromBufferAttribute(mesh.geometry.attributes.position);
+  const x = Math.max(Math.abs(local.min.x), Math.abs(local.max.x));
+  const y = Math.max(Math.abs(local.min.y), Math.abs(local.max.y));
+  const z = Math.max(Math.abs(local.min.z), Math.abs(local.max.z));
+  const world = new THREE.Box3();
+  mesh.intersectsFrustum = function (frustum) {
+    if (typeof frustum.intersectsBox !== 'function') return THREE.Mesh.prototype.intersectsFrustum.call(this, frustum);
+    // Re-read the renderer-current world transform, including changed/reparented terrain groups. Scale the tiny
+    // Float32 margin by operation magnitudes, not just the result (large translations can cancel local positions).
+    const e = this.matrixWorld.elements;
+    const margin = .001 + 2 ** -21 * Math.max(
+      Math.abs(e[0]) * x + Math.abs(e[4]) * y + Math.abs(e[8]) * z + Math.abs(e[12]),
+      Math.abs(e[1]) * x + Math.abs(e[5]) * y + Math.abs(e[9]) * z + Math.abs(e[13]),
+      Math.abs(e[2]) * x + Math.abs(e[6]) * y + Math.abs(e[10]) * z + Math.abs(e[14]));
+    world.copy(local).applyMatrix4(this.matrixWorld).expandByScalar(margin);
+    return frustum.intersectsBox(world);
+  };
+}
+
 function buildShadowCaster(surfaceY, extentX, extentZ) {
   const T = Terrain;
   const material = new THREE.MeshBasicNodeMaterial({ color: 0x000000, side: THREE.FrontSide });
@@ -478,6 +500,7 @@ function buildShadowCaster(surfaceY, extentX, extentZ) {
       mesh.castShadow = true;
       mesh.receiveShadow = false;
       mesh.userData.shadowProxy = true;
+      setTerrainShadowBoxCulling(mesh);
       if (meshes.length) mesh.userData.sharesPipelineWith = meshes[0];
       meshes.push(mesh);
     }

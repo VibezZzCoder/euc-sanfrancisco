@@ -29,6 +29,7 @@ import { SfChaseHud } from './sf-chase-hud.js';
 import { createBookingDirector, BookingScreen } from './booking.js';
 import { createBookingScene } from './booking-scene.js';
 import { createSfBookingPlacement } from './sf-booking-placement.js';
+import { createRenderStats } from './render-stats.js';
 
 // Exploratory survey points, NOT accepted final staging. The intake is derived from the
 // surveyed desk point; every transfer and release is independently checked at runtime.
@@ -442,7 +443,8 @@ export async function initApp(startup) {
       booking: booking.active, menu: gameMenu?.isOpen, map: mapSystem.isFullMapOpen,
       title: !titleScreen || titleScreen.isOpen || !titleScreen.started });
   }
-  function resetFramePacing() { framePacer.reset(); frameCount = fpsTimer = 0; }
+  let renderStats = null;
+  function resetFramePacing() { framePacer.reset(); frameCount = fpsTimer = 0; renderStats?.reset(); }
   function resetFrameClock() { lastTime = null; resetFramePacing(); }
   function syncLifecycle() {
     const current = owner();
@@ -467,6 +469,7 @@ export async function initApp(startup) {
       if (previous) await previous;
       if (signal.aborted || stopped) throw new DOMException('Compilation cancelled', 'AbortError');
       rendererBusy = true;
+      renderStats?.reset();
       const target = renderer.getRenderTarget(), previousMRT = renderer.getMRT(), culled = [];
       try {
         scene.add(group);
@@ -844,6 +847,8 @@ export async function initApp(startup) {
   startup.phase('shaders'); compileWork = precompileShaders(); await compileWork;
   if (startup.failed) return;
   startup.phase('first-frame'); await stage('Preparing shadows and the first frame…', 'firstFrame');
+  renderStats = createRenderStats({ enabled: params.get('perf') === '1', renderer });
+  if (renderStats) ownedDisposals.push(renderStats.dispose);
   lifecycleReady = true; syncLifecycle();
 
   function updateWorldView(viewTime) {
@@ -882,6 +887,7 @@ export async function initApp(startup) {
       else if (current === 'riding' || current === 'map') gamepadControls.update(dt);
       current = owner(); // a pad edge may change owner in this callback
       if (current !== ownerBeforeInput) dt = 0;
+      renderStats?.setActive(current === 'riding' && !rendererBusy && windowFocused);
       if (current === 'hidden' || current === 'graphics' || rendererBusy) return;
       let riding = current === 'riding';
       const title = current === 'title';
@@ -950,7 +956,9 @@ export async function initApp(startup) {
             if (nemesisWarming) { nemesis.endWarmup(); nemesisWarming = false; }
           }
         }
-        renderPipeline.render(); frameCount++;
+        renderPipeline.render();
+        renderStats?.submitted(now, riding);
+        frameCount++;
         graphicsLimit.dataset.quality = graphics.value;
         graphicsLimit.removeAttribute('aria-busy');
         if (!warmedUp) {

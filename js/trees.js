@@ -10,7 +10,7 @@
 // - Crown-shell normals, interior occlusion & sway weights baked per vertex (attributes: createTreeMaterial in
 //   tsl-materials.js)
 // - Three levels of detail (two variants per species up close), picked per tree from the camera distance and
-//   regrouped into one instanced mesh per species / variant / level whenever the camera has moved a few metres
+//   regrouped into thirty global pools; one conservative view-plus-sun union is published before each drawn scene
 
 const { THREE } = window.NYC;
 const { createTreeMaterial } = window.NYC;
@@ -863,21 +863,15 @@ function buildTreeGeometries(speciesIndex, variant, tileMeters) {
 }
 
 // =====================================================================================================================
-// 5. TREE FIELD: CPU cell-hierarchical selection feeding the original global species / variant / level pools
+// 5. TREE FIELD: original 30 global pools, original movement-gated CPU LOD hierarchy, one view/shadow union
 // =====================================================================================================================
 // CPU hierarchy adapted from euc-newyork@9c4cfc9e32a425d58bac36cf9e074a2aa77fac70, js/trees.js
-// (Mr.doob's e35c06c hierarchy, corrected global-pool hybrid). Cells select candidates; global pools retain draw order.
-// Keep SF's six species, terrain-aware movement gate, render-hook owner and startup/shadow policy unchanged.
+// (Mr.doob's e35c06c hierarchy). Selector samples remain distinct from full-canopy render bounds.
 const TREE_CELL_SIZE = 200;
-const LOD_NEAR = 105; // full detail within (m)
-const LOD_MID = 420; // coarse cards & branches within; whole-crown cards beyond
+const LOD_NEAR = 105;
+const LOD_MID = 420;
 const LOD_HYSTERESIS = 6;
-// The camera moves this far before the levels are worked out again (was 4 m: with San Francisco's ~23k street trees
-// every re-sort re-uploads the instance buffers, and at driving speed that cost a 20 ms frame several times a second);
-// from the air, a fifth of the camera's height above the ground
 const RELEVEL_STEP = 10;
-// Draw distance per tier (0 park & plaza, 1 avenue & esplanade, 2 cross-street); at street level everything beyond
-// LOW_CUTOFF is behind the buildings anyway
 const MAX_DIST = [3000, 1600, 950];
 const LOW_CUTOFF = 1150;
 
@@ -886,22 +880,11 @@ function hashPos(x, y, z) {
   return s - Math.floor(s);
 }
 
-/**
- * Builds the instanced tree field for `sites` ({ x, y, z, scale, species, yaw?, sx?, sz?, tier? }) and keeps each
- * tree's level of detail up to date from the camera of every view pass (scene.onBeforeRender). Returns
- * { group, material, atlas, update(cameraPosition) }.
- */
-// One leaf atlas, material and species geometry set per page, shared by the street-tree field, the regional tree pool
-// (region.js) and landmark plantings (landmarks.js), so every tree in the city shades alike and the atlas is drawn once.
-// Whoever asks first builds it (the region is built before the street trees). `regionalMaterial` is the same material
-// with the canyon sky occlusion taken from the tree's own height instead of the core terrain texture (which only covers
-// the downtown core and clamps outside it).
 let sharedTreeAssets = null;
 function getTreeAssets() {
   if (sharedTreeAssets) return sharedTreeAssets;
   const atlas = createLeafAtlas();
   const material = createTreeMaterial(atlas.texture);
-  // Geometries: [species][variant][lod]
   const geos = SPECIES.map((_, s) => [0, 1].map((v) => buildTreeGeometries(s, v, atlas.tileMeters)));
   let regional = null;
   sharedTreeAssets = {
@@ -916,173 +899,149 @@ function createTreeField(scene, sites) {
   const group = new THREE.Group();
   group.name = 'Trees';
   const { atlas, material, geos } = getTreeAssets();
-
-  // Per-tree transform & data
   const N = sites.length;
-  const mats = new Float32Array(N * 16);
-  const data = new Float32Array(N * 4);
-  const px = new Float32Array(N);
-  const py = new Float32Array(N);
-  const pz = new Float32Array(N);
-  const meshOf = new Int16Array(N * 3); // mesh index per level
-  const tier = new Uint8Array(N);
-  const lod = new Uint8Array(N).fill(255);
-
-  // Meshes: lod 0 & 1 per species & variant, lod 2 per species
-  const meshes = [];
-  const counts = [];
-  const makeMesh = (geo, name) => {
-    meshes.push({ geo, name, capacity: 0 });
-    return meshes.length - 1;
-  };
+  const mats = new Float32Array(N * 16), data = new Float32Array(N * 4);
+  const px = new Float32Array(N), py = new Float32Array(N), pz = new Float32Array(N);
+  const meshOf = new Int16Array(N * 3), tier = new Uint8Array(N), lod = new Uint8Array(N).fill(255);
+  const drawn = new Uint8Array(N).fill(255), spheres = new Float32Array(N * 4), dirty = new Uint8Array(30);
+  const meshes = [], counts = [];
+  function makeMesh(geo, name) {
+    // createTreeMaterial adds wind AFTER instancing. Its normalized normalLocal bounds flutter by .0375.
+    const tree = geo.attributes.aTree.array;
+    let sway = 0, flutter = 0;
+    for (let i = 0; i < tree.length; i += 4) {
+      sway = Math.max(sway, Math.abs(tree[i + 2]));
+      flutter = Math.max(flutter, Math.abs(tree[i] * tree[i + 2]));
+    }
+    const height = Math.max(Math.abs(geo.boundingBox.min.y), Math.abs(geo.boundingBox.max.y)), bend = (height / 11) ** 2;
+    const wind = new V3((.86 * .2 + .51 * .06) * bend + .0375 * flutter + .01,
+      .05 * sway + .0375 * flutter + .01, (.51 * .2 + .86 * .06) * bend + .0375 * flutter + .01);
+    meshes.push({ geo, name, wind, capacity: 0 }); return meshes.length - 1;
+  }
   const meshIndex = SPECIES.map((sp, s) => ({
-    l0: [0, 1].map((v) => makeMesh(geos[s][v][0], `Trees_${sp.name}_v${v}_lod0`)),
-    l1: [0, 1].map((v) => makeMesh(geos[s][v][1], `Trees_${sp.name}_v${v}_lod1`)),
+    l0: [0, 1].map(v => makeMesh(geos[s][v][0], `Trees_${sp.name}_v${v}_lod0`)),
+    l1: [0, 1].map(v => makeMesh(geos[s][v][1], `Trees_${sp.name}_v${v}_lod1`)),
     l2: makeMesh(geos[s][0][2], `Trees_${sp.name}_lod2`)
   }));
-
-  const dummy = new THREE.Object3D();
-  const tint = new THREE.Color();
-  const cells = new Map();
+  const dummy = new THREE.Object3D(), tint = new THREE.Color(), cells = new Map();
+  const box = new THREE.Box3(), common = new THREE.Box3(), center = new V3(), matrix = new THREE.Matrix4();
   sites.forEach((t, i) => {
     const sp = Math.min(SPECIES.length - 1, Math.max(0, t.species || 0));
-    const r1 = hashPos(t.x, 1.3, t.z);
-    const r2 = hashPos(t.z, 7.1, t.x);
-    const r3 = hashPos(t.x + t.z, 3.3, 0.7);
-    const variant = hashPos(t.x, 5.9, t.z) < 0.5 ? 0 : 1;
-    const s = t.scale * (0.9 + r1 * 0.2);
+    const r1 = hashPos(t.x, 1.3, t.z), r2 = hashPos(t.z, 7.1, t.x), r3 = hashPos(t.x + t.z, 3.3, 0.7);
+    const variant = hashPos(t.x, 5.9, t.z) < .5 ? 0 : 1;
+    const s = t.scale * (.9 + r1 * .2);
     dummy.position.set(t.x, t.y || 0, t.z);
     dummy.rotation.set(0, t.yaw ?? r2 * Math.PI * 2, 0);
-    dummy.scale.set(s * (0.9 + r3 * 0.2) * (t.sx || 1), s * (0.88 + r1 * 0.24), s * (0.9 + r2 * 0.2) * (t.sz || 1));
-    dummy.updateMatrix();
-    dummy.matrix.toArray(mats, i * 16);
+    dummy.scale.set(s * (.9 + r3 * .2) * (t.sx || 1), s * (.88 + r1 * .24), s * (.9 + r2 * .2) * (t.sz || 1));
+    dummy.updateMatrix(); dummy.matrix.toArray(mats, i * 16);
     const R = window.NYC.RideGeometry, e = dummy.matrix.elements;
-    // (`body: false`: the site's owner already registered its trunk, e.g. landmarks.js's Salesforce Park plantings)
     if (R && t.body !== false) for (const p of geos[sp][variant][0].userData.rideTrunk || []) {
-      R.addPrism(p.outer.map((v) => ({ x: e[0] * v.x + e[8] * v.z + e[12], z: e[2] * v.x + e[10] * v.z + e[14] })),
+      R.addPrism(p.outer.map(v => ({ x: e[0] * v.x + e[8] * v.z + e[12], z: e[2] * v.x + e[10] * v.z + e[14] })),
         e[13] + p.minY * e[5], e[13] + p.maxY * e[5], { surface: 'wood' });
     }
-    tint.setHex(SPECIES[sp].tints[Math.floor(r3 * 2.999)]).multiplyScalar(0.82 + r1 * 0.36);
-    data.set([tint.r, tint.g, tint.b, sp + r2 * 0.999], i * 4);
-    px[i] = t.x;
-    py[i] = (t.y || 0) + 6 * s;
-    pz[i] = t.z;
-    tier[i] = Math.min(2, t.tier || 0);
-    // Construction-only signed keys; no packed-coordinate aliasing or extra GPU batches.
+    tint.setHex(SPECIES[sp].tints[Math.floor(r3 * 2.999)]).multiplyScalar(.82 + r1 * .36);
+    data.set([tint.r, tint.g, tint.b, sp + r2 * .999], i * 4);
+    px[i] = t.x; py[i] = (t.y || 0) + 6 * s; pz[i] = t.z; tier[i] = Math.min(2, t.tier || 0);
     const key = Math.floor(t.x / TREE_CELL_SIZE) + ',' + Math.floor(t.z / TREE_CELL_SIZE);
     let cell = cells.get(key);
     if (!cell) cells.set(key, cell = { trees: [] });
     cell.trees.push(i);
-    const mi = meshIndex[sp];
-    meshOf[i * 3] = mi.l0[variant];
-    meshOf[i * 3 + 1] = mi.l1[variant];
-    meshOf[i * 3 + 2] = mi.l2;
-    for (let l = 0; l < 3; l++) meshes[meshOf[i * 3 + l]].capacity++;
+    const mi = meshIndex[sp]; meshOf[i * 3] = mi.l0[variant]; meshOf[i * 3 + 1] = mi.l1[variant]; meshOf[i * 3 + 2] = mi.l2;
+    // A single compact sphere per tree encloses ALL three actual LODs, from uploaded Float32 transforms plus wind.
+    matrix.fromArray(mats, i * 16); common.makeEmpty();
+    for (let l = 0; l < 3; l++) {
+      const pool = meshes[meshOf[i * 3 + l]]; pool.capacity++;
+      common.union(box.copy(pool.geo.boundingBox).applyMatrix4(matrix).expandByVector(pool.wind));
+    }
+    common.getCenter(center);
+    const at = i * 4;
+    spheres[at] = center.x; spheres[at + 1] = center.y; spheres[at + 2] = center.z;
+    const radius = Math.hypot(common.max.x - common.min.x, common.max.y - common.min.y, common.max.z - common.min.z) / 2
+      + Math.hypot(center.x - spheres[at], center.y - spheres[at + 1], center.z - spheres[at + 2]);
+    spheres[at + 3] = radius + Math.max(.001, radius * 2 ** -21); // round conservatively into Float32
   });
-
-  // Bounds enclose the original Float32 mid-crown samples in all three dimensions. They select only LOD;
-  // they never frustum-cull geometry/shadows or change the construction-time physical trunk registrations.
-  const cellList = Array.from(cells.values(), (cell) => {
-    const trees = Int32Array.from(cell.trees);
-    const bounds = new THREE.Box3();
-    const point = new V3();
+  const cellList = Array.from(cells.values(), cell => {
+    const trees = Int32Array.from(cell.trees), bounds = new THREE.Box3(), point = new V3();
     let minCutoff = Infinity, maxCutoff = 0;
     for (const i of trees) {
       bounds.expandByPoint(point.set(px[i], py[i], pz[i]));
-      minCutoff = Math.min(minCutoff, MAX_DIST[tier[i]]);
-      maxCutoff = Math.max(maxCutoff, MAX_DIST[tier[i]]);
+      minCutoff = Math.min(minCutoff, MAX_DIST[tier[i]]); maxCutoff = Math.max(maxCutoff, MAX_DIST[tier[i]]);
     }
-    const center = bounds.getCenter(new V3());
-    let radiusSq = 0;
-    for (const i of trees) radiusSq = Math.max(radiusSq, point.set(px[i], py[i], pz[i]).distanceToSquared(center));
-    cell.trees = trees;
-    cell.cx = center.x;
-    cell.cy = center.y;
-    cell.cz = center.z;
-    cell.radius = Math.sqrt(radiusSq) + 0.001;
-    cell.minCutoffAloft = minCutoff;
-    cell.maxCutoffAloft = maxCutoff;
-    cell.minCutoffLow = Math.min(minCutoff, LOW_CUTOFF);
-    cell.maxCutoffLow = Math.min(maxCutoff, LOW_CUTOFF);
-    cell.uniformLod = 255; // -1 means mixed, 255 means hidden
-    return cell;
+    const c = bounds.getCenter(new V3()); let radiusSq = 0;
+    for (const i of trees) radiusSq = Math.max(radiusSq, point.set(px[i], py[i], pz[i]).distanceToSquared(c));
+    cell.trees = trees; cell.cx = c.x; cell.cy = c.y; cell.cz = c.z; cell.radius = Math.sqrt(radiusSq) + .001;
+    cell.minCutoffAloft = minCutoff; cell.maxCutoffAloft = maxCutoff;
+    cell.minCutoffLow = Math.min(minCutoff, LOW_CUTOFF); cell.maxCutoffLow = Math.min(maxCutoff, LOW_CUTOFF);
+    cell.uniformLod = 255; return cell;
   });
   cells.clear();
-
-  const instanced = meshes.map((m) => {
+  const cellSpheres = new Float64Array(cellList.length * 4), cellDrawCounts = new Uint32Array(cellList.length);
+  for (let ci = 0; ci < cellList.length; ci++) {
+    common.makeEmpty();
+    for (const i of cellList[ci].trees) {
+      const o = i * 4, r = spheres[o + 3];
+      common.expandByPoint(center.set(spheres[o] - r, spheres[o + 1] - r, spheres[o + 2] - r));
+      common.expandByPoint(center.set(spheres[o] + r, spheres[o + 1] + r, spheres[o + 2] + r));
+    }
+    common.getCenter(center); const o = ci * 4;
+    cellSpheres[o] = center.x; cellSpheres[o + 1] = center.y; cellSpheres[o + 2] = center.z;
+    cellSpheres[o + 3] = Math.hypot(common.max.x - common.min.x, common.max.y - common.min.y, common.max.z - common.min.z) / 2 + .001;
+  }
+  const instanced = meshes.map(m => {
     const geo = new THREE.BufferGeometry();
     for (const name of Object.keys(m.geo.attributes)) geo.setAttribute(name, m.geo.attributes[name]);
-    geo.setIndex(m.geo.index);
-    geo.boundingSphere = m.geo.boundingSphere;
+    geo.setIndex(m.geo.index); geo.boundingSphere = m.geo.boundingSphere;
     const cap = Math.max(1, m.capacity);
-    // Static usage on purpose: three.js re-uploads a DynamicDrawUsage attribute in every render pass of every frame
-    // (both shadow cascades + the scene pass, ~7 MB/frame here). rebuild() uploads just the instances in use, and only
-    // when the levels change.
-    const treeData = new THREE.InstancedBufferAttribute(new Float32Array(cap * 4), 4);
-    geo.setAttribute('aTreeData', treeData);
+    geo.setAttribute('aTreeData', new THREE.InstancedBufferAttribute(new Float32Array(cap * 4), 4));
     const mesh = new THREE.InstancedMesh(geo, material, cap);
-    mesh.name = m.name;
-    mesh.count = 0;
-    mesh.visible = false;
-    mesh.frustumCulled = false; // instances surround the camera: the per-tree levels do the culling
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    group.add(mesh);
-    counts.push(0);
-    return mesh;
+    mesh.name = m.name; mesh.count = 0; mesh.visible = false;
+    mesh.frustumCulled = false; // ONE union is packed before the view; shadow passes must not replace its GPU data
+    mesh.castShadow = mesh.receiveShadow = true; mesh.userData.dynamicInstances = true; mesh.userData.treePool = m.name;
+    group.add(mesh); counts.push(0); return mesh;
   });
-
-  // Regroup every visible tree into the mesh of its level
-  function rebuild() {
-    counts.fill(0);
-    for (let i = 0; i < N; i++) {
-      const l = lod[i];
-      if (l === 255) continue;
-      const mi = meshOf[i * 3 + l];
-      const mesh = instanced[mi];
-      const c = counts[mi]++;
-      // Copy the same Float32 values without two transient views per visible tree.
-      // Resolve the destination each rebuild: the host may replace it with a storage attribute.
-      const matrix = mesh.instanceMatrix.array, treeData = mesh.geometry.attributes.aTreeData.array;
-      for (let k = 0; k < 16; k++) matrix[c * 16 + k] = mats[i * 16 + k];
-      for (let k = 0; k < 4; k++) treeData[c * 4 + k] = data[i * 4 + k];
-    }
-    instanced.forEach((mesh, mi) => {
-      const n = counts[mi];
-      if (n > 0) {
-        // upload only the instances in use (main.js swaps instanceMatrix for a storage attribute: look it up here)
-        for (const attr of [mesh.instanceMatrix, mesh.geometry.attributes.aTreeData]) {
-          attr.clearUpdateRanges();
-          attr.addUpdateRange(0, n * attr.itemSize);
-          attr.needsUpdate = true;
-        }
-      }
-      mesh.count = n;
-      mesh.visible = n > 0;
-    });
+  const uploadRanges = Array.from({ length: 60 }, () => ({ start: 0, count: 0 })), startupStandins = [];
+  function upload(attr, n, range) {
+    let end = n * attr.itemSize;
+    for (let i = 0; i < attr.updateRanges.length; i++) end = Math.max(end, attr.updateRanges[i].start + attr.updateRanges[i].count);
+    attr.clearUpdateRanges(); range.count = end; attr.updateRanges.push(range); attr.needsUpdate = true;
   }
-
+  function setDrawn(i, next) {
+    const old = drawn[i]; if (old === next) return;
+    if (old !== 255) dirty[meshOf[i * 3 + old]] = 1;
+    drawn[i] = next; if (next !== 255) dirty[meshOf[i * 3 + next]] = 1;
+  }
+  function rebuild() {
+    let any = false;
+    for (let mi = 0; mi < 30; mi++) { counts[mi] = 0; if (dirty[mi]) any = true; }
+    if (!any) return;
+    for (let i = 0; i < N; i++) {
+      const level = drawn[i]; if (level === 255) continue;
+      const mi = meshOf[i * 3 + level]; if (!dirty[mi]) continue;
+      const mesh = instanced[mi], slot = counts[mi]++, transform = mesh.instanceMatrix.array, td = mesh.geometry.attributes.aTreeData.array;
+      for (let k = 0; k < 16; k++) transform[slot * 16 + k] = mats[i * 16 + k];
+      for (let k = 0; k < 4; k++) td[slot * 4 + k] = data[i * 4 + k];
+    }
+    for (let mi = 0; mi < 30; mi++) if (dirty[mi]) {
+      const mesh = instanced[mi], n = counts[mi]; dirty[mi] = 0;
+      if (n > 0) {
+        upload(mesh.instanceMatrix, n, uploadRanges[mi * 2]);
+        upload(mesh.geometry.attributes.aTreeData, n, uploadRanges[mi * 2 + 1]);
+      }
+      mesh.count = n; mesh.visible = n > 0;
+    }
+  }
   function setCellUniformLod(cell, target) {
     if (cell.uniformLod === target) return false;
     let changed = false;
-    for (const i of cell.trees) {
-      if (lod[i] !== target) {
-        lod[i] = target;
-        changed = true;
-      }
-    }
-    cell.uniformLod = target;
-    return changed;
+    for (const i of cell.trees) if (lod[i] !== target) { lod[i] = target; changed = true; }
+    cell.uniformLod = target; return changed;
   }
-
-  // Levels from the camera position (3D distance to mid-crown), with hysteresis at every boundary
-  const last = new V3(Infinity, Infinity, Infinity);
-  const cam = new V3();
-  function update(position) {
+  const last = new V3(Infinity, Infinity, Infinity), cam = new V3();
+  function selectLod(position) {
     cam.copy(position);
     const T = window.NYC.Terrain;
     const above = cam.y - (T && T.loaded ? T.groundAt(cam.x, cam.z) : 0);
-    const step = Math.max(RELEVEL_STEP, above * 0.2); // (from the air the levels change slowly)
+    const step = Math.max(RELEVEL_STEP, above * .2);
     if (cam.distanceToSquared(last) < step * step) return false;
     last.copy(cam);
     const low = cam.y < 40;
@@ -1094,22 +1053,14 @@ function createTreeField(scene, sites) {
       const maxCutoff = low ? cell.maxCutoffLow : cell.maxCutoffAloft;
       const minCutoff = low ? cell.minCutoffLow : cell.minCutoffAloft;
       let target = -1;
-      // Only a whole cell safely clear of every applicable hysteresis band can skip per-tree arithmetic.
       if (minD >= maxCutoff + LOD_HYSTERESIS) target = 255;
       else if (maxD < LOD_NEAR - LOD_HYSTERESIS) target = 0;
       else if (minD >= LOD_NEAR + LOD_HYSTERESIS && maxD < LOD_MID - LOD_HYSTERESIS) target = 1;
       else if (minD >= LOD_MID + LOD_HYSTERESIS && maxD < minCutoff - LOD_HYSTERESIS) target = 2;
-      if (target !== -1) {
-        if (setCellUniformLod(cell, target)) changed = true;
-        continue;
-      }
-
+      if (target !== -1) { if (setCellUniformLod(cell, target)) changed = true; continue; }
       let firstLod = -1, allSame = true;
       for (const i of cell.trees) {
-        const dx = px[i] - cam.x;
-        const dy = py[i] - cam.y;
-        const dz = pz[i] - cam.z;
-        // Preserve baseline sqrt/order at edges: squared thresholds can disagree by an ULP.
+        const dx = px[i] - cam.x, dy = py[i] - cam.y, dz = pz[i] - cam.z;
         const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
         const maxD = low ? Math.min(MAX_DIST[tier[i]], LOW_CUTOFF) : MAX_DIST[tier[i]];
         const curL = lod[i] === 255 ? 3 : lod[i];
@@ -1119,44 +1070,125 @@ function createTreeField(scene, sites) {
           if (Math.abs(d - edge) < LOD_HYSTERESIS) nextL = curL;
         }
         const next = nextL === 3 ? 255 : nextL;
-        if (next !== lod[i]) {
-          lod[i] = next;
-          changed = true;
-        }
-        if (firstLod === -1) firstLod = next;
-        else if (next !== firstLod) allSame = false;
+        if (next !== lod[i]) { lod[i] = next; changed = true; }
+        if (firstLod === -1) firstLod = next; else if (next !== firstLod) allSame = false;
       }
       cell.uniformLod = allSame ? firstLod : -1;
     }
-    if (changed) rebuild();
     return changed;
   }
-
-  // Follow the view camera of every scene render (shadow cascades are orthographic and keep the view's levels)
-  const viewPos = new V3();
-  const prevBeforeRender = scene.onBeforeRender;
+  const frusta = [new THREE.Frustum()], clip = new THREE.Matrix4(), identity = new THREE.Matrix4();
+  const lights = [];
+  let discovered = false, frustumCount = 1, filtering = false;
+  function collectLight(object) { if (object.isLight) lights.push(object); }
+  function validFrustum(f) {
+    if (!f || !f.planes || f.planes.length !== 6) return false;
+    for (let j = 0; j < 6; j++) {
+      const p = f.planes[j]; if (!p || !p.normal) return false;
+      const n = p.normal, lengthSq = n.x * n.x + n.y * n.y + n.z * n.z;
+      if (!Number.isFinite(lengthSq) || Math.abs(lengthSq - 1) > 1e-5 || !Number.isFinite(p.constant)) return false;
+    }
+    return true;
+  }
+  function prepareUnion(camera) {
+    if (!discovered) {
+      scene.traverse(collectLight);
+      for (let i = 0; i < lights.length; i++) if (lights[i].isSunLight) {
+        frusta.push(new THREE.Frustum(), new THREE.Frustum());
+      }
+      discovered = true;
+    }
+    // Current SF's SunLight inventory is construction-static. Unsupported active light/shadow configurations,
+    // transformed pools or degenerate projections retain the complete raw-LOD stream, never partial shadows.
+    if (!group.matrixWorld.equals(identity)) return false;
+    for (let mi = 0; mi < 30; mi++) if (!instanced[mi].matrixWorld.equals(identity)) return false;
+    clip.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    frusta[0].setFromProjectionMatrix(clip, camera.coordinateSystem, camera.reversedDepth);
+    if (!validFrustum(frusta[0])) return false;
+    frustumCount = 1;
+    for (let i = 0; i < lights.length; i++) {
+      const light = lights[i]; if (!light.castShadow || light.intensity === 0) continue;
+      const shadow = light.shadow;
+      if (shadow && shadow.intensity === 0) continue; // Low: inactive shadow maps must not enlarge the union
+      const e = light.matrixWorld.elements, directionLengthSq = e[12] * e[12] + e[13] * e[13] + e[14] * e[14];
+      if (!Number.isFinite(directionLengthSq) || directionLengthSq < 1e-12) return false;
+      if (!light.isSunLight || !shadow || !shadow.isSunLightShadow || !Number.isFinite(shadow.intensity) || !shadow.camera
+        || typeof shadow.getViewportCount !== 'function' || typeof shadow.getFrustum !== 'function' || typeof shadow.updateMatrices !== 'function'
+        || (!shadow.autoUpdate && !shadow.needsUpdate)
+        || shadow.camera.coordinateSystem !== camera.coordinateSystem || shadow.camera.reversedDepth !== camera.reversedDepth) return false;
+      if (frustumCount + 2 > frusta.length) return false;
+      try {
+        if (shadow.getViewportCount() !== 2) return false;
+        shadow.updateMatrices(light, camera);
+        for (let c = 0; c < 2; c++) {
+          const f = shadow.getFrustum(c); if (!validFrustum(f)) return false;
+          frusta[frustumCount++].copy(f);
+        }
+      } catch { return false; }
+    }
+    return true;
+  }
+  // Union classification: completely inside any frustum accepts a cell; outside ALL frusta rejects it.
+  function classify(x, y, z, radius) {
+    let intersects = false;
+    for (let f = 0; f < frustumCount; f++) {
+      const planes = frusta[f].planes; let inside = true, outside = false;
+      for (let j = 0; j < 6; j++) {
+        const p = planes[j], n = p.normal, d = n.x * x + n.y * y + n.z * z + p.constant;
+        if (d < -radius) { outside = true; break; }
+        if (d < radius) inside = false;
+      }
+      if (!outside) { if (inside) return 1; intersects = true; }
+    }
+    return intersects ? 0 : -1;
+  }
+  function publish(useUnion) {
+    for (let ci = 0; ci < cellList.length; ci++) {
+      const cell = cellList[ci];
+      if (cell.uniformLod === 255 && cellDrawCounts[ci] === 0) continue;
+      const o = ci * 4, mode = useUnion ? classify(cellSpheres[o], cellSpheres[o + 1], cellSpheres[o + 2], cellSpheres[o + 3]) : 1;
+      if (mode < 0 && cellDrawCounts[ci] === 0) continue;
+      let n = 0;
+      for (let j = 0; j < cell.trees.length; j++) {
+        const i = cell.trees[j], b = i * 4;
+        let next = lod[i];
+        if (next !== 255 && (mode < 0 || (mode === 0 && classify(spheres[b], spheres[b + 1], spheres[b + 2], spheres[b + 3]) < 0))) next = 255;
+        setDrawn(i, next); if (next !== 255) n++;
+      }
+      cellDrawCounts[ci] = n;
+    }
+    rebuild(); filtering = useUnion;
+  }
+  function retireStandins() {
+    for (let i = 0; i < startupStandins.length; i++) dirty[startupStandins[i]] = 1;
+    startupStandins.length = 0;
+  }
+  function update(position) {
+    const changed = selectLod(position);
+    if (!changed && !filtering) return false;
+    retireStandins();
+    publish(false); // standalone API always exposes raw selected LOD, including after a filtered view
+    return changed;
+  }
+  const viewPos = new V3(), prevBeforeRender = scene.onBeforeRender;
   scene.onBeforeRender = function (renderer, scn, camera, target) {
     prevBeforeRender.call(this, renderer, scn, camera, target);
-    if (camera.isOrthographicCamera === true || camera.isArrayCamera === true) return;
-    update(viewPos.setFromMatrixPosition(camera.matrixWorld));
+    if (scn.overrideMaterial?.isShadowPassMaterial === true) return; // also protects unsupported perspective shadow cameras
+    // Orthographic cameras are the native shadow passes. NEVER mutate the common GPU buffers per cascade.
+    if (camera.isOrthographicCamera === true) return;
+    if (!scene.visible || renderer?._precompilationState != null) return;
+    if (camera.isArrayCamera === true) { retireStandins(); publish(false); return; }
+    selectLod(viewPos.setFromMatrixPosition(camera.matrixWorld));
+    retireStandins(); publish(camera.isPerspectiveCamera === true && prepareUnion(camera));
   };
-
-  // Levels for the start-up view (Midtown, 5th Ave), so the precompile pass sees the tree meshes; a mesh the view has
-  // no tree for draws one zero-scale instance until its first rebuild, so its pipeline is compiled up front too (not
-  // on the frame its first tree comes into range)
   update(new V3(0, 10, 140));
-  for (const mesh of instanced) {
-    if (mesh.count > 0) continue;
-    mesh.instanceMatrix.array.fill(0, 0, 16);
-    mesh.count = 1;
-    mesh.visible = true;
+  for (let mi = 0; mi < 30; mi++) {
+    const mesh = instanced[mi]; if (mesh.count > 0) continue;
+    mesh.instanceMatrix.array.fill(0, 0, 16); mesh.count = 1; mesh.visible = true; startupStandins.push(mi);
   }
-
-  const stats = {
-    trees: N,
-    triangles: geos.map((v) => v.map((l) => l.map((g) => g && g.userData.triangles))),
-    cards: geos.map((v) => v.map((l) => l.map((g) => g && g.userData.cards)))
-  };
+  const stats = { trees: N,
+    triangles: geos.map(v => v.map(l => l.map(g => g && g.userData.triangles))),
+    cards: geos.map(v => v.map(l => l.map(g => g && g.userData.cards))) };
   return { group, material, atlas, update, meshes: instanced, stats };
 }
 

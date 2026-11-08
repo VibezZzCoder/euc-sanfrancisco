@@ -21,6 +21,132 @@ const HEIGHT = 0.012; // above the asphalt
 const STEP = 1; // metres between the vertex pairs of a strip
 // Shader-expanded bounds: NYC @9c4cfc9 (MIT, © 2026 Mr.doob).
 const MAX_WIDEN = 16; // createRoadPaintMaterial's screen-space clamp
+const PAINT_LEAF_TRIANGLES = 256;
+
+// One transparent render item, original vertices and original primitive order. Only its index prefix changes.
+// Defined outside buildRoadPaint so the render hook cannot retain the large temporary construction arrays.
+function installOrderedPaintCulling(mesh) {
+  const geometry = mesh.geometry, index = geometry.index, target = index.array, count = index.count;
+  if (count === 0) return;
+  let original = target.slice(); // immutable source; target remains the one existing GPU index buffer
+  const leafSize = PAINT_LEAF_TRIANGLES * 3, leaves = Math.ceil(count / leafSize);
+  let base = 1;
+  while (base < leaves) base *= 2;
+  let bounds = new Float64Array(base * 2 * 6);
+  let selected = new Uint32Array(leaves), previous = new Uint32Array(leaves);
+  let sourceViews = new Array(leaves);
+  const positions = geometry.attributes.position.array, sides = geometry.attributes.side.array;
+  for (let node = 0; node < base * 2; node++) {
+    const o = node * 6;
+    bounds[o] = bounds[o + 1] = bounds[o + 2] = Infinity;
+    bounds[o + 3] = bounds[o + 4] = bounds[o + 5] = -Infinity;
+  }
+  for (let leaf = 0; leaf < leaves; leaf++) {
+    const start = leaf * leafSize, end = Math.min(count, start + leafSize), o = (base + leaf) * 6;
+    sourceViews[leaf] = original.subarray(start, end); // construction-only views, never new views per frame
+    previous[leaf] = leaf;
+    for (let j = start; j < end; j++) {
+      const v = original[j], p = v * 3, s = v * 2;
+      const x = positions[p], y = positions[p + 1], z = positions[p + 2];
+      const wx = x + sides[s] * (MAX_WIDEN - 1), wz = z + sides[s + 1] * (MAX_WIDEN - 1);
+      bounds[o] = Math.min(bounds[o], x, wx); bounds[o + 1] = Math.min(bounds[o + 1], y);
+      bounds[o + 2] = Math.min(bounds[o + 2], z, wz);
+      bounds[o + 3] = Math.max(bounds[o + 3], x, wx); bounds[o + 4] = Math.max(bounds[o + 4], y);
+      bounds[o + 5] = Math.max(bounds[o + 5], z, wz);
+    }
+    const magnitude = Math.max(Math.abs(bounds[o]), Math.abs(bounds[o + 1]), Math.abs(bounds[o + 2]),
+      Math.abs(bounds[o + 3]), Math.abs(bounds[o + 4]), Math.abs(bounds[o + 5]));
+    const pad = .01 + magnitude * 2 ** -21; // Float32 widening/clip-edge allowance, including wide track beds
+    for (let axis = 0; axis < 3; axis++) { bounds[o + axis] -= pad; bounds[o + axis + 3] += pad; }
+  }
+  for (let node = base - 1; node > 0; node--) {
+    const o = node * 6, left = node * 12, right = left + 6;
+    for (let axis = 0; axis < 3; axis++) {
+      bounds[o + axis] = Math.min(bounds[left + axis], bounds[right + axis]);
+      bounds[o + axis + 3] = Math.max(bounds[left + axis + 3], bounds[right + axis + 3]);
+    }
+  }
+  const clip = new THREE.Matrix4(), previousClip = new THREE.Matrix4(), frustum = new THREE.Frustum();
+  const uploadRange = { start: 0, count: 0 }; // native backends clear the array; reuse the range object too
+  let previousCount = leaves, selectedCount = 0, validClip = false, coordinateSystem, reversedDepth, disposed = false;
+  const before = mesh.onBeforeRender;
+  function dirtyPrefix(end) {
+    for (let i = 0; i < index.updateRanges.length; i++) {
+      const range = index.updateRanges[i]; end = Math.max(end, range.start + range.count);
+    }
+    index.clearUpdateRanges(); uploadRange.count = end; index.updateRanges.push(uploadRange); index.needsUpdate = true;
+  }
+  function fullStream() {
+    if (previousCount !== leaves) {
+      target.set(original); dirtyPrefix(count);
+      for (let i = 0; i < leaves; i++) previous[i] = i;
+      previousCount = leaves;
+    }
+    geometry.setDrawRange(0, count);
+    validClip = false;
+  }
+  // -1 outside, 0 intersecting, 1 fully inside. Typed node bounds avoid per-node Box3/Vector allocations.
+  function classify(node) {
+    const o = node * 6;
+    const minX = bounds[o], minY = bounds[o + 1], minZ = bounds[o + 2];
+    const maxX = bounds[o + 3], maxY = bounds[o + 4], maxZ = bounds[o + 5];
+    let inside = 1;
+    for (let i = 0; i < 6; i++) {
+      const plane = frustum.planes[i], n = plane.normal;
+      if (n.x * (n.x > 0 ? maxX : minX) + n.y * (n.y > 0 ? maxY : minY) + n.z * (n.z > 0 ? maxZ : minZ) + plane.constant < 0) return -1;
+      if (n.x * (n.x > 0 ? minX : maxX) + n.y * (n.y > 0 ? minY : maxY) + n.z * (n.z > 0 ? minZ : maxZ) + plane.constant < 0) inside = 0;
+    }
+    return inside;
+  }
+  function visit(node, first, end) {
+    if (first >= leaves) return;
+    const classification = classify(node);
+    if (classification < 0) return;
+    if (classification === 1 || node >= base) {
+      const last = Math.min(end, leaves);
+      for (let leaf = first; leaf < last; leaf++) selected[selectedCount++] = leaf;
+    } else {
+      const middle = (first + end) / 2;
+      visit(node * 2, first, middle); visit(node * 2 + 1, middle, end); // left-to-right SOURCE order
+    }
+  }
+  function onBeforeRender(renderer, scene, camera, geo, material, group) {
+    // e27dfa9 renderObject invokes this BEFORE _renderObjectDirect captures drawRange and updates geometries.
+    // The observer tracks index.version; retain StaticDrawUsage so identical selections do not upload again.
+    before.call(this, renderer, scene, camera, geo, material, group);
+    if (disposed) return;
+    // The host disables culling for warmup. CompileAsync calls this hook before uploading too. Array views use
+    // the full stream rather than choosing one eye's frustum; this game normally supplies a perspective camera.
+    if (renderer?._precompilationState != null || !this.frustumCulled || camera.isArrayCamera) { fullStream(); return; }
+    clip.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse).multiply(this.matrixWorld);
+    if (validClip && coordinateSystem === camera.coordinateSystem && reversedDepth === camera.reversedDepth && clip.equals(previousClip)) return;
+    previousClip.copy(clip); coordinateSystem = camera.coordinateSystem; reversedDepth = camera.reversedDepth; validClip = true;
+    frustum.setFromProjectionMatrix(clip, coordinateSystem, reversedDepth);
+    selectedCount = 0; visit(1, 0, base);
+    let changed = selectedCount !== previousCount;
+    for (let i = 0; !changed && i < selectedCount; i++) if (selected[i] !== previous[i]) changed = true;
+    if (!changed) return; // different camera/projection, identical surviving leaves: no copying or upload
+    let written = 0;
+    for (let i = 0; i < selectedCount; i++) {
+      const leaf = selected[i], source = sourceViews[leaf];
+      target.set(source, written); written += source.length; previous[i] = leaf;
+    }
+    previousCount = selectedCount;
+    geometry.setDrawRange(0, written);
+    if (written > 0) dirtyPrefix(written); // empty selection changes only drawRange; pending bytes remain pending
+  }
+  mesh.onBeforeRender = onBeforeRender;
+  function dispose() {
+    if (disposed) return;
+    // Geometry.dispose normally ends this scene. Restore a complete CPU stream as well so re-uploading the same
+    // geometry later remains valid; release the private source/hierarchy while native disposal frees its GPU index.
+    fullStream(); disposed = true;
+    if (mesh.onBeforeRender === onBeforeRender) mesh.onBeforeRender = before;
+    geometry.removeEventListener('dispose', dispose);
+    original = bounds = selected = previous = sourceViews = null;
+  }
+  geometry.addEventListener('dispose', dispose);
+}
 
 // Preserve source-order blending of overlapping SF rail/paint ribbons.
 function buildRoadPaint(scene, network) {
@@ -228,6 +354,7 @@ function buildRoadPaint(scene, network) {
     return mesh;
   }
   const result = makeMesh(attributes, index, 'RoadMarkings');
+  installOrderedPaintCulling(result);
   scene.add(result);
   console.info(`[paint] ${bikeLanes} bike lanes along ${roads.size} roads`);
   return result;

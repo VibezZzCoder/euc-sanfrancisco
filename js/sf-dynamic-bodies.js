@@ -3,6 +3,12 @@
 // Load before traffic.js / sf-transit.js. No renderer or player-movement authority here.
 const N = window.NYC;
 
+// Grid keys: pack integer cells within ±2^14 injectively into a non-negative Smi (≤2^30-1).
+// Other cells retain their text key; the two key types cannot collide, and ±0 remain equivalent.
+const BODY_CELL_OFFSET = 2 ** 14, BODY_CELL_SPAN = 2 ** 15;
+const bodyCellKey = (x, z) => x > -BODY_CELL_OFFSET && x < BODY_CELL_OFFSET && z > -BODY_CELL_OFFSET && z < BODY_CELL_OFFSET
+  ? (x + BODY_CELL_OFFSET) * BODY_CELL_SPAN + (z + BODY_CELL_OFFSET) : `${x},${z}`;
+
 function createSfDynamicBodyIndex(cellSize = 16) {
   const cells = new Map(), spare = [], used = [];
   const seen = new WeakMap();
@@ -20,7 +26,7 @@ function createSfDynamicBodyIndex(cellSize = 16) {
     const rz = s * body.halfWidthMetres + c * body.halfLengthMetres;
     for (let ix = Math.floor((body.x - rx) / cellSize); ix <= Math.floor((body.x + rx) / cellSize); ix++) {
       for (let iz = Math.floor((body.z - rz) / cellSize); iz <= Math.floor((body.z + rz) / cellSize); iz++) {
-        const key = `${ix},${iz}`;
+        const key = bodyCellKey(ix, iz);
         let bucket = cells.get(key);
         if (!bucket) { bucket = spare.pop() || []; cells.set(key, bucket); used.push(bucket); }
         bucket.push(body);
@@ -36,7 +42,7 @@ function createSfDynamicBodyIndex(cellSize = 16) {
     for (let ix = Math.floor((x - radius) / cellSize); ix <= Math.floor((x + radius) / cellSize); ix++) {
       for (let iz = Math.floor((z - radius) / cellSize); iz <= Math.floor((z + radius) / cellSize); iz++) {
         stats.queryCells++;
-        const bucket = cells.get(`${ix},${iz}`);
+        const bucket = cells.get(bodyCellKey(ix, iz));
         if (!bucket) continue;
         for (const b of bucket) {
           if (seen.get(b) === query) continue;

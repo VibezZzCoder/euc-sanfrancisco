@@ -121,6 +121,15 @@ level. The marker disappears when the chase ends; it is not a waypoint or an arr
   **Reload SF** is the recovery path for a failed native appearance import.
 - The title link or confirmed pause-menu return opens the **EUC Thrills main menu in the same tab**.
 
+## Optional rendering diagnostics
+
+Add `?perf=1` to the game URL (or `&perf=1` if it already has a query), then reload and activate **Ride**.
+The read-only panel shows the actual backend, draw calls/triangles for the latest whole submitted frame,
+and mean/p95 submitted-frame intervals plus intervals over 50 ms in the last five seconds (at most 600 intervals).
+It refreshes at most twice a second, resets when riding is suspended, and hides if there is no clear space below
+the toolbar. These are submission/RAF observations, not GPU execution or displayed-frame measurements.
+Remove `perf=1` and reload to disable it; normal play creates no diagnostics panel or timing buffers.
+
 ## Help and feedback
 
 The pause menu's **Player guide** and **Feedback / bugs** links open GitHub in a new tab, keeping SF paused.

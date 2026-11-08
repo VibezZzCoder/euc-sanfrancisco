@@ -52,7 +52,7 @@ function instanceSize(mesh) {
 }
 
 function isStaticMesh(o) {
-  return o.isMesh && !o.isSkinnedMesh && o.visible && o.frustumCulled !== false && !o.morphTargetInfluences;
+  return o.isMesh && !o.isSkinnedMesh && o.visible && o.frustumCulled !== false && !o.morphTargetInfluences && !o.userData.dynamicInstances;
 }
 
 function copyObjectState(dst, src) {
@@ -127,6 +127,40 @@ function proxyableMaterial(mat) {
   return !!mat && !Array.isArray(mat) && !mat.transparent && !(mat.alphaTest > 0) && !mat.alphaMap &&
     !mat.positionNode && !mat.castShadowPositionNode && !mat.castShadowNode && !mat.alphaTestNode &&
     !mat.maskNode && !mat.maskShadowNode && !mat.depthNode && !mat.displacementMap;
+}
+
+// Only construction-static, position-only shadow stand-ins use this admission override. Keep geometry bounds
+// untouched (shared attributes/spheres are also used by the originals). The renderer updates matrixWorld before
+// calling intersectsFrustum; rebuild the world box per pass so later object/parent transforms cannot stale it.
+function setShadowProxyBoxCulling(mesh) {
+  const local = new THREE.Box3().setFromBufferAttribute(mesh.geometry.attributes.position);
+  const transformMargin = (box, matrix) => {
+    const x = Math.max(Math.abs(box.min.x), Math.abs(box.max.x));
+    const y = Math.max(Math.abs(box.min.y), Math.abs(box.max.y));
+    const z = Math.max(Math.abs(box.min.z), Math.abs(box.max.z));
+    const e = matrix.elements;
+    // Four Float32-operation epsilons plus 1 mm, including large terms that cancel near the world origin.
+    return .001 + 2 ** -21 * Math.max(
+      Math.abs(e[0]) * x + Math.abs(e[4]) * y + Math.abs(e[8]) * z + Math.abs(e[12]),
+      Math.abs(e[1]) * x + Math.abs(e[5]) * y + Math.abs(e[9]) * z + Math.abs(e[13]),
+      Math.abs(e[2]) * x + Math.abs(e[6]) * y + Math.abs(e[10]) * z + Math.abs(e[14]));
+  };
+  if (mesh.isInstancedMesh) {
+    const base = local.clone(), instance = new THREE.Box3();
+    local.makeEmpty();
+    // Proxy instance transforms/count are immutable after this builder publishes them. Bound their uploaded
+    // Float32 matrices, including arithmetic error in the instancing stage, independently of matrixWorld.
+    for (let i = 0; i < mesh.count; i++) {
+      mesh.getMatrixAt(i, _m);
+      local.union(instance.copy(base).applyMatrix4(_m).expandByScalar(transformMargin(base, _m)));
+    }
+  }
+  const world = new THREE.Box3();
+  mesh.intersectsFrustum = function (frustum) {
+    if (typeof frustum.intersectsBox !== 'function') return THREE.Mesh.prototype.intersectsFrustum.call(this, frustum);
+    world.copy(local).applyMatrix4(this.matrixWorld).expandByScalar(transformMargin(local, this.matrixWorld));
+    return frustum.intersectsBox(world); // native Frustum and FrustumArray; no redundant sphere admission
+  };
 }
 
 /**
@@ -279,6 +313,7 @@ function setupSceneCulling(scene, roots, shadow = null) {
       mesh.receiveShadow = false;
       mesh.frustumCulled = true;
       mesh.userData.shadowProxy = true;
+      setShadowProxyBoxCulling(mesh);
       const kind = mesh.material.uuid + (mesh.isInstancedMesh ? ':i' : ':m');
       if (firstProxy.has(kind)) mesh.userData.sharesPipelineWith = firstProxy.get(kind);
       else firstProxy.set(kind, mesh);

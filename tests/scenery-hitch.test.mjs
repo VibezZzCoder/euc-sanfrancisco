@@ -276,25 +276,39 @@ function treeField(source, sites, terrain) {
   new Function('window', read('js/sf-ride-geometry.js'))(window);
   new Function('window', 'document', source)(window, document);
   const scene = new THREE.Scene(), field = window.NYC.createTreeField(scene, sites);
+  scene.add(field.group); scene.updateMatrixWorld(true);
   return { ...field, scene, bodies: window.NYC.ride };
 }
 function sameTrees(a, b) {
-  for (let i = 0; i < a.meshes.length; i++) {
-    const x = a.meshes[i], y = b.meshes[i];
-    for (const key of ['count', 'visible', 'name', 'castShadow', 'receiveShadow', 'frustumCulled']) assert.equal(x[key], y[key]);
-    for (const [aa, bb] of [[x.instanceMatrix, y.instanceMatrix], [x.geometry.attributes.aTreeData, y.geometry.attributes.aTreeData]]) {
-      // Compare whole pool as well as drawn prefixes: no accidental writes to undrawn capacity.
-      assert.deepEqual(bytes(aa.array), bytes(bb.array)); assert.deepEqual(aa.updateRanges, bb.updateRanges); assert.equal(aa.version, bb.version);
+  assert.equal(a.meshes.length, 30); assert.equal(b.meshes.length, 30);
+  for (let i = 0; i < 30; i++) {
+    const old = a.meshes[i], m = b.meshes[i];
+    for (const key of ['name', 'count', 'visible', 'castShadow', 'receiveShadow', 'frustumCulled']) assert.equal(m[key], old[key], `${old.name}: ${key}`);
+    assert.equal(m.layers.mask, old.layers.mask);
+    for (const [before, after, label] of [[old.instanceMatrix, m.instanceMatrix, 'ordered matrix'],
+      [old.geometry.attributes.aTreeData, m.geometry.attributes.aTreeData, 'ordered tree data']]) {
+      for (const key of ['itemSize', 'count', 'normalized', 'usage', 'gpuType']) assert.equal(after[key], before[key], `${old.name}: ${key}`);
+      assert.equal(after.array.constructor, before.array.constructor);
+      // Raw update(position) must retain the entire original ordered pool, including inactive capacity.
+      // Dirty versions/ranges intentionally differ: the union implementation repacks only changed streams.
+      assert.deepEqual(bytes(after.array), bytes(before.array), `${old.name}: ${label} bytes`);
+    }
+    for (const attr of [m.instanceMatrix, m.geometry.attributes.aTreeData]) {
+      for (const r of attr.updateRanges) assert.ok(r.start >= 0 && r.start + r.count <= attr.array.length);
     }
   }
 }
-baselineTest('trees: real22886 planting, exact geometry/physical bodies/ordered pools, transitions, host replacement and sole hook', t => {
+baselineTest('trees: real22886 planting, exact raw global pools/geometry/physics/capacity/allocation and shadow-hook ownership', t => {
   const { sites, terrain } = plantedSites(); assert.equal(sites.length, 22886);
   const a = treeField(baseline.trees, sites, terrain), b = treeField(current.trees, sites, terrain);
   assert.deepEqual(a.stats, b.stats); assert.equal(hash(JSON.stringify(a.bodies)), hash(JSON.stringify(b.bodies)));
-  for (let i = 0; i < a.meshes.length; i++) sameGeometry(a.meshes[i].geometry, b.meshes[i].geometry);
-  assert.equal(section(current.trees, '  function setCellUniformLod', '\nObject.assign'), section(baseline.trees, '  function setCellUniformLod', '\nObject.assign'),
-    'selection, hysteresis, movement gates, startup and sole hook unchanged');
+  assert.equal(a.meshes.length, 30); assert.equal(b.meshes.length, 30);
+  for (let i = 0; i < 30; i++) sameGeometry(a.meshes[i].geometry, b.meshes[i].geometry);
+  sameTrees(a, b);
+  // Negative control: preserving a multiset is insufficient; swapping two instances must fail this oracle.
+  const ordered = b.meshes.find(m => m.count > 1).instanceMatrix.array;
+  const swap = () => { for (let i = 0; i < 16; i++) { const value = ordered[i]; ordered[i] = ordered[16 + i]; ordered[16 + i] = value; } };
+  swap(); assert.throws(() => sameTrees(a, b), /ordered matrix/); swap(); sameTrees(a, b);
   const path = Array.from({ length: 80 }, (_, i) => { const site = sites[i * 127 % sites.length]; return new THREE.Vector3(site.x, [site.y + 8, 39.999, 40, 120, 400][i % 5], site.z); });
   path.push(new THREE.Vector3(30000, 80, 30000));
   let views = 0;
@@ -303,24 +317,47 @@ baselineTest('trees: real22886 planting, exact geometry/physical bodies/ordered 
     Float32Array.prototype.subarray = function (...args) { views++; return old.apply(this, args); };
     try { return fn(); } finally { Float32Array.prototype.subarray = old; }
   };
-  let oldViews = 0, newViews = 0;
-  for (const p of path) {
+  let oldViews = 0, newViews = 0, replacements;
+  for (const [i, p] of path.entries()) {
+    if (i === 40) {
+      replacements = [a, b].map(f => f.meshes.map(m => {
+        m.instanceMatrix = new THREE.StorageInstancedBufferAttribute(m.instanceMatrix.array, 16); return m.instanceMatrix;
+      }));
+    }
     views = 0; const before = countViews(() => a.update(p)); oldViews += views;
     views = 0; const after = countViews(() => b.update(p)); newViews += views;
     assert.equal(after, before); sameTrees(a, b);
   }
   assert.ok(oldViews > 100000); assert.equal(newViews, 0);
-  for (const f of [a, b]) for (const m of f.meshes) m.instanceMatrix = new THREE.StorageInstancedBufferAttribute(m.instanceMatrix.array, 16);
-  const camera = new THREE.PerspectiveCamera(); camera.position.copy(path[0]); camera.updateMatrixWorld();
-  for (const f of [a, b]) f.scene.onBeforeRender(null, f.scene, camera, null);
-  sameTrees(a, b);
-  for (const camera of [new THREE.OrthographicCamera(), new THREE.ArrayCamera()]) {
-    camera.position.set(30000, 900, 30000); camera.updateMatrixWorld();
-    for (const f of [a, b]) f.scene.onBeforeRender(null, f.scene, camera, null);
-    sameTrees(a, b);
-  }
-  t.diagnostic(JSON.stringify({ sites: sites.length, views: path.length, removedSubarrayViews: oldViews, currentSubarrayViews: newViews, pools: a.meshes.length,
-    matrixAndDataCapacityBytes: a.meshes.reduce((n, m) => n + m.instanceMatrix.array.byteLength + m.geometry.attributes.aTreeData.array.byteLength, 0), newRetainedBytes: 0 }));
+  for (const [j, f] of [a, b].entries()) for (let i = 0; i < 30; i++) assert.equal(f.meshes[i].instanceMatrix, replacements[j][i]);
+  assert.ok(replacements[1].some(attr => attr.version > 0), 'remaining raw views publish through the replacement storage');
+  const camera = new THREE.PerspectiveCamera(); camera.position.copy(path[0]); camera.updateMatrixWorld(true);
+  a.update(camera.position); b.scene.updateMatrixWorld(true);
+  b.scene.onBeforeRender(null, b.scene, camera, null);
+  const rawCount = a.meshes.reduce((n, m) => n + m.count, 0), filteredCount = b.meshes.reduce((n, m) => n + m.count, 0);
+  assert.ok(filteredCount > 0 && filteredCount < rawCount, 'exercise an intentionally filtered hook result, not a raw-stream comparison');
+  const snapshot = () => b.meshes.map(m => ({ count: m.count, visible: m.visible,
+    matrix: Buffer.from(bytes(m.instanceMatrix.array)), data: Buffer.from(bytes(m.geometry.attributes.aTreeData.array)),
+    versions: [m.instanceMatrix.version, m.geometry.attributes.aTreeData.version],
+    ranges: [m.instanceMatrix, m.geometry.attributes.aTreeData].map(attr => attr.updateRanges.map(r => ({ start: r.start, count: r.count }))) }));
+  const filtered = snapshot(), previousOverride = b.scene.overrideMaterial;
+  try {
+    b.scene.overrideMaterial = { isShadowPassMaterial: true };
+    for (const shadow of [new THREE.OrthographicCamera(), new THREE.PerspectiveCamera()]) {
+      shadow.position.set(30000, 900, 30000); shadow.updateMatrixWorld(true);
+      b.scene.onBeforeRender(null, b.scene, shadow, null);
+      assert.deepEqual(snapshot(), filtered, 'shadow passes cannot replace or dirty the common union stream');
+    }
+  } finally { b.scene.overrideMaterial = previousOverride; }
+  assert.equal(b.update(camera.position), a.update(camera.position), 'raw restore keeps the original same-position return value');
+  sameTrees(a, b); // the raw update restores the original complete ordered arrays at exactly the hook position
+  const capacityBytes = f => f.meshes.reduce((n, m) => n + m.instanceMatrix.array.byteLength + m.geometry.attributes.aTreeData.array.byteLength, 0);
+  assert.equal(capacityBytes(a), capacityBytes(b));
+  assert.equal(hash(JSON.stringify(a.bodies)), hash(JSON.stringify(b.bodies)), 'views never change native trunks');
+  t.diagnostic(JSON.stringify({ sites: sites.length, views: path.length, removedSubarrayViews: oldViews, currentSubarrayViews: newViews,
+    baselinePools: a.meshes.length, currentPools: b.meshes.length, matrixAndDataCapacityBytes: capacityBytes(b), renderCapacityDeltaBytes: capacityBytes(b) - capacityBytes(a),
+    storageReplacementAtView: 40, rawHookPositionInstances: rawCount, filteredHookInstances: filteredCount,
+    runtimeTreeSHA256: hash(current.trees), scope: 'raw global-pool differential and hook ownership only; union correctness has separate sf-trees coverage' }));
   bench(t, 'tree selector+repack81-view path', () => { for (const p of path) a.update(p); }, () => { for (const p of path) b.update(p); });
   for (const f of [a, b]) {
     for (const m of f.meshes) { m.dispose(); m.geometry.dispose(); }

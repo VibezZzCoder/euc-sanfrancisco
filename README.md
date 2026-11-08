@@ -28,7 +28,7 @@ owner-approved exception. Street, district and landmark names are kept as place 
 [rights notice](NOTICE-EUC-THRILLS.md).
 
 <p align="center">
-  <a href="screenshots/golden-gate.webp"><img src="screenshots/golden-gate.webp" width="420" alt="Cool Rider on the Golden Gate Bridge deck, with red suspension towers, bay water and hazy hills ahead." /></a>
+  <a href="screenshots/golden-gate.webp"><img src="screenshots/golden-gate.webp" width="420" alt="Cool Rider on Golden Gate's marked roadway, with open orange guardrails, side paths, suspension towers and the bay ahead." /></a>
   <a href="screenshots/painted-ladies.webp"><img src="screenshots/painted-ladies.webp" width="420" alt="Cool Rider overlooking the Painted Ladies from Alamo Square, with the downtown skyline beyond and the riding HUD visible." /></a>
 </p>
 <p align="center">
@@ -79,6 +79,16 @@ The upper-left **3D resolution** (100/75/50%) and **Graphics** (High/Medium/Low)
 routes, physics, traffic and the city stay the same. The speedometer
 shows mph and km/h. The [player guide](PLAYER_GUIDE.md) covers every control, the map, recovery and settings.
 
+For optional read-only rendering diagnostics, open the game with
+[`?perf=1`](https://vibezzzcoder.github.io/euc-sanfrancisco/?perf=1). The panel shows the rendering backend, submitted
+draw calls/triangles, frame-interval mean/p95 and intervals over 50 ms. It samples the last five seconds, up to 600
+intervals, and resets when riding is suspended. These intervals are not GPU timings or proof of displayed FPS.
+
+The latest rendering update reduces offscreen tree/paint submissions and tightens shadow-caster culling. Matched
+desktop views submit about 28–32% fewer triangles at Market and the rooftops, with nearly identical rendered output.
+That percentage is not an FPS gain: controlled desktop riding timings were generally slightly slower, while the
+owner reports better framerate in playtesting. Integrated-GPU and physical-phone benefits remain unverified.
+
 ## Officer Dorkins
 
 Keep an eye out for Officer Dorkins on his hover-wheel. If he pursues you, hop or swerve away, or break sight and
@@ -123,6 +133,9 @@ This is an early release. Known issues include:
 
 - **Tunnel approaches:** some approach ramps sit awkwardly behind the newer tunnel portal walls.
 - **Bay Bridge:** upper-west traffic may extend beyond the visible deck.
+- **I-80 W off-ramp near Clementina St:** an owner-reported approach cannot be climbed; investigation is pending.
+- **Vermont St / Potrero Hill:** an owner-reported separation at the built-city/outer-land boundary needs investigation.
+- **Lombard/Hyde gallery view:** a reported green/pink road artifact awaits investigation; its cause is unconfirmed.
 - **Outer neighbourhoods** look bland and low in detail.
 - **Union Square, Dragon Gate and Fisherman's Wharf** still lack their real character.
 - **Alcatraz and Yerba Buena Island** are undercooked.

@@ -1553,6 +1553,17 @@ body.game-menu-open .getup-prompt { visibility: hidden; }
 #graphics-quality[data-quality='low'] { color: var(--bad); }
 #graphics-quality option { color: var(--text); background: #172027; }
 body.hud-minimized .performance-controls { display: none; }
+/* URL-opt-in, read-only diagnostics. Placement below the toolbar/controls is bounded by render-stats.js. */
+.render-stats {
+  position: fixed; z-index: 8; top: var(--hud-content-top, 82px);
+  left: max(12px, env(safe-area-inset-left)); right: max(12px, env(safe-area-inset-right));
+  width: max-content; max-width: calc(100% - max(12px, env(safe-area-inset-left)) - max(12px, env(safe-area-inset-right)));
+  margin-inline: auto; padding: 8px 10px; border: 1px solid var(--glass-border); border-radius: 10px;
+  color: var(--text); background: var(--glass-strong); pointer-events: none;
+}
+.render-stats pre { font: 11px/1.45 ui-monospace, monospace; font-variant-numeric: tabular-nums; white-space: pre-wrap; overflow-wrap: anywhere; pointer-events: none; }
+.render-stats[hidden] { display: none; }
+body.hud-minimized .render-stats { visibility: hidden; }
 .hud-bottom-right { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
 .wheel-cues { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; max-width: 260px; pointer-events: none; }
 .wheel-cues:not(:has(.wheel-cue:not([hidden]))) { display: none; }
