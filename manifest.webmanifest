@@ -1,0 +1,14 @@
+{
+  "id": "./",
+  "name": "SF Spin-off: EUC Thrills",
+  "short_name": "EUC SF",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#17140a",
+  "theme_color": "#17140a",
+  "icons": [
+    { "src": "./assets/app-icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "./assets/app-icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

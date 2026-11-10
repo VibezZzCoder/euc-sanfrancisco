@@ -24,7 +24,7 @@ const types = {
   // Plain gzip file bytes, deliberately without Content-Encoding (the loader inflates; GitHub Pages behaves alike).
   '.gz': 'application/gzip',
   '.woff2': 'font/woff2', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
-  '.svg': 'image/svg+xml', '.ico': 'image/x-icon',
+  '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.webmanifest': 'application/manifest+json',
 };
 function reply(res, code, text, extra = {}) {
   res.writeHead(code, { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',

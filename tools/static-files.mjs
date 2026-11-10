@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 export const PUBLIC_FILES = Object.freeze([
-  'index.html', 'README.md', 'PLAYER_GUIDE.md', 'CONTRIBUTING.md', 'LICENSE', 'NOTICE.md',
+  'index.html', 'manifest.webmanifest', 'README.md', 'PLAYER_GUIDE.md', 'CONTRIBUTING.md', 'LICENSE', 'NOTICE.md',
   'NOTICE-EUC-THRILLS.md', 'FORK_GUIDE.md', 'LICENSING.md',
 ]);
 export const PUBLIC_DIRECTORIES = Object.freeze(['css', 'js', 'audio', 'fonts', 'vendor', 'provenance']);
@@ -14,6 +14,7 @@ export const REQUIRED_FILES = Object.freeze([
   'data/region/manifest.json', 'css/style.css', 'css/fonts.css', 'js/boot.js', 'js/main.js',
   'js/sf-bootstrap.js', 'js/euc/LICENSE', 'js/euc/MANIFEST.json', 'audio/euc/PROVENANCE.md',
   'vendor/MANIFEST.json', 'vendor/three/LICENSE', 'fonts/OFL-Inter.txt', 'fonts/OFL-Overpass.txt',
+  'assets/app-icon-180.png', 'assets/app-icon-192.png', 'assets/app-icon-512.png',
   'provenance/README.md', 'provenance/data-sources.md', 'provenance/formats.md',
 ]);
 const privatePart = name => name.startsWith('.') || ['node_modules', 'qa-artifacts', '__pycache__'].includes(name);

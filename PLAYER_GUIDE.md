@@ -6,6 +6,9 @@ physical phones and foldables are not fully verified. See the README's known rou
 
 ## Start and ride
 
+To launch SF directly from a phone Home Screen, open its own game URL in the browser and use the browser's
+Add to Home Screen action. The city has its own icon and app scope; installation behavior varies by browser/device.
+
 1. Open the game or the local preview described in [README.md](README.md#run-it-locally). Wait for initialization to complete.
 2. Use **Choose rider / Change rider** to browse the eleven reviewed profiles. Confirm the named rider to prepare
    their appearance and selected sounds; browsing alone does not change your committed rider.

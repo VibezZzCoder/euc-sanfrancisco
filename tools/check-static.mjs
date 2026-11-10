@@ -47,6 +47,10 @@ for (const [file, pattern] of [
   // Static runtime links are project-relative; navigation and attribution anchors are not fetches.
   reference(url.startsWith('.') || /^(?:[a-z]+:|\/|#)/i.test(url) ? url : `./${url}`, file);
 }
+const installManifest = JSON.parse(await fs.readFile(path.join(root, 'manifest.webmanifest'), 'utf8'));
+assert.equal(installManifest.start_url, './');
+assert.equal(installManifest.scope, './');
+for (const icon of installManifest.icons) reference(icon.src, 'manifest.webmanifest');
 for (const file of actual.filter(name => /\.(?:js|css)$/.test(name))) {
   const text = await fs.readFile(path.join(root, file), 'utf8');
   if (file.endsWith('.css')) {

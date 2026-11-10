@@ -213,6 +213,8 @@ export class TitleScreen {
   resetInput() { this.keysDown.clear(); this.padPrevious = null; this.padReady = false; }
 
   cancelPreparation() {
+    const hadPreparation = this.preparing || (this.retryButton && !this.retryButton.hidden)
+      || (this.cancelButton && !this.cancelButton.hidden);
     ++this.startSerial;
     this.onCancelStart?.();
     this.preparing = false;
@@ -220,7 +222,7 @@ export class TitleScreen {
     if (this.pickerButton) this.pickerButton.disabled = false;
     if (this.retryButton) this.retryButton.hidden = true;
     if (this.cancelButton) this.cancelButton.hidden = true;
-    if (this.status) this.status.textContent = 'Preparation cancelled. Ride when ready.';
+    if (this.status && hadPreparation) this.status.textContent = 'Preparation cancelled. Ride when ready.';
     this.resetInput();
     if (this.isOpen && this.canInteract()) this.rideButton?.focus({ preventScroll: true });
   }
