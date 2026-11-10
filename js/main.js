@@ -97,12 +97,14 @@ export async function initApp(startup) {
   }
 
   const params = new URLSearchParams(location.search);
+  const initialRendering = initialRenderPreferences();
+  const phoneWebGLDefault = initialRendering.phone && params.get('webgpu') !== '1';
+  const forceWebGL = params.get('webgpu') === '0' || phoneWebGLDefault;
   startup.phase('graphics');
   await stage('Initializing graphics…', 'graphics');
   const renderer = new THREE.WebGPURenderer({ antialias: true, powerPreference: 'high-performance',
-    reversedDepthBuffer: true, forceWebGL: params.get('webgpu') === '0' });
+    reversedDepthBuffer: true, forceWebGL });
   renderer.outputColorSpace = THREE.SRGBColorSpace;
-  const initialRendering = initialRenderPreferences();
   const resolutionPreference = createRenderResolutionPreference(undefined, initialRendering.resolution);
   const graphicsPreference = createGraphicsQualityPreference(undefined, initialRendering.quality);
   let renderScale = resolutionPreference.scale;
@@ -179,9 +181,11 @@ export async function initApp(startup) {
   document.getElementById('hud-backend').textContent = backendName;
   // A device report should name the build it tested (a home-screen app can keep running an old cached build).
   const buildId = document.querySelector('meta[name="euc-build"]')?.content || 'dev';
-  const automaticFallback = backendName === 'WebGL2' && params.get('fallback');
+  const backendDetail = backendName !== 'WebGL2' ? ''
+    : params.get('webgpu') === '0' ? (params.get('fallback') ? 'automatic fallback' : 'forced by URL')
+    : phoneWebGLDefault ? 'phone default' : 'automatic fallback';
   const buildNote = document.getElementById('menu-build');
-  if (buildNote) buildNote.textContent = `Build ${buildId} · ${backendName}${automaticFallback ? ' (automatic fallback)' : ''}`;
+  if (buildNote) buildNote.textContent = `Build ${buildId} · ${backendName}${backendDetail ? ` (${backendDetail})` : ''}`;
 
   startup.phase('city');
   await stage('Creating San Francisco sky and environment lighting…', 'lighting');
@@ -508,6 +512,7 @@ export async function initApp(startup) {
     audioSystem.setPaused(current !== 'riding' && (current !== 'booking' || suspended));
     if (suspensionChanged && lifecycleReady) resetFrameClock();
     if (current === lastOwner) return;
+    startup.sessionState?.(current);
     lastOwner = current; dirtyView = true;
     if (lifecycleReady) resetFrameClock();
     const riding = current === 'riding';

@@ -18,16 +18,18 @@
     }
   };
 
-  // Boot breadcrumb. iOS kills a tab that exceeds its memory limit without any script error, reloads it and
-  // eventually shows "A problem repeatedly occurred". sessionStorage survives those automatic reloads in the same
-  // tab, so every loading-stage change is recorded here and cleared on a clean exit (error panel, page hide).
-  // A crumb found at the next boot means the previous attempt died at that stage; it is shown under the bar.
-  // Riding keeps a crumb too, so a crash while playing is reported the same way.
+  // A browser can interrupt/reload a tab without delivering a script error. sessionStorage may survive that
+  // interruption; the last recorded stage/state is diagnostic evidence, not proof of a memory kill or its cause.
+  // Clear on an error panel or clean page exit; retain the actual session state after loading.
   const CRUMB_KEY = 'euc-sanfrancisco-boot-crumb';
   const bootStarted = performance.now();
   let previousCrumb = null, attempt = 1;
+  let sessionState = 'title', heartbeat = null, pageActive = true;
+  const sessionDescriptions = { title: 'at the title screen', riding: 'while riding',
+    'map open': 'with the map open', booking: 'during booking', paused: 'while paused' };
   const readCrumb = () => { try { return JSON.parse(sessionStorage.getItem(CRUMB_KEY) || 'null'); } catch { return null; } };
   const writeCrumb = (stage) => {
+    if (failed || !pageActive) return;
     try {
       sessionStorage.setItem(CRUMB_KEY, JSON.stringify({ stage: String(stage).slice(0, 160), attempt,
         t: Math.round(performance.now() - bootStarted), backend: document.body.dataset.backend || '',
@@ -40,8 +42,10 @@
   if (previousCrumb && typeof previousCrumb.stage === 'string') {
     attempt = (Number(previousCrumb.attempt) || 1) + 1;
     const seconds = Math.max(0, Math.round((Number(previousCrumb.t) || 0) / 1000));
-    const where = previousCrumb.stage === 'riding' ? `while riding (${seconds} s after start)`
-      : `at: ${previousCrumb.stage.replace(/…$/, '')} (${seconds} s in${previousCrumb.backend ? `, ${previousCrumb.backend === 'webgl2' ? 'WebGL2' : 'WebGPU'}` : ''})`;
+    const backend = previousCrumb.backend === 'webgl2' ? ', WebGL2' : previousCrumb.backend === 'webgpu' ? ', WebGPU' : '';
+    const where = Object.hasOwn(sessionDescriptions, previousCrumb.stage)
+      ? `${sessionDescriptions[previousCrumb.stage]} (${seconds} s after start${backend})`
+      : `at: ${previousCrumb.stage.replace(/…$/, '')} (${seconds} s in${backend})`;
     const build = typeof previousCrumb.build === 'string' && previousCrumb.build ? ` · build ${previousCrumb.build.slice(0, 40)}` : '';
     const note = document.getElementById('loading-crumb');
     if (note) { note.textContent = `Last attempt stopped ${where}${build}`; note.hidden = false; }
@@ -50,8 +54,8 @@
   writeCrumb(status.textContent);
   new MutationObserver(() => { if (!failed && !ready) writeCrumb(status.textContent); })
     .observe(status, { childList: true, characterData: true, subtree: true });
-  addEventListener('pagehide', clearCrumb);
-  addEventListener('pageshow', (event) => { if (event.persisted && ready) writeCrumb('riding'); });
+  addEventListener('pagehide', () => { pageActive = false; clearCrumb(); });
+  addEventListener('pageshow', () => { pageActive = true; writeCrumb(ready ? sessionState : status.textContent); });
 
   const removeListeners = () => {
     window.removeEventListener('error', onError);
@@ -71,6 +75,7 @@
   const fail = (error) => {
     if (failed) return false;
     failed = true;
+    clearInterval(heartbeat);
     clearCrumb(); // a visible error panel is not a crash
     removeListeners();
     // Drain once, including if cleanup reenters fail or registers another stop callback.
@@ -119,11 +124,18 @@
       else stops.push(callback);
     },
     fail,
+    sessionState(value) {
+      const next = value === 'map' ? 'map open' : value === 'menu' || value === 'hidden' ? 'paused' : value;
+      if (!Object.hasOwn(sessionDescriptions, next) || next === sessionState) return;
+      sessionState = next;
+      if (ready) writeCrumb(sessionState);
+    },
     complete() {
       if (failed) return false;
+      if (ready) return true;
       ready = true;
-      writeCrumb('riding');
-      setInterval(() => { if (!document.hidden) writeCrumb('riding'); }, 10000);
+      writeCrumb(sessionState);
+      heartbeat = setInterval(() => { if (!document.hidden) writeCrumb(sessionState); }, 10000);
       removeListeners();
       return true;
     }

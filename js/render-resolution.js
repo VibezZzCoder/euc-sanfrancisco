@@ -2,8 +2,9 @@
 // Scale only the 3D drawing buffer; CSS layout, maps and simulation use their own sizes/clocks.
 export const RENDER_RESOLUTION_KEY = 'euc-sanfrancisco-render-resolution';
 const scales = new Map([['100', 1], ['75', 0.75], ['50', 0.5]]);
-const desktopDefaults = Object.freeze({ quality: 'high', resolution: '100' });
-const phoneDefaults = Object.freeze({ quality: 'medium', resolution: '75' });
+const desktopDefaults = Object.freeze({ quality: 'high', resolution: '100', phone: false });
+const phoneDefaults = Object.freeze({ quality: 'medium', resolution: '75', phone: true });
+const compactTabletDefaults = Object.freeze({ quality: 'medium', resolution: '75', phone: false });
 
 // Initial defaults only, not an adaptive quality controller. Mobile identity covers landscape/foldable inner screens;
 // the small touch-screen fallback covers reduced/desktop-style mobile UAs without treating a narrow desktop tab as a phone.
@@ -15,6 +16,11 @@ export function initialRenderPreferences(environment = globalThis) {
     const shortEdge = Math.min(environment.screen?.width ?? Infinity, environment.screen?.height ?? Infinity);
     const smallTouch = n?.maxTouchPoints > 0 && shortEdge > 0 && shortEdge <= 600
       && environment.matchMedia?.('(pointer: coarse)').matches === true;
+    // Keep known tablets on their existing backend policy, including desktop-UA iPads. Preserve the
+    // older small-screen quality preset on compact tablets; this single probe also owns phone identity.
+    const tablet = /iPad|Android(?!.*Mobile)/i.test(n?.userAgent || '')
+      || (/Macintosh/i.test(n?.userAgent || '') && n?.maxTouchPoints > 1);
+    if (tablet) return phone || smallTouch ? compactTabletDefaults : desktopDefaults;
     return phone || smallTouch ? phoneDefaults : desktopDefaults;
   } catch { return desktopDefaults; }
 }

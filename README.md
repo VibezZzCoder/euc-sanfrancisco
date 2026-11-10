@@ -47,10 +47,18 @@ owner-approved exception. Street, district and landmark names are kept as place 
 ## Play
 
 Open the [play link](https://vibezzzcoder.github.io/euc-sanfrancisco/) in an up-to-date desktop browser with hardware
-acceleration. WebGPU is preferred; the renderer falls back to WebGL2 automatically when WebGPU is unavailable.
-This policy also applies to phones on supported HTTPS browsers. Add [`?webgpu=0`](https://vibezzzcoder.github.io/euc-sanfrancisco/?webgpu=0)
-to explicitly select WebGL2. Covered WebGPU validation failures, and startup device-loss/out-of-memory failures,
-also trigger one reload into WebGL2; this does not guarantee a device has enough memory.
+acceleration. Phones start on **WebGL2**; desktops and tablets retain WebGPU-first with WebGL2 fallback.
+
+| Device / URL | Renderer policy |
+|---|---|
+| Phone, no override | WebGL2 (`phone default` in the pause menu) |
+| Desktop or tablet, no override | WebGPU preferred; WebGL2 fallback if unavailable |
+| [`?webgpu=0`](https://vibezzzcoder.github.io/euc-sanfrancisco/?webgpu=0) | Force WebGL2 (`forced by URL`) |
+| [`?webgpu=1`](https://vibezzzcoder.github.io/euc-sanfrancisco/?webgpu=1) | Explicitly request WebGPU, including on phones |
+
+Covered WebGPU validation failures, and startup device-loss/out-of-memory failures, can still trigger one reload
+into WebGL2 (`automatic fallback`). A session already on WebGL2 does not repeat that reload. Remove `webgpu` and
+`fallback` parameters to return to the device default. The phone policy is a mitigation, not a confirmed stability fix.
 The first load downloads and builds a large city, so allow about **30 seconds on a desktop** (longer on slower
 machines or connections). Choose a rider if you like, then press **Ride**. Sound starts after your first interaction.
 
@@ -85,7 +93,9 @@ routes, physics, traffic and the city stay the same. The speedometer
 shows mph and km/h. The [player guide](PLAYER_GUIDE.md) covers every control, the map, recovery and settings.
 Fresh phone sessions default to **Medium / 75%**; desktop defaults to **High / 100%**. Your saved choices take
 precedence, and rotation does not reset them. The pause menu shows **Build [UTC timestamp] · [actual backend]**;
-include that text with reports. A loading note can identify the last recorded stage of an interrupted attempt.
+include that text with reports. WebGL2 labels distinguish **phone default**, **forced by URL**, and **automatic fallback**.
+A loading note identifies the renderer and last recorded loading stage or actual session state: title, riding, map open,
+booking or paused. It updates on state changes and every ten seconds; elapsed seconds include loading time.
 
 For optional read-only rendering diagnostics, open the game with
 [`?perf=1`](https://vibezzzcoder.github.io/euc-sanfrancisco/?perf=1). The panel shows the rendering backend, submitted
@@ -154,9 +164,12 @@ This is an early release. Known issues include:
   downloading city data are now retried automatically.
 - **Dorkins:** chase, booking and map-marker behavior are still being tested across routes and devices; the map
   cannot show whether the officer is on a different elevation.
-- **iPhone reloads remain:** the owner's latest plain-HTTP LAN test (WebGL2, Medium/75) reloaded when opening the map
-  in Safari. Home Screen mode allowed a longer Maribel/UN skatepark/Dorkins/rotation session before another reboot.
-  No Safari/device memory trace confirms the cause. Live HTTPS/WebGPU behavior needs a separate physical test.
+- **iPhone reloads remain — seen by the owner on a device:** live HTTPS build `2026-11-10 0528Z` on the iPhone Air
+  repeatedly returned to the first loading screen in Home Screen WebGPU sessions, in portrait and landscape.
+  Breadcrumbs reported 67, 61 and 34 seconds after startup in the old broad “riding” state, and 17 seconds at scene
+  visibility/shadows; loading time is included. WebGL2 in a Safari tab lasted clearly longer but was not reported stable.
+  The earlier LAN WebGL2 test also eventually failed. No November 9/10 JetsamEvent was found; the cause is unmeasured,
+  not a confirmed system memory kill. Physical testing of the new phone default and a Safari Web Inspector trace remain next.
 - **Other phones, tablets and foldables:** emulated layouts do not establish physical-device stability. Android,
   foldable transitions and sustained-play/thermal behavior still need review. Lower graphics settings are not a guaranteed remedy.
 - **macOS Firefox:** the shader change and fallback have Linux/compiler evidence; current macOS behavior still needs

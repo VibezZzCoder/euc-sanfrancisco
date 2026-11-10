@@ -1,9 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import vm from 'node:vm';
+import { readFileSync } from 'node:fs';
 import { initialRenderPreferences, createRenderResolutionPreference, RENDER_RESOLUTION_KEY } from '../js/render-resolution.js';
 import { createGraphicsQualityPreference, GRAPHICS_QUALITY_KEY } from '../js/graphics-quality.js';
 
-const phone = { quality: 'medium', resolution: '75' }, desktop = { quality: 'high', resolution: '100' };
+const phone = { quality: 'medium', resolution: '75', phone: true }, desktop = { quality: 'high', resolution: '100', phone: false };
 const env = (ua, width, height, coarse = true, touch = 5) => ({ navigator: { userAgent: ua, maxTouchPoints: touch },
   screen: { width, height }, matchMedia: () => ({ matches: coarse }) });
 
@@ -16,6 +18,29 @@ test('phone defaults cover rotation, mobile folded screens and reduced UAs witho
     env('Linux',1920,1080,true),{},env('',0,0),{get navigator(){throw Error('unavailable');}}]) {
     assert.deepEqual(initialRenderPreferences(e),desktop);
   }
+});
+
+test('tablets retain their backend and quality policy, including desktop-UA iPads and compact Android tablets', () => {
+  for (const ua of ['iPad', 'Macintosh', 'Android Tablet']) {
+    assert.deepEqual(initialRenderPreferences(env(ua,768,1024)),desktop);
+    assert.deepEqual(initialRenderPreferences(env(ua,1024,768)),desktop);
+    assert.deepEqual(initialRenderPreferences(env(ua,600,960)),{...phone,phone:false});
+    const emulated = env(ua,768,1024);
+    emulated.navigator.userAgentData = {mobile:true};
+    assert.deepEqual(initialRenderPreferences(emulated),{...phone,phone:false});
+  }
+});
+
+test('native renderer selection uses the shared phone probe once and respects both URL overrides', () => {
+  const main=readFileSync(new URL('../js/main.js',import.meta.url),'utf8');
+  const block=main.slice(main.indexOf('  const params ='),main.indexOf("  startup.phase('graphics');"));
+  assert.equal((main.match(/initialRenderPreferences\(\)/g)||[]).length,1);
+  for (const isPhone of [false,true]) for (const search of ['', '?webgpu=0', '?webgpu=1', '?webgpu=garbage']) {
+    const result=vm.runInNewContext(`${block}\n({forceWebGL,phoneWebGLDefault})`,{
+      URLSearchParams,location:{search},initialRenderPreferences:()=>({...desktop,phone:isPhone})});
+    assert.equal(result.forceWebGL,search==='?webgpu=0'||(isPhone&&search!=='?webgpu=1'),`${isPhone}/${search}`);
+  }
+  assert.match(main,/reversedDepthBuffer: true, forceWebGL \}/);
 });
 
 test('saved independent choices override phone defaults; defaults do not write storage', () => {
