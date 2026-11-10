@@ -8,7 +8,7 @@ export const PUBLIC_FILES = Object.freeze([
 ]);
 export const PUBLIC_DIRECTORIES = Object.freeze(['css', 'js', 'audio', 'fonts', 'vendor', 'provenance']);
 // SFB1 data is delivered only as lossless gzip copies (tools/compress-data.mjs); raw .bin stays repository-only.
-export const DATA_FILES = Object.freeze(['terrain-core.bin.gz', 'buildings-core.bin.gz', 'groundmask-core.bin.gz']);
+export const DATA_FILES = Object.freeze(['terrain-core.bin.gz', 'buildings-core.bin.gz', 'groundmask-core.bin.gz', 'light-terrain.bin.gz']);
 export const REQUIRED_FILES = Object.freeze([
   ...PUBLIC_FILES, ...DATA_FILES.map(name => `data/${name}`),
   'data/region/manifest.json', 'css/style.css', 'css/fonts.css', 'js/boot.js', 'js/main.js',

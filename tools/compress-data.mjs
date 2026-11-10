@@ -10,10 +10,11 @@ import zlib from 'node:zlib';
 
 const root = path.resolve(import.meta.dirname, '..');
 export const CORE_DATA = Object.freeze(['terrain-core.bin', 'buildings-core.bin', 'groundmask-core.bin']);
+export const TIER_DATA = Object.freeze(['light-terrain.bin']);
 
 export async function runtimeBinaries(base = root) {
   const region = (await fs.readdir(path.join(base, 'data/region'))).filter(name => name.endsWith('.bin')).sort();
-  return [...CORE_DATA.map(name => `data/${name}`), ...region.map(name => `data/region/${name}`)];
+  return [...CORE_DATA.map(name => `data/${name}`), ...TIER_DATA.map(name => `data/${name}`), ...region.map(name => `data/region/${name}`)];
 }
 
 export async function compressedOrphans(base = root, expected) {

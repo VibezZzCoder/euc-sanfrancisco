@@ -318,6 +318,7 @@ function buildSFGround(scene, { deferCurbSurfaces = false } = {}) {
 
   scene.add(group);
   // Omit the same regional scenery for the phone default or explicit ?region=0.
+  if (window.NYC.DATA?.lightTerrain) scene.add(buildRegionGround(null));
   if (window.NYC.DATA && (window.NYC.DATA.region || window.NYC.DATA.fullRegion) && (window.NYC.regionEnabled ?? (new URLSearchParams(location.search).get('region') !== '0'))) scene.add(buildRegionGround(window.NYC.DATA.fullRegion ? null : window.NYC.DATA.region));
   if (!deferCurbSurfaces) finishCurbSurfaces();
   return { group, terrain, sidewalks, finishCurbSurfaces, footprints: [], colliders: [], highwayLanes: [] };

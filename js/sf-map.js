@@ -172,7 +172,7 @@ class TiledLayer {
 let RELIEF = null;
 function mapRelief() {
   if (RELIEF) return RELIEF;
-  const g = window.NYC.DATA?.fullRegion?.city;
+  const g = window.NYC.DATA?.fullRegion?.city || window.NYC.DATA?.lightTerrain?.city;
   if (!g) return null;
   const canvas = document.createElement('canvas'); canvas.width = g.w; canvas.height = g.h;
   // One reusable strip avoids a second full-city RGBA buffer on the first map
@@ -589,6 +589,8 @@ class NYCMapSystem {
     this.elSearchStatus = document.getElementById('fullmap-search-status');
     this.elSearchSummary = document.getElementById('fullmap-search-summary');
     this.elActionStatus = document.getElementById('fullmap-action-status');
+    const lightNote = document.getElementById('light-map-note');
+    if (lightNote) lightNote.hidden = !window.NYC.lightCoverage;
     if (this.elSearchInput) this.elSearchInput.placeholder = `Search ${ROAD_NAME_COUNT} streets & landmarks…`;
 
     this.isFullMapOpen = false;
@@ -671,7 +673,7 @@ class NYCMapSystem {
     if (fullIslandBtn) {
       fullIslandBtn.addEventListener('click', () => {
         // Fit the full measured city. Pins are geographic, not a promise of supported EUC arrival.
-        const city = window.NYC.DATA?.fullRegion?.city;
+        const city = window.NYC.DATA?.fullRegion?.city || window.NYC.DATA?.lightTerrain?.city;
         const b = city ? { minX:city.x0,maxX:city.x1,minZ:city.z0,maxZ:city.z1 } : ISLAND_BOUNDS;
         const { w, h } = this.fullSize();
         this.viewCenterX = (b.minX + b.maxX) * 0.5;
@@ -1636,6 +1638,18 @@ class NYCMapSystem {
 
     // 2. SF terrain, coastline, blocks, parks, footprints, highways and bridges
     this.drawWorld(ctx, v, false);
+
+    const coverage = window.NYC.lightCoverage;
+    if (coverage) {
+      v.world(ctx);
+      ctx.fillStyle = 'rgba(5, 9, 14, 0.66)';
+      ctx.beginPath(); ctx.rect(v.minX, v.minZ, v.maxX - v.minX, v.maxZ - v.minZ);
+      ctx.rect(coverage.minX, coverage.minZ, coverage.maxX - coverage.minX, coverage.maxZ - coverage.minZ);
+      ctx.fill('evenodd');
+      ctx.strokeStyle = '#8c959f'; ctx.lineWidth = 1 / s; ctx.setLineDash([6 / s, 5 / s]);
+      ctx.strokeRect(coverage.minX, coverage.minZ, coverage.maxX - coverage.minX, coverage.maxZ - coverage.minZ);
+      ctx.setLineDash([]);
+    }
 
     v.screen(ctx);
     const toX = (wx) => v.toX(wx);

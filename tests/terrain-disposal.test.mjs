@@ -13,7 +13,7 @@ function section(start, end) {
 const stopSource = section('  startup.onStop(async () => {', '  rendererInit = renderer.init();');
 // Includes the production scene disposal registration, ground construction, terrain registration and the next stage.
 // Removing/moving terrain registration past this boundary must fail the early-startup-failure case too.
-const groundSource = section('  const scene = new THREE.Scene();', '  const region = city.buildSFRegion(');
+const groundSource = section('  const scene = new THREE.Scene();', '  const region = worldTier.light ?');
 
 function deferred() {
   let resolve, reject;
@@ -49,7 +49,7 @@ function hostFixture({ compiling = false, failAfterGround = false } = {}) {
     setGameUIEnabled(value) { assert.equal(value, false); },
     stopRuntime: async () => { events.push('runtime-stop'); },
     releaseAppearanceCaches: () => events.push('appearance-release'),
-    renderer, rendererInit: Promise.resolve(), riderPreparationWork: null, firstFrameWork: null,
+    renderer, rendererInit: Promise.resolve(), riderPreparationWork: null, firstFrameWork: null, worldTier: { light: false },
     compileWork: compiling ? renderer.compileAsync('startup') : null,
     runtimeCompile: compiling ? renderer.compileAsync('runtime') : null,
     ownedDisposals: [], THREE: { Scene },

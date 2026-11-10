@@ -214,7 +214,8 @@ function hostFixture(enabled = true) {
     streetDetails: {}, trafficSystem: { update: noop }, highwayTraffic: { update: noop }, transit: { update: noop },
     nemesis: null, retireBookingSpawnProtection: noop, bookingScreen: { setSuspended: noop },
     city: { updateSceneCulling: noop, getLocationLabel: () => 'fixture' }, eucHud: { update: noop }, savePlayerState: noop, updateWorldView: noop,
-    graphicsFailed: error => failures.push(error), promptDevice: 'keyboard', renderLocation: noop };
+    graphicsFailed: error => failures.push(error), promptDevice: 'keyboard', renderLocation: noop,
+    lightBoundary: null, lightNotice: null };
   const runtime = new Function(...Object.keys(env), `
     let rendererBusy = false, stopped = false, pageAway = false, lastOwner = null, lifecycleReady = true;
     let windowFocused = true, bookingSuspended = false, bookingClearancePending = false, dirtyView = false;

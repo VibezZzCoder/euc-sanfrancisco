@@ -3,9 +3,10 @@
 > **Early Access / Work in Progress.** With the region enabled, every destination can be reached and ridden; the game runs with both
 > WebGPU and WebGL2. Expect rough visuals, a long first load and unfinished corners; see
 > [Known rough spots](#known-rough-spots). Feedback is very welcome.
-> **Interim phone mode:** phones start on WebGL2 with the surrounding region off. The owner completed a full iPhone Air
-> session with that combination, but surroundings beyond the core city are missing. This is an accepted temporary
-> limitation, not a finished lighter tier or a guarantee of stability on every phone.
+> **Phone-ready Light world:** phones start on WebGL2 with a terrain-only **Light world**. The core is retained;
+> outer terrain and destination ground replace the previous void, while regional buildings, trees and boats remain
+> omitted. The owner reports a playable, approximately five-minute iPhone Air Safari session with no reboots;
+> longer sessions and other phones still need testing.
 
 **[▶ Play now](https://vibezzzcoder.github.io/euc-sanfrancisco/)**
 
@@ -52,16 +53,18 @@ acceleration. Phones start on **WebGL2**; desktops and tablets retain WebGPU-fir
 
 | Device / URL | Renderer policy |
 |---|---|
-| Phone, no override | WebGL2 (`phone default` in the pause menu), region off |
+| Phone, no override | WebGL2 (`phone default` in the pause menu), Light world |
 | Desktop or tablet, no override | WebGPU preferred; WebGL2 fallback if unavailable; region on, unchanged |
 | [`?webgpu=0`](https://vibezzzcoder.github.io/euc-sanfrancisco/?webgpu=0) | Force WebGL2 (`forced by URL`) |
 | [`?webgpu=1`](https://vibezzzcoder.github.io/euc-sanfrancisco/?webgpu=1) | Explicitly request WebGPU, including on phones |
 
 Covered WebGPU validation failures, and startup device-loss/out-of-memory failures, can still trigger one reload
 into WebGL2 (`automatic fallback`). A session already on WebGL2 does not repeat that reload. Remove `webgpu` and
-`fallback` parameters to return to the device default. The phone policy is a mitigation, not a confirmed stability fix.
-Region selection is independent: `?region=1` opts into the surrounding region on a phone, while `?region=0` omits it
-on any device. Remove `region` to restore the device default. See the interim phone limitation below.
+`fallback` parameters to return to the device default. The successful short Safari playtest is not universal stability acceptance.
+World choice is independent: `?tier=light` or `?tier=full` overrides the boot choice on any device. Without an explicit
+tier, `?region=1` still opts a phone back into Full world. An explicit tier wins a conflicting `region` option.
+`?tier=full&region=0` retains the old scenery-off diagnostic mode and its downloads. Remove `tier` and `region` to
+restore device defaults. Light does not change saved Graphics/3D-resolution choices or desktop/tablet defaults.
 The first load downloads and builds a large city, so allow about **30 seconds on a desktop** (longer on slower
 machines or connections). Choose a rider if you like, then press **Ride**. Sound starts after your first interaction.
 
@@ -108,9 +111,10 @@ intervals, and resets when riding is suspended. These intervals are not GPU timi
 Recent rendering updates reduce offscreen tree/paint submissions, tighten shadow-caster culling and spread the first
 build of distant Golden Gate / Twin Peaks scenery across frames; distant scenery may appear a moment later.
 The owner previously reported a clearly better framerate playing at night with a PS5 controller.
-The current update reduces retained support/collision and graphics-resource memory, narrows map allocation peaks,
-and addresses a Firefox shader-validation incompatibility. Most changes also apply to desktop. Some packing/query
-work adds CPU cost, and startup memory peaks remain substantial; lower retained memory is not a universal speedup.
+Earlier updates reduced retained support/collision and graphics-resource memory, narrowed map allocation peaks,
+and addressed a Firefox shader-validation incompatibility. This update adds the terrain-only phone world, checked
+outer-edge returns and map coverage guidance. Startup memory peaks remain substantial; lower retained memory is not
+a universal speedup.
 
 ## Officer Dorkins
 
@@ -167,7 +171,7 @@ This is an early release. Known issues include:
   downloading city data are now retried automatically.
 - **Dorkins:** chase, booking and map-marker behavior are still being tested across routes and devices; the map
   cannot show whether the officer is on a different elevation.
-- **iPhone reloads remain — seen by the owner on a device:** live HTTPS build `2026-11-10 0528Z` on the iPhone Air
+- **Earlier iPhone reloads — seen by the owner on a device:** live HTTPS build `2026-11-10 0528Z` on the iPhone Air
   repeatedly returned to the first loading screen in Home Screen WebGPU sessions, in portrait and landscape.
   Breadcrumbs reported 67, 61 and 34 seconds after startup in the old broad “riding” state, and 17 seconds at scene
   visibility/shadows; loading time is included. WebGL2 in a Safari tab lasted clearly longer but was not reported stable.
@@ -177,11 +181,15 @@ This is an early release. Known issues include:
 - **Phone region-off mode — seen by the owner on a device:** on the same build, WebGL2 plus `?region=0`, Home Screen,
   Medium/75 ran a full session without reload: rider changes, rotation, a Dorkins escape, the map and several location
   changes. WebGPU with the region off lasted longer than with it on but eventually reloaded during rotation.
-- **Accepted interim missing surroundings:** phones now default to that existing region-off behavior. The world beyond
-  the core city is missing; outlying skateparks and the Golden Gate deck can stand in empty space, and nearby map
-  positions may have no usable ground. Stay in the core for ordinary phone exploration. Map/edge behavior has not been
-  redesigned. The switch still loads regional data but skips regional scenery construction; this is not yet the planned
-  finished lighter tier. Desktop and tablet defaults are unchanged. The new default needs confirmation on the owner's phone.
+- **Light world — implemented, with scoped Chromium checks:** a separate terrain-only package avoids
+  unused regional downloads, retaining the original outer city heights/ground classes and detailed core. A cheap
+  horizon and near-rider terrain replace the void around destinations. Regional buildings, trees and boats are still
+  omitted, so the outer landscape is bare. The map marks distant scenery-only coverage, unsupported arrivals remain
+  checked, and leaving supported terrain makes a checked return to the last verified safe point with a notice.
+  Desktop and tablet defaults retain Full world. The owner reports a playable approximately five-minute iPhone Air
+  Safari session with no reboots, covering three riders, repeated rotations, map teleports/Golden Gate riding checks,
+  cop capture/release and UN skatepark. They stopped voluntarily while multitasking. This is short-session physical
+  evidence; ten-minute endurance, detailed outer visuals, full routes and other devices remain unverified.
 - **Other phones, tablets and foldables:** emulated layouts do not establish physical-device stability. Android,
   foldable transitions and sustained-play/thermal behavior still need review. Lower graphics settings are not a guaranteed remedy.
 - **macOS Firefox:** the shader change and fallback have Linux/compiler evidence; current macOS behavior still needs

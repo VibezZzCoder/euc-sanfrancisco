@@ -6,7 +6,7 @@
   <title>SF Spin-off: EUC Thrills</title>
   <link rel="icon" type="image/svg+xml" sizes="any" href="./assets/euc-badge.svg" />
   <!-- Build id: "dev" in source; the public exporter stamps the release date (shown in the pause menu). -->
-  <meta name="euc-build" content="2026-11-10 0923Z" />
+  <meta name="euc-build" content="2026-11-10 1907Z" />
   <meta name="description" content="Ride an electric unicycle through San Francisco's hills, streets and marine fog. A free EUC Thrills city destination in Early Access." />
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="EUC Thrills" />
@@ -45,6 +45,10 @@
   <link rel="modulepreload" href="./js/sf-bootstrap.js" />
   <link rel="modulepreload" href="./js/main.js" />
   <link rel="modulepreload" href="./js/graphics-quality.js" />
+  <link rel="modulepreload" href="./js/world-tier.js" />
+  <link rel="modulepreload" href="./js/sf-light-data.js" />
+  <link rel="modulepreload" href="./js/sf-light-terrain.js" />
+  <link rel="modulepreload" href="./js/sf-light-boundary.js" />
   <link rel="modulepreload" href="./js/sf-skateparks.js" />
   <link rel="modulepreload" href="./js/sf-skatepark-geometry.js" />
   <!-- euc:preload:start (tools/vendor-euc.mjs) -->
@@ -393,6 +397,7 @@
       <button class="touch-btn touch-btn--charge" data-touch="boost" type="button" aria-label="Crouch and charge a bigger hop; hold in the air to tuck">CHARGE</button>
     </div>
   </section>
+  <p id="light-world-notice" class="light-world-notice panel" role="status" hidden></p>
 
   <!-- Eleven rider-relative cameras, including cinematic tracking and an aerial director -->
   <div id="camera-popover" class="popover" popover data-side="above" data-anchor="hud-cluster" data-align="hud-cluster" aria-label="Multiple Camera Angles">
@@ -459,6 +464,7 @@
     <div id="fullmap-footer" class="fullmap-footer">
       <div class="panel fullmap-status">
         <span id="fullmap-hover-info">Click for a checked arrival · Drag to pan · Scroll to zoom · Waypoint shows direction, not a route</span>
+        <span id="light-map-note" class="fullmap-action-status" hidden>Light world · muted outer areas are scenery only.</span>
         <span id="fullmap-action-status" class="fullmap-action-status" role="status" aria-live="polite" aria-atomic="true"></span>
         <p class="fullmap-pad-help gamepad-prompt">LS Cursor · RS Pan · LT / RT Zoom · A Select / teleport<br>X Center · Y Whole SF · D-pad Controls · B / Start Close · View Menu</p>
       </div>

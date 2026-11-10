@@ -40,7 +40,8 @@ async function fetchBin(url, onBytes) {
   return { header, buf, offset: 8 + n };
 }
 
-async function loadCityData(onProgress) {
+async function loadCityData(onProgress, { loadOuter = window.NYC.loadSFRegion,
+  installOuter = window.NYC.installRegionTerrain, outerKey = 'fullRegion' } = {}) {
   const d = GEO.data;
   let done = 0;
   const step = () => onProgress && onProgress(++done / 3);
@@ -49,7 +50,7 @@ async function loadCityData(onProgress) {
   const t = await fetchBin(d.terrain.url, step);
   const b = await fetchBin(d.buildings.url, step);
   const m = await fetchBin(d.groundMask.url, step);
-  const fullRegion = await window.NYC.loadSFRegion(fetchBin);
+  const outer = await loadOuter(fetchBin);
   const DATA = {
     terrain: { header: t.header, q: new Uint16Array(t.buf, t.offset, t.header.w * t.header.h) },
     buildings: {
@@ -60,10 +61,10 @@ async function loadCityData(onProgress) {
     },
     groundMask: { header: m.header, mask: new Uint8Array(m.buf, m.offset, m.header.w * m.header.h) }
   };
-  DATA.fullRegion = fullRegion;
+  DATA[outerKey] = outer;
   window.NYC.DATA = DATA;
   window.NYC.Terrain.load(DATA.terrain.header, DATA.terrain.q);
-  window.NYC.installRegionTerrain(fullRegion);
+  installOuter(outer);
   return DATA;
 }
 

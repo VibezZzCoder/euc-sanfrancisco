@@ -267,7 +267,7 @@ function hostFixture() {
     audioSystem: { update: noop, setPaused: noop }, eucHud: { update: noop },
     trafficSystem: { update: noop }, highwayTraffic: { update: noop }, transit: { update: noop }, streetDetails: {},
     city: { updateSceneCulling: noop }, scene: { add: () => calls.push('attach') }, sceneMRT: {},
-    updateWorldView: noop, savePlayerState: noop, promptDevice: 'keyboard',
+    updateWorldView: noop, savePlayerState: noop, promptDevice: 'keyboard', lightBoundary: null, lightNotice: null,
     scheduleViewportResize: () => calls.push('resize'),
     listen: (element, type, fn) => { assert.equal(element, control); listeners.set(type, fn); },
     setGameUIEnabled: noop, startupPreparation: { abort: noop }, stopRuntime: async () => {}, releaseAppearanceCaches: noop

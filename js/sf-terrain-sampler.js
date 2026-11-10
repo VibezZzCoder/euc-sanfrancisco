@@ -4,6 +4,7 @@
 // No renderer/THREE or mutable player floor. All elevations are absolute NAVD88 metres.
 import { PlanTerrainSampler } from './euc/simulation/planSampler.js';
 import { findPlacementTarget, findRecoveryTarget } from './euc-recovery.js';
+import { lightMaskValue } from './sf-light-data.js';
 import { SfSupportStore } from './sf-support-store.js';
 import { SfStaticBoxStore, SfRegionalPrismStore, prepareStaticBox as prepareBox } from './sf-static-body-store.js';
 import { WHEEL, TERRAIN } from './euc/data/tuning.js';
@@ -338,7 +339,7 @@ function maskClass(m, x, z, region = false) {
   const h = m.header ?? m, cell = h.cell ?? h.step ?? (region ? 4 : 1);
   const i = Math.floor((x - (h.originX ?? h.x0)) / cell), j = Math.floor((z - (h.originZ ?? h.z0)) / cell);
   if (i < 0 || j < 0 || i >= h.w || j >= h.h) return null;
-  const value = (m.mask ?? m.values)?.[j * h.w + i];
+  const value = m.rows ? lightMaskValue(m, i, j) : (m.mask ?? m.values)?.[j * h.w + i];
   return h.classes?.[value] ?? (region ? REGION_CLASSES[value] : CORE_CLASSES[value]);
 }
 
@@ -598,7 +599,7 @@ export class SfTerrainSampler {
     this.waterLevel = terrain?.waterLevel ?? data?.fullRegion?.manifest?.waterLevel ?? 0;
     this.coreMask = data?.groundMask;
     const region = data?.fullRegion;
-    this.regionMask = region ? { header: region.manifest.mask, mask: region.mask } : null;
+    this.regionMask = region ? { header: region.manifest.mask, mask: region.mask } : data?.lightTerrain?.mask ?? null;
     this.fields = [fieldOf(terrain), ...(terrain?.patches ?? []).map(fieldOf)].filter(Boolean);
     if (!this.fields.length && data?.terrain) {
       const { header: h, q } = data.terrain;

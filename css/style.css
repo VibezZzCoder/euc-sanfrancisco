@@ -1868,3 +1868,21 @@ body.touch-enabled #fog-preset { width: 96px; font-size: 11px; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+.light-world-notice {
+  position: fixed;
+  z-index: 12;
+  left: 50%;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 160px);
+  transform: translateX(-50%);
+  max-width: min(420px, calc(100vw - 32px));
+  padding: 10px 14px;
+  font-size: 13px;
+  text-align: center;
+  pointer-events: none;
+}
+
+/* Search results can grow the header; keep the light-tier Close target above the compact action row. */
+body[data-world-tier="light"] .fullmap-close {
+  align-self: flex-start;
+  height: 46px;
+}

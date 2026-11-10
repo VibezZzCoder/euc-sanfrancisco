@@ -57,6 +57,16 @@ test('all session notes include the actual backend; old riding crumbs and unknow
   }
 });
 
+test('a session interruption reports its boot tier with backend and actual state', () => {
+  for (const tier of ['full', 'light']) {
+    const b = boot({ stage: 'map open', backend: 'webgl2', tier, t: 34000, build: 'older' });
+    assert.ok(b.node('loading-crumb').textContent.includes(tier + ' tier'));
+    b.document.body.dataset.worldTier = tier;
+    b.api.complete(); b.api.sessionState('booking'); b.tick();
+    assert.equal(b.crumb().tier, tier); assert.equal(b.crumb().stage, 'booking');
+  }
+});
+
 test('pagehide stays clear through state changes/timer; BFCache restore resumes the recorded state', () => {
   const b = boot(); b.api.complete(); b.api.sessionState('map'); b.event('pagehide');
   b.api.sessionState('hidden'); b.tick(); assert.equal(b.crumb(),null);

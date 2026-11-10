@@ -33,6 +33,7 @@
     try {
       sessionStorage.setItem(CRUMB_KEY, JSON.stringify({ stage: String(stage).slice(0, 160), attempt,
         t: Math.round(performance.now() - bootStarted), backend: document.body.dataset.backend || '',
+        tier: document.body.dataset.worldTier || '',
         build: document.querySelector('meta[name="euc-build"]')?.content || '',
         heapMB: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : undefined }));
     } catch { /* Private mode or full storage: the breadcrumb is diagnostic only. */ }
@@ -42,7 +43,8 @@
   if (previousCrumb && typeof previousCrumb.stage === 'string') {
     attempt = (Number(previousCrumb.attempt) || 1) + 1;
     const seconds = Math.max(0, Math.round((Number(previousCrumb.t) || 0) / 1000));
-    const backend = previousCrumb.backend === 'webgl2' ? ', WebGL2' : previousCrumb.backend === 'webgpu' ? ', WebGPU' : '';
+    const backend = (previousCrumb.backend === 'webgl2' ? ', WebGL2' : previousCrumb.backend === 'webgpu' ? ', WebGPU' : '')
+      + (previousCrumb.tier === 'full' || previousCrumb.tier === 'light' ? `, ${previousCrumb.tier} tier` : '');
     const where = Object.hasOwn(sessionDescriptions, previousCrumb.stage)
       ? `${sessionDescriptions[previousCrumb.stage]} (${seconds} s after start${backend})`
       : `at: ${previousCrumb.stage.replace(/…$/, '')} (${seconds} s in${backend})`;

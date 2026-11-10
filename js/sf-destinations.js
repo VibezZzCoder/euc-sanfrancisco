@@ -153,7 +153,7 @@ function nearestRoad(pin) {
     if (road.flags & (1 | 2 | 4 | 16)) continue;
     for (let i = 1; i < road.pts.length; i++) consider(road.pts[i - 1], road.pts[i]);
   }
-  const roads = N.DATA?.fullRegion?.roads;
+  const roads = N.DATA?.fullRegion?.roads || N.DATA?.lightTerrain?.roads;
   if (roads) for (let k = 0; k < roads.length; k += 4)
     consider({ x: roads[k], z: roads[k + 1] }, { x: roads[k + 2], z: roads[k + 3] });
   return best;

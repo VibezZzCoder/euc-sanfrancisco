@@ -31,6 +31,10 @@ import { createBookingDirector, BookingScreen } from './booking.js';
 import { createBookingScene } from './booking-scene.js';
 import { createSfBookingPlacement } from './sf-booking-placement.js';
 import { createRenderStats } from './render-stats.js';
+import { createWorldTierPolicy } from './world-tier.js';
+import { loadLightTerrain, installLightTerrain } from './sf-light-data.js';
+import { buildLightTerrain } from './sf-light-terrain.js';
+import { createLightBoundaryReturn } from './sf-light-boundary.js';
 
 // Exploratory survey points, NOT accepted final staging. The intake is derived from the
 // surveyed desk point; every transfer and release is independently checked at runtime.
@@ -98,11 +102,13 @@ export async function initApp(startup) {
 
   const params = new URLSearchParams(location.search);
   const initialRendering = initialRenderPreferences();
-  // Interim phone default: use the existing region=0 construction path. Explicit region=1 opts back in.
-  city.regionEnabled = params.get('region') !== '0' && (!initialRendering.phone || params.get('region') === '1');
+  const worldTier = createWorldTierPolicy(initialRendering.phone, params);
+  city.worldTier = worldTier.name;
+  city.regionEnabled = worldTier.regionEnabled;
   const phoneWebGLDefault = initialRendering.phone && params.get('webgpu') !== '1';
   const forceWebGL = params.get('webgpu') === '0' || phoneWebGLDefault;
   startup.phase('graphics');
+  document.body.dataset.worldTier = worldTier.name;
   await stage('Initializing graphics…', 'graphics');
   const renderer = new THREE.WebGPURenderer({ antialias: true, powerPreference: 'high-performance',
     reversedDepthBuffer: true, forceWebGL });
@@ -187,7 +193,7 @@ export async function initApp(startup) {
     : params.get('webgpu') === '0' ? (params.get('fallback') ? 'automatic fallback' : 'forced by URL')
     : phoneWebGLDefault ? 'phone default' : 'automatic fallback';
   const buildNote = document.getElementById('menu-build');
-  if (buildNote) buildNote.textContent = `Build ${buildId} · ${backendName}${backendDetail ? ` (${backendDetail})` : ''}`;
+  if (buildNote) buildNote.textContent = `Build ${buildId} · ${backendName}${backendDetail ? ` (${backendDetail})` : ''}${worldTier.light ? ' · Light world' : ''}`;
 
   startup.phase('city');
   await stage('Creating San Francisco sky and environment lighting…', 'lighting');
@@ -205,8 +211,10 @@ export async function initApp(startup) {
     for (const resource of [...geometries, ...materials, ...textures]) resource.dispose();
     lightingSystem.dispose?.(); scene.environment?.dispose(); scene.clear();
   });
-  await stage('Loading terrain, buildings and the San Francisco region…', 'data');
-  await city.loadCityData();
+  await stage(worldTier.light ? 'Loading the city and lightweight outer terrain…'
+    : 'Loading terrain, buildings and the San Francisco region…', 'data');
+  await city.loadCityData(undefined, worldTier.light ? { loadOuter: loadLightTerrain,
+    installOuter: data => installLightTerrain(city, data), outerKey: 'lightTerrain' } : undefined);
   if (startup.failed) return;
   await stage('Building hills, streets and waterfronts…', 'ground');
   const cityGrid = city.buildSFGround(scene, { deferCurbSurfaces: true });
@@ -215,7 +223,8 @@ export async function initApp(startup) {
   // tile minimum); any tile needing a finer level still rebuilds at once. Drawing-only; physics is unaffected.
   cityGrid.terrain?.setLodBudget?.(4);
   await stage('Building the regional landscape…', 'region');
-  const region = city.buildSFRegion(scene, { paintIntervals: skateparkPaintIntervals });
+  const region = worldTier.light ? buildLightTerrain(scene, city)
+    : city.buildSFRegion(scene, { paintIntervals: skateparkPaintIntervals });
   ownedDisposals.push(() => region.disposeTerrainCache());
   // Cold arrivals: uncached camera-threshold regional LODs build over later frames (~4 ms each, one tile minimum) and
   // publish together when complete; rider-near/seam tiles stay synchronous. Drawing-only; physics is unaffected.
@@ -497,6 +506,13 @@ export async function initApp(startup) {
     allBlocks: cityBlocks.allBlocks, onToggle: open => { syncLifecycle(); if (open) mapSystem.setInputDevice(promptDevice); }, onTeleport: teleportTo });
   mapSystem.chaser = nemesis; // The map reads only the officer's published presence and position.
   mapSystem.enabled = false;
+  const lightNotice = worldTier.light ? document.getElementById('light-world-notice') : null;
+  let lightNoticeUntil = 0;
+  const lightBoundary = worldTier.light ? createLightBoundaryReturn(controllerManager, city.lightCoverage, () => {
+    touchControls.reset(); gamepadControls.reset(); cameraSystem.resetForTeleport();
+    lightNoticeUntil = elapsed + 4; dirtyView = true;
+    lightNotice.textContent = 'Light world boundary — returned to your last safe ground.';
+  }) : null;
   function owner() {
     return menuOwner({ failed: startup.failed || stopped, hidden: document.hidden, pageAway,
       booking: booking.active, menu: gameMenu?.isOpen, map: mapSystem.isFullMapOpen,
@@ -843,7 +859,7 @@ export async function initApp(startup) {
   // Existing inspection API: ordinary runtime objects, no alternate simulation or test-only control path.
   window.__NYC_APP = { renderer, scene, renderPipeline, postFX: { scenePass, ssrPass, graphics,
       get bloomPass() { return graphics.current?.grade.bloomPass; }, get colorGrade() { return graphics.current?.grade; } },
-    cityGrid, cityBlocks, quadtree: cityBlocks.quadtree, cullingStats, geometryCopies, region, bridges, gradeSeparation, roadNetwork,
+    cityGrid, cityBlocks, quadtree: cityBlocks.quadtree, cullingStats, geometryCopies, region, bridges, gradeSeparation, roadNetwork, worldTier,
     trafficSystem, highwayTraffic, transit, controllerManager, cameraSystem, touchControls, gamepadControls,
     lightingSystem, mapSystem, audioSystem, titleScreen, gameMenu, riderSelection, dynamicWorld,
     selectCamera, cycleCamera, selectTime, getFps: () => currentFps, ready: false,
@@ -965,7 +981,9 @@ export async function initApp(startup) {
         retireBookingSpawnProtection(entity);
         highwayTraffic.update(dt, cameraSystem.camera, entity, 'euc'); transit.update(dt);
         controllerManager.update(dt, elapsed);
+        lightBoundary?.update(elapsed);
       } else entity.update(0, controllerManager.keys);
+      if (lightNotice) lightNotice.hidden = !riding || elapsed >= lightNoticeUntil;
       if (title) titleElapsed += dt;
       const viewTime = title ? titleElapsed : elapsed;
       if (riding || title || !warmedUp) cameraSystem.update(dt, viewTime);

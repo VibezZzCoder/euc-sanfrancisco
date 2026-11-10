@@ -4,6 +4,7 @@ import vm from 'node:vm';
 import { readFileSync } from 'node:fs';
 import { initialRenderPreferences, createRenderResolutionPreference, RENDER_RESOLUTION_KEY } from '../js/render-resolution.js';
 import { createGraphicsQualityPreference, GRAPHICS_QUALITY_KEY } from '../js/graphics-quality.js';
+import { createWorldTierPolicy } from '../js/world-tier.js';
 
 const phone = { quality: 'medium', resolution: '75', phone: true }, desktop = { quality: 'high', resolution: '100', phone: false };
 const env = (ua, width, height, coarse = true, touch = 5) => ({ navigator: { userAgent: ua, maxTouchPoints: touch },
@@ -37,7 +38,7 @@ test('native renderer selection uses the shared phone probe once and respects bo
   assert.equal((main.match(/initialRenderPreferences\(\)/g)||[]).length,1);
   for (const isPhone of [false,true]) for (const search of ['', '?webgpu=0', '?webgpu=1', '?webgpu=garbage']) {
     const result=vm.runInNewContext(`${block}\n({forceWebGL,phoneWebGLDefault})`,{
-      URLSearchParams,location:{search},city:{},initialRenderPreferences:()=>({...desktop,phone:isPhone})});
+      URLSearchParams,createWorldTierPolicy,location:{search},city:{},initialRenderPreferences:()=>({...desktop,phone:isPhone})});
     assert.equal(result.forceWebGL,search==='?webgpu=0'||(isPhone&&search!=='?webgpu=1'),`${isPhone}/${search}`);
   }
   assert.match(main,/reversedDepthBuffer: true, forceWebGL \}/);
@@ -48,9 +49,9 @@ test('phones select the existing region-off gates; desktop/tablet URL behavior i
   const main=read('main'), block=main.slice(main.indexOf('  const params ='),main.indexOf("  startup.phase('graphics');"));
   const region=read('region'), ground=read('sf-ground');
   const regionGate=region.slice(region.indexOf('  const data=window.NYC.DATA.fullRegion;'),region.indexOf('  const group=new THREE.Group();'));
-  const groundGate=ground.split('\n').find(line=>line.includes('scene.add(buildRegionGround('));
+  const groundGate=ground.split('\n').find(line=>line.includes('window.NYC.DATA &&')&&line.includes('scene.add(buildRegionGround('));
   for (const isPhone of [false,true]) for (const search of ['', '?region=0', '?region=1', '?region=other', '?webgpu=1', '?webgpu=0&region=1']) {
-    const city={DATA:{fullRegion:{}}}, sandbox={URLSearchParams,location:{search},city,
+    const city={DATA:{fullRegion:{}}}, sandbox={URLSearchParams,createWorldTierPolicy,location:{search},city,
       initialRenderPreferences:()=>({...desktop,phone:isPhone})};
     vm.runInNewContext(block,sandbox);
     const expected=isPhone ? new URLSearchParams(search).get('region')==='1' : new URLSearchParams(search).get('region')!=='0';

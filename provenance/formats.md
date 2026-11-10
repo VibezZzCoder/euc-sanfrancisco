@@ -128,3 +128,15 @@ Regenerate with `node --max-old-space-size=8192 tools/geo-region.mjs`; source fe
 [data-sources.md](data-sources.md). The 366 outputs total 18.16 MB; the largest is 2.48 MB. A repeat build was byte-identical.
 The old `data/terrain-region.bin` is reproducible from the retained Phase 5 tools but is no longer retained or packaged;
 the runtime no longer loads it. Removing it saves source/package bytes, not active startup transfer or live memory.
+## Light terrain package (local tier, 2026-11-10)
+
+`data/light-terrain.bin` is an SFB1 header plus aligned typed arrays, delivered as its lossless `.bin.gz` copy.
+`tools/build-light-terrain.mjs` derives it solely from existing committed runtime data; it performs no geographic
+downloads/regeneration. `--check` verifies output bytes and `provenance/light-terrain.json` source/output SHA-256s.
+The source geographic attribution and ODbL terms remain in `NOTICE.md` and `provenance/data-sources.md`.
+
+The `sf-light-terrain` version1 header describes a byte-offset/length layout for Float32 native8m city heights,
+Float32 visual-only256m horizon heights, a bounded Float32 subset of source road segments for Yerba Buena's existing
+arrival consumer, and the exact original4m ground classes encoded per row (Uint32 row offsets, Uint16 exclusive
+column ends, Uint8 class values). Core data stays separate. The horizon is never installed as physical support.
+The runtime validates grid dimensions, layout ownership, row coverage/class ranges and metadata before installation.
