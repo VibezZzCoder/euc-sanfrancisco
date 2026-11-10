@@ -142,14 +142,26 @@ was found, so a system memory kill is not confirmed.
 
 | Device / URL | Renderer policy |
 |---|---|
-| Phone, no override | **WebGL2** (`phone default`) |
-| Desktop or tablet, no override | WebGPU preferred; WebGL2 fallback if needed |
+| Phone, no override | **WebGL2** (`phone default`), **region off** |
+| Desktop or tablet, no override | WebGPU preferred; WebGL2 fallback if needed; **region on**, unchanged |
 | `?webgpu=0` | Force WebGL2 (`forced by URL`) |
 | `?webgpu=1` | Explicitly request WebGPU, including on phones; fallback remains available |
 
 Remove `webgpu` and `fallback` parameters to return to the device default. A covered WebGPU failure can reload once
 into WebGL2 automatically (`automatic fallback`). A session already on WebGL2 does not repeat that reload.
 Tablets, including iPads, retain their existing defaults. The phone policy is a mitigation, not a confirmed stability fix.
+
+**Interim phone world:** the region outside the core city is off by default. This is the same behavior as `?region=0`.
+The owner reported a full Home Screen session on the iPhone Air using WebGL2, region off, Medium/75 on live build
+`2026-11-10 0528Z`: rider changes, rotation, map/location changes and a Dorkins escape, with no reload. This is one
+owner-observed session, not proof of stability on every phone. WebGPU with the region off eventually reloaded on rotation.
+
+**Known and accepted for now:** the surrounding world is missing. Outlying skateparks and the Golden Gate deck can
+stand in empty space, and map destinations beside them may have no usable ground. The core city is the intended area
+for ordinary phone exploration in this interim mode. The map and missing-ground behavior have not been redesigned.
+Use `?region=1` to opt back into the region (or `&region=1` alongside another query); this is independent of the renderer
+and may bring back the phone failures. `?region=0` selects the same omission on desktop. Remove `region` to restore
+the device default. The existing switch still loads regional data; it skips regional scenery construction.
 
 The pause menu shows **Build [UTC timestamp] · [actual backend]**, distinguishing WebGL2's **phone default**,
 **forced by URL**, and **automatic fallback** cases.

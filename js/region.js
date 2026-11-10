@@ -250,7 +250,7 @@ function computeRegionVertexNormals(geo) {
 function buildSFRegion(scene, { paintIntervals = null } = {}) {
   const ride = window.NYC.RideGeometry;
   const data=window.NYC.DATA.fullRegion;
-  if(!data || new URLSearchParams(location.search).get('region')==='0')return { update(){}, disposeTerrainCache(){}, stats:()=>({}) };
+  if(!data || !(window.NYC.regionEnabled ?? (new URLSearchParams(location.search).get('region')!=='0')))return { update(){}, disposeTerrainCache(){}, stats:()=>({}) };
   const group=new THREE.Group();group.name='SFRegion';scene.add(group);
   const C=data.city,H=data.horizon,M=data.manifest.mask,water=data.manifest.waterLevel;
   const maskTexture=new THREE.DataTexture(data.mask,M.w,M.h,THREE.RedFormat,THREE.UnsignedByteType);

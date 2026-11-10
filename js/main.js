@@ -98,6 +98,8 @@ export async function initApp(startup) {
 
   const params = new URLSearchParams(location.search);
   const initialRendering = initialRenderPreferences();
+  // Interim phone default: use the existing region=0 construction path. Explicit region=1 opts back in.
+  city.regionEnabled = params.get('region') !== '0' && (!initialRendering.phone || params.get('region') === '1');
   const phoneWebGLDefault = initialRendering.phone && params.get('webgpu') !== '1';
   const forceWebGL = params.get('webgpu') === '0' || phoneWebGLDefault;
   startup.phase('graphics');

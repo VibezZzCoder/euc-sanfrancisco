@@ -1,10 +1,11 @@
 # SF Spin-off: EUC Thrills — Early Access / Work in Progress
 
-> **Early Access / Work in Progress.** Every destination can be reached and ridden, and the game runs with both
+> **Early Access / Work in Progress.** With the region enabled, every destination can be reached and ridden; the game runs with both
 > WebGPU and WebGL2. Expect rough visuals, a long first load and unfinished corners; see
 > [Known rough spots](#known-rough-spots). Feedback is very welcome.
-> **iPhone stability remains unresolved:** loading, map opening, rotation or longer play can reload the game,
-> including in Home Screen mode. The memory/startup update is available for further device testing, not a confirmed phone fix.
+> **Interim phone mode:** phones start on WebGL2 with the surrounding region off. The owner completed a full iPhone Air
+> session with that combination, but surroundings beyond the core city are missing. This is an accepted temporary
+> limitation, not a finished lighter tier or a guarantee of stability on every phone.
 
 **[▶ Play now](https://vibezzzcoder.github.io/euc-sanfrancisco/)**
 
@@ -51,14 +52,16 @@ acceleration. Phones start on **WebGL2**; desktops and tablets retain WebGPU-fir
 
 | Device / URL | Renderer policy |
 |---|---|
-| Phone, no override | WebGL2 (`phone default` in the pause menu) |
-| Desktop or tablet, no override | WebGPU preferred; WebGL2 fallback if unavailable |
+| Phone, no override | WebGL2 (`phone default` in the pause menu), region off |
+| Desktop or tablet, no override | WebGPU preferred; WebGL2 fallback if unavailable; region on, unchanged |
 | [`?webgpu=0`](https://vibezzzcoder.github.io/euc-sanfrancisco/?webgpu=0) | Force WebGL2 (`forced by URL`) |
 | [`?webgpu=1`](https://vibezzzcoder.github.io/euc-sanfrancisco/?webgpu=1) | Explicitly request WebGPU, including on phones |
 
 Covered WebGPU validation failures, and startup device-loss/out-of-memory failures, can still trigger one reload
 into WebGL2 (`automatic fallback`). A session already on WebGL2 does not repeat that reload. Remove `webgpu` and
 `fallback` parameters to return to the device default. The phone policy is a mitigation, not a confirmed stability fix.
+Region selection is independent: `?region=1` opts into the surrounding region on a phone, while `?region=0` omits it
+on any device. Remove `region` to restore the device default. See the interim phone limitation below.
 The first load downloads and builds a large city, so allow about **30 seconds on a desktop** (longer on slower
 machines or connections). Choose a rider if you like, then press **Ride**. Sound starts after your first interaction.
 
@@ -169,7 +172,16 @@ This is an early release. Known issues include:
   Breadcrumbs reported 67, 61 and 34 seconds after startup in the old broad “riding” state, and 17 seconds at scene
   visibility/shadows; loading time is included. WebGL2 in a Safari tab lasted clearly longer but was not reported stable.
   The earlier LAN WebGL2 test also eventually failed. No November 9/10 JetsamEvent was found; the cause is unmeasured,
-  not a confirmed system memory kill. Physical testing of the new phone default and a Safari Web Inspector trace remain next.
+  not a confirmed system memory kill. A cable Inspector connection was attempted but the Mac did not list the phone;
+  no device memory reading was obtained.
+- **Phone region-off mode — seen by the owner on a device:** on the same build, WebGL2 plus `?region=0`, Home Screen,
+  Medium/75 ran a full session without reload: rider changes, rotation, a Dorkins escape, the map and several location
+  changes. WebGPU with the region off lasted longer than with it on but eventually reloaded during rotation.
+- **Accepted interim missing surroundings:** phones now default to that existing region-off behavior. The world beyond
+  the core city is missing; outlying skateparks and the Golden Gate deck can stand in empty space, and nearby map
+  positions may have no usable ground. Stay in the core for ordinary phone exploration. Map/edge behavior has not been
+  redesigned. The switch still loads regional data but skips regional scenery construction; this is not yet the planned
+  finished lighter tier. Desktop and tablet defaults are unchanged. The new default needs confirmation on the owner's phone.
 - **Other phones, tablets and foldables:** emulated layouts do not establish physical-device stability. Android,
   foldable transitions and sustained-play/thermal behavior still need review. Lower graphics settings are not a guaranteed remedy.
 - **macOS Firefox:** the shader change and fallback have Linux/compiler evidence; current macOS behavior still needs

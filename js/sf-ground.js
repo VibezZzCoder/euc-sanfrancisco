@@ -317,8 +317,8 @@ function buildSFGround(scene, { deferCurbSurfaces = false } = {}) {
   const pierCount = piers.length; // the retained one-shot finalizer must not capture the unmerged construction geometries
 
   scene.add(group);
-  // ?region=0: omit regional scenery meshes for performance comparisons
-  if (window.NYC.DATA && (window.NYC.DATA.region || window.NYC.DATA.fullRegion) && new URLSearchParams(location.search).get('region') !== '0') scene.add(buildRegionGround(window.NYC.DATA.fullRegion ? null : window.NYC.DATA.region));
+  // Omit the same regional scenery for the phone default or explicit ?region=0.
+  if (window.NYC.DATA && (window.NYC.DATA.region || window.NYC.DATA.fullRegion) && (window.NYC.regionEnabled ?? (new URLSearchParams(location.search).get('region') !== '0'))) scene.add(buildRegionGround(window.NYC.DATA.fullRegion ? null : window.NYC.DATA.region));
   if (!deferCurbSurfaces) finishCurbSurfaces();
   return { group, terrain, sidewalks, finishCurbSurfaces, footprints: [], colliders: [], highwayLanes: [] };
 }
