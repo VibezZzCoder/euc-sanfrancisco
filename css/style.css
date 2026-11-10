@@ -299,6 +299,18 @@ body::after {
   font-variant-numeric: tabular-nums;
 }
 
+/* Previous attempt's last stage (boot.js breadcrumb), shown only after an attempt ended without an error */
+#loading-crumb {
+  max-width: min(320px, 86vw);
+  margin-top: 8px;
+  font-size: 11.5px;
+  line-height: 1.4;
+  text-align: center;
+  color: var(--text-3);
+  opacity: 0.85;
+}
+#loading-crumb[hidden] { display: none; }
+
 @keyframes loader-sweep {
   from { transform: translateX(-100%); }
   to { transform: translateX(290%); }
@@ -1500,6 +1512,7 @@ body.title-open.game-menu-open .title-head, body.title-open.game-menu-open .titl
 .menu-links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .menu-links a { display: flex; flex: 1 1 140px; align-items: center; justify-content: center; gap: 6px; min-height: 44px; padding: 9px 12px; border: 1px solid var(--glass-border); border-radius: 10px; color: var(--text); background: var(--hover); text-decoration: none; font: 600 13px/1.3 var(--font-sans); }
 .menu-links a:hover { background: #ffffff24; text-decoration: underline; }
+.menu-build { margin: 10px 0 0; color: var(--text-3); font: 500 11px/1.4 var(--font-sans); font-variant-numeric: tabular-nums; text-align: center; }
 .menu-departure { margin-top: 22px; padding-top: 12px; border-top: 1px solid var(--divider); }
 .menu-departure p { color: var(--text-2); font-size: 12px; }
 .menu-actions { display: flex; gap: 8px; }
@@ -1712,9 +1725,9 @@ body.touch-enabled #fog-preset { width: 96px; font-size: 11px; }
   body.touch-enabled .hud-top-right { top: var(--safe-top); right: var(--safe-right); max-width: calc(100% - 84px); }
   body.touch-enabled .toolbar { flex-wrap: wrap; width: 230px; max-width: 100%; height: auto; justify-content: center; }
   body.touch-enabled .hud-bottom-right { top: calc(var(--hud-content-top, 124px) + var(--sound-notice-space, 0px)); }
-  .fullmap-modal[data-input='gamepad'] .map-controls { top: calc(var(--safe-top) + 62px); bottom: auto; flex-direction: row; translate: none; }
-  .fullmap-modal[data-input='gamepad'] .map-zoom { flex-direction: row; }
-  .fullmap-modal[data-input='gamepad'] .fullmap-search-results { margin-top: 72px; }
+  .fullmap-modal .map-controls { top: calc(var(--safe-top) + 62px); bottom: auto; flex-direction: row; translate: none; }
+  .fullmap-modal .map-zoom { flex-direction: row; }
+  .fullmap-modal .fullmap-search-results { margin-top: 72px; }
 }
 @media (max-width: 499px) {
   /* Two numeric fields beside the gauge; Medium gets the complete second row. */

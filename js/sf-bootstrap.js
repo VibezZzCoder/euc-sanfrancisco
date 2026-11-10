@@ -9,6 +9,10 @@ import { SkyMesh } from 'three/addons/objects/SkyMesh.js';
 import { SunLight } from 'three/addons/lights/SunLight.js';
 import { SunLightNode } from 'three/addons/lights/SunLightNode.js';
 import { ClusteredLighting } from 'three/addons/lighting/ClusteredLighting.js';
+import { installSunShadowRetentionFix } from './sun-shadow-retention.js';
+
+// Before any material builds: cascaded sun shadows must not keep each material's node builder alive.
+installSunShadowRetentionFix();
 
 // IIFEs capture namespace members when they execute: order is a contract.
 export const CITY_SCRIPTS = Object.freeze([

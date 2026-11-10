@@ -215,6 +215,8 @@ function mapPrototype() {
   vm.runInNewContext(source('sf-map'), { window, document });
   const map = Object.create(window.NYC.NYCMapSystem.prototype);
   Object.assign(map, { waypoint: { x: 3, z: 4 }, elActionStatus: { textContent: '' },
+    // This fixture bypasses the constructor; provide its view-cache memberships.
+    fullStaticPlaced: [], fullStaticPins: [],
     layoutStatus() {}, renderFullMap() {} });
   return map;
 }

@@ -5,6 +5,7 @@
 import { PlanTerrainSampler } from './euc/simulation/planSampler.js';
 import { findPlacementTarget, findRecoveryTarget } from './euc-recovery.js';
 import { SfSupportStore } from './sf-support-store.js';
+import { SfStaticBoxStore, SfRegionalPrismStore, prepareStaticBox as prepareBox } from './sf-static-body-store.js';
 import { WHEEL, TERRAIN } from './euc/data/tuning.js';
 
 const EPS = 1e-8;
@@ -214,14 +215,6 @@ function nativeBoxes(records) {
   n.columnAt = n.rowAt = n.cellAt = nativeScratchCell;
   n.gridStarts = new Int32Array(2); n.gridItems = new Int32Array(0);
   return n;
-}
-
-function prepareBox(collider) {
-  const cos = Math.cos(collider.rotationY ?? 0), sin = Math.sin(collider.rotationY ?? 0);
-  const x = Math.abs(cos) * collider.halfExtents.x + Math.abs(sin) * collider.halfExtents.z;
-  const z = Math.abs(sin) * collider.halfExtents.x + Math.abs(cos) * collider.halfExtents.z;
-  return { collider, cos, sin, minX: collider.centre.x - x, maxX: collider.centre.x + x,
-    minZ: collider.centre.z - z, maxZ: collider.centre.z + z, occludes: collider.occludes !== false };
 }
 
 function sphereHitsBox(p, o, d, max, radius) {
@@ -613,9 +606,9 @@ export class SfTerrainSampler {
     }
     this.fieldIndex = new SparseIndex(this.fields, 256);
     const seenBodies = new WeakSet(), counts = { ignoredBodies: 0, duplicateBodies: 0 };
-    this.boxRecords = []; this.prisms = [];
+    const boxSources = []; this.prisms = [];
     this.hasBoxSupport = false; this.hasPrismSupport = false;
-    const addBox = b => { this.boxRecords.push(prepareBox(b)); if (b.support === true) this.hasBoxSupport = true; };
+    const addBox = b => { boxSources.push(b); if (b.support === true) this.hasBoxSupport = true; };
     const addPrism = p => { this.prisms.push(new PreparedPrism(p, this.prisms.length)); if (p.support === true) this.hasPrismSupport = true; };
     // Stream inputs: no concatenated world arrays, per-box sampler, or cloning of
     // already-normalized native registry boxes. Only repeated references dedupe;
@@ -627,7 +620,9 @@ export class SfTerrainSampler {
     for (const list of [boxes.prisms ?? EMPTY, prisms, ride?.prisms ?? EMPTY]) for (const p of list) {
       if (claimBody(p, seenBodies, counts)) addPrism(p);
     }
-    this.boxIndex = new SparseIndex(this.boxRecords, 8);
+    this.boxStore = new SfStaticBoxStore(boxSources);
+    this.boxRecords = this.boxStore.records;
+    this.boxIndex = new SparseIndex(this.boxStore, 8);
     this.prismIndex = new SparseIndex(this.prisms, 16);
     this._nextContactId = this.boxRecords.length + this.prisms.length;
     this.topStore = new SfSupportStore([ride?.tops ?? EMPTY, tops, gradeTops(grade)], { cacheSize: topViewCacheSize });
@@ -649,7 +644,7 @@ export class SfTerrainSampler {
     // original actual geometry. SF retains sparse indexing across distant sites.
     const reach = WHEEL.shellHeight - WHEEL.pedalHeight * TERRAIN.stepUpPedalFactor;
     const wheelRecords = [];
-    for (const { collider: b } of this.boxRecords) if (b.wheelSweep === true) wheelRecords.push(prepareBox({ ...b,
+    for (const b of boxSources) if (b.wheelSweep === true) wheelRecords.push(prepareBox({ ...b,
       centre: { ...b.centre, y: b.centre.y - reach / 2 },
       halfExtents: { ...b.halfExtents, y: b.halfExtents.y + reach / 2 }, support: false }));
     this.wheelBoxes = wheelRecords.length ? nativeBoxes(wheelRecords) : null;
@@ -660,19 +655,26 @@ export class SfTerrainSampler {
       fields: this.fieldIndex.stats, ceilings: this.ceilingIndex.stats, capabilities: this.capabilityIndex.stats,
       ...(this.wheelIndex ? { wheelShell: this.wheelIndex.stats } : {}) });
     this.stats = Object.freeze({ boxes: this.boxRecords.length, prisms: this.prisms.length, tops: store.length,
-      ...counts, indexes, supportStore: store.stats,
+      ...counts, indexes, supportStore: store.stats, staticBoxStore: this.boxStore.stats,
       indexReferences: Object.values(indexes).reduce((n, s) => n + s.references, 0),
       indexTypedBytes: Object.values(indexes).reduce((n, s) => n + s.typedBytes, 0) });
     // Weak ownership certificate: the default constructor does not consume caller
     // inputs, and this certificate itself cannot keep raw facets/arrays alive.
     if (ride && ['tops', 'solids', 'prisms'].every(k => Array.isArray(ride[k]))) {
+      // An explicit caller list is an independent owner even if it also contains a
+      // region-tagged record. Such sources must keep the ordinary identity contract.
+      const excluded = new WeakSet();
+      if (ride.regionalBodies) for (const list of [colliders, boxes, boxes.prisms ?? EMPTY, prisms]) {
+        for (const body of list) if (body && typeof body === 'object') excluded.add(body);
+      }
       this._registryHandoff = { registry: new WeakSet([ride]), arrays: ['tops', 'solids', 'prisms'].map(k => new WeakSet([ride[k]])),
-        lengths: ['tops', 'solids', 'prisms'].map(k => ride[k].length), released: false };
+        lengths: ['tops', 'solids', 'prisms'].map(k => ride[k].length), regional: ride.regionalBodies, excluded, released: false };
     }
   }
 
   /** Host-only successful static-world handoff. Call after manager construction,
-   * before exposing gameplay. Clears memberships, never shared body geometry.
+   * before exposing gameplay. Clears memberships, never shared body geometry. Only
+   * explicitly region-owned bodies transfer; default construction is non-consuming.
    * A changed registry must be rebuilt, not released through an older sampler.
    */
   releaseConstructionRegistry(ride) {
@@ -684,12 +686,40 @@ export class SfTerrainSampler {
       if (!token.arrays[i].has(array) || array.length !== token.lengths[i]) throw new Error('SF registry changed after sampler construction');
       if (!Object.getOwnPropertyDescriptor(array, 'length').writable || Object.isSealed(array)) throw new Error('SF registry is not releasable');
     }
+    if (ride.regionalBodies !== token.regional) throw new Error('SF regional body ownership changed after construction');
+    const boxes = this.boxStore.prepareRegionalHandoff(token.regional, token.excluded);
+    const prisms = SfRegionalPrismStore.prepare(this.prisms, token.regional, token.excluded, PreparedPrism);
+    // All validation/allocation precedes publication. The original registry records
+    // remained available through tunnel finalization and full manager construction.
+    this.boxStore.commitRegionalHandoff(boxes);
+    if (prisms) {
+      prisms.commit(); this.prismStore = prisms; this.prisms = prisms.records; this.prismIndex.items = prisms;
+    }
+    if (boxes || prisms) this.stats = Object.freeze({ ...this.stats, staticBoxStore: this.boxStore.stats,
+      ...(prisms ? { regionalPrismStore: prisms.stats } : {}) });
     for (const k of keys) { ride[k].length = 0; Object.freeze(ride[k]); }
+    // Membership certificates have no query role. Drop even their WeakSet table
+    // capacity after transfer; neither this sampler nor the registry factory keeps it.
+    if (Object.getOwnPropertyDescriptor(ride, 'regionalBodies')?.configurable) delete ride.regionalBodies;
+    token.regional = null; token.excluded = null;
     Object.freeze(ride); token.released = true;
     return true;
   }
 
   get colliderCount() { return this.boxRecords.length + this.prisms.length; }
+  prismAt(id) { return this.prismStore ? this.prismStore.get(id) : this.prisms[id]; }
+  prismContactPieces(p) {
+    if (p.contactPieces) return p.contactPieces;
+    const pieces = contactPieces(p), saved = this.prismStore?.contactBase(p.id) ?? -1;
+    if (saved >= 0) {
+      let id = saved;
+      for (const piece of pieces) piece.contactId = id++;
+    } else {
+      this.prismStore?.rememberContactBase(p.id, this._nextContactId);
+      for (const piece of pieces) piece.contactId = this._nextContactId++;
+    }
+    return p.contactPieces = pieces;
+  }
   findPlacementTarget(request) { return findPlacementTarget(this, request); }
   findRecoveryTarget(request, canPlace) { return findRecoveryTarget(this, request, canPlace); }
 
@@ -783,7 +813,7 @@ export class SfTerrainSampler {
     // bodies opt in, and map/recovery can still demand registered surface support.
     const point = { minX: x, maxX: x, minZ: z, maxZ: z };
     if (this.hasBoxSupport) for (const id of this.boxIndex.query(point, this._boxIds)) {
-      const b = this.boxRecords[id], c = b.collider, y = c.centre.y + c.halfExtents.y;
+      const b = this.boxStore.get(id), c = b.collider, y = c.centre.y + c.halfExtents.y;
       if (c.support !== true || y <= out.height || (Number.isFinite(referenceY) && y > referenceY + this.supportReach)) continue;
       const dx = x - c.centre.x, dz = z - c.centre.z;
       if (Math.abs(b.cos * dx - b.sin * dz) > c.halfExtents.x || Math.abs(b.sin * dx + b.cos * dz) > c.halfExtents.z) continue;
@@ -791,7 +821,7 @@ export class SfTerrainSampler {
       out.height = y; out.plane = null; out.surface = c.surface; out.support = c; out.registered = false; out.offCourse = out.water;
     }
     if (this.hasPrismSupport) for (const id of this.prismIndex.query(point, this._prismIds)) {
-      const p = this.prisms[id];
+      const p = this.prismAt(id);
       if (p.support !== true || p.maxY <= out.height || (Number.isFinite(referenceY) && p.maxY > referenceY + this.supportReach) || !contains(p, x, z)) continue;
       out.water &&= p.maxY <= this.waterLevel + 0.05;
       out.height = p.maxY; out.plane = null; out.surface = p.surface ?? 'pavement'; out.support = p; out.registered = false; out.offCourse = out.water;
@@ -843,11 +873,11 @@ export class SfTerrainSampler {
     if (limb) {
       const exact = limb.prisms ??= []; exact.length = 0;
       for (const id of this._prismIds) {
-        const p = this.prisms[id];
+        const p = this.prismAt(id);
         if (touches(p, limb) && p.minY <= limb.maxY && p.maxY >= limb.minY) exact.push(p);
       }
       for (const p of exact) {
-        const pieces = p.contactPieces ??= contactPieces(p).map(piece => Object.assign(piece, { contactId: this._nextContactId++ }));
+        const pieces = this.prismContactPieces(p);
         for (let id = 0; id < pieces.length; id++) {
           const piece = pieces[id]; if (!touches(piece, limb)) continue;
           if (limb.count >= limb.capacity) { limb.overflow = true; break; }
@@ -862,18 +892,18 @@ export class SfTerrainSampler {
     }
     if (initialExit) {
       if (polygonExit) {
-        const p = this.prisms[initialExit.colliderIndex - boxCount];
+        const p = this.prismAt(initialExit.colliderIndex - boxCount);
         if (!p || !this._validPrismExit(p, origin, d, maxDistance, width, initialExit) || hit !== null) return 0;
-        for (const id of this._boxIds) if (sphereHitsBox(this.boxRecords[id], origin, d, maxDistance, width)) return 0;
+        for (const id of this._boxIds) if (sphereHitsBox(this.boxStore.get(id), origin, d, maxDistance, width)) return 0;
       } else if (hit !== null) return 0;
       for (const id of this._prismIds) {
         if (boxCount + id === initialExit.colliderIndex) continue;
-        if (prismIntervals(this.prisms[id], origin, d, maxDistance, 0, 0, 0, width).length) return 0;
+        if (prismIntervals(this.prismAt(id), origin, d, maxDistance, 0, 0, 0, width).length) return 0;
       }
       return this._roofDistance(origin, d, maxDistance, width)?.distance !== undefined ? 0 : null;
     }
     for (const id of this._prismIds) {
-      const p = this.prisms[id], intervals = prismIntervals(p, origin, d, maxDistance, width, lx, lz);
+      const p = this.prismAt(id), intervals = prismIntervals(p, origin, d, maxDistance, width, lx, lz);
       if (!intervals.length || (hit !== null && hit <= intervals[0].start)) continue;
       const first = intervals[0]; hit = first.start;
       if (out) {
@@ -1003,7 +1033,7 @@ export class SfTerrainSampler {
       return false;
     };
     for (const id of this.boxIndex.query(b, this._boxIds)) {
-      const p = this.boxRecords[id], q = p.collider;
+      const p = this.boxStore.get(id), q = p.collider;
       const top = q.centre.y + q.halfExtents.y;
       if (top <= lower + EPS || q.centre.y - q.halfExtents.y >= maxY - EPS) continue;
       const xc = p.cos * q.halfExtents.x, xs = p.sin * q.halfExtents.x, zc = p.cos * q.halfExtents.z, zs = p.sin * q.halfExtents.z;
@@ -1011,7 +1041,7 @@ export class SfTerrainSampler {
         { x: q.centre.x + xc + zs, z: q.centre.z - xs + zc }, { x: q.centre.x - xc + zs, z: q.centre.z + xs + zc }] }, top)) return false;
     }
     for (const id of this.prismIndex.query(b, this._prismIds)) {
-      const p = this.prisms[id]; if (p.maxY > lower + EPS && p.minY < maxY - EPS && overlapsPoly(p, p.maxY)) return false;
+      const p = this.prismAt(id); if (p.maxY > lower + EPS && p.minY < maxY - EPS && overlapsPoly(p, p.maxY)) return false;
     }
     for (const p of [...poly, { x, z }]) {
       const reference = fp ? bottomAt(p.x, p.z) - minY + (body.floorY ?? fp.y) : body.floorY ?? minY;
@@ -1029,7 +1059,7 @@ export class SfTerrainSampler {
     this._candidates(origin, d, maxDistance, 0);
     let hit = this.native.raycastPreparedBoxes(origin, d.x, d.y, d.z, maxDistance, true);
     for (const id of this._prismIds) {
-      const p = this.prisms[id]; if (p.occludes === false) continue;
+      const p = this.prismAt(id); if (p.occludes === false) continue;
       const a = prismIntervals(p, origin, d, maxDistance);
       if (a.length && (hit === null || a[0].start < hit)) hit = a[0].start;
     }

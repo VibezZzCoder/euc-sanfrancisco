@@ -115,15 +115,17 @@ test('ground builder registers actual pier slab and Drape lawn/kerb elevations, 
   load('drape.js'); load('sf-ground.js');
   const city = N.buildSFGround(new T.Scene());
   assert.equal(city.colliders.length, 0); assert.equal(N.ride.prisms.length, 1);
-  const slab = N.ride.prisms[0], top = N.ride.tops.find((t) => t.shore);
+  // Draped facets are packed batches (phone memory, 2026-11-09); check their exact plain records.
+  const tops = N.RideGeometry.expandTops(N.ride.tops);
+  const slab = N.ride.prisms[0], top = tops.find((t) => t.shore);
   near(top.top, Math.max(...pier.ring.map((p) => ground(p.x, p.z))) + .1);
   near(slab.minY, -.3); near(slab.maxY, top.top);
   assert.equal(top.layered, true); assert.equal(slab.outer.length, pier.ring.length);
-  assert.ok(N.ride.tops.some((t) => t.surface === 'grass'));
-  for (const t of N.ride.tops.filter((t) => !t.shore)) for (const p of t.poly) {
+  assert.ok(tops.some((t) => t.surface === 'grass'));
+  for (const t of tops.filter((t) => !t.shore)) for (const p of t.poly) {
     near(height(t, p.x, p.z) - ground(p.x, p.z), t.surface === 'grass' ? .162 : .15, 2e-6);
   }
-  assert.ok(N.ride.tops.every((t) => t.top > 10), 'no water-plane support');
+  assert.ok(tops.every((t) => t.top > 10), 'no water-plane support');
 });
 
 test('tree cache contains only bounded lower trunk geometry and does not register prototype bodies', async () => {

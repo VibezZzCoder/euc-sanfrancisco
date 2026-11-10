@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>SF Spin-off: EUC Thrills</title>
   <link rel="icon" type="image/svg+xml" sizes="any" href="./assets/euc-badge.svg" />
+  <!-- Build id: "dev" in source; the public exporter stamps the release date (shown in the pause menu). -->
+  <meta name="euc-build" content="2026-11-10 0528Z" />
   <meta name="description" content="Ride an electric unicycle through San Francisco's hills, streets and marine fog. A free EUC Thrills city destination in Early Access." />
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="EUC Thrills" />
@@ -138,6 +140,7 @@
       <div class="loader-tagline">Hills · Streets · Electric unicycles</div>
       <div class="loader-track is-indeterminate" aria-hidden="true"><span id="loading-progress" class="loader-fill"></span></div>
       <div id="loading-status">Loading city code and data…</div>
+      <div id="loading-crumb" hidden></div>
       <div id="startup-error" hidden>
         <p id="startup-help"></p>
         <button id="startup-retry" type="button">Retry</button>
@@ -294,6 +297,7 @@
         <a id="menu-guide" href="https://github.com/VibezZzCoder/euc-sanfrancisco/blob/main/PLAYER_GUIDE.md" target="_blank" rel="noopener noreferrer" aria-label="Player guide on GitHub (opens in a new tab)">Player guide <span aria-hidden="true">↗</span></a>
         <a id="menu-feedback" href="https://github.com/VibezZzCoder/euc-sanfrancisco/issues" target="_blank" rel="noopener noreferrer" aria-label="Feedback and bug reports on GitHub Issues (opens in a new tab)">Feedback / bugs <span aria-hidden="true">↗</span></a>
       </nav>
+      <p id="menu-build" class="menu-build">Build dev</p>
       <div class="menu-departure"><p>Leave SF and open the main game's menu.</p><button id="menu-return" type="button">Return to EUC Thrills main menu</button></div>
     </section>
     <section data-menu-view="picker" class="rider-picker" hidden aria-labelledby="rider-heading">

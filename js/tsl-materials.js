@@ -978,7 +978,9 @@ function createPreWarBuildingMaterial(opts = {}) {
       };
       const letters = max(lettering(0.14, 0.56, 0), lettering(0.66, 0.86, 1));
       const flake = smoothstep(0.5, 0.74, noise2D(vec2(wallS.mul(0.7), fromTop.mul(1.1)).add(tone.mul(31.0))));
-      const cover = mix(float(0.34), float(0.66), fract(tone.mul(7.7))).mul(float(1.0).sub(flake.mul(0.9)));
+      // Not mix(0.34, 0.66, …): where tone is the constant 0.5 the whole call is a WGSL constant expression, and
+      // Firefox's WebGPU compiler (Naga) cannot constant-evaluate mix/smoothstep, so it rejected the shader.
+      const cover = fract(tone.mul(7.7)).mul(0.32).add(0.34).mul(float(1.0).sub(flake.mul(0.9)));
       signPaint.assign(vec4(mix(ground, ink, max(letters, border)), cover));
     });
 

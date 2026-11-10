@@ -157,7 +157,7 @@ function drapedMesh(out, mat, name, cuts) {
   mesh.castShadow = false;
   // Capture the final Float32 Drape facets, before cells are batched/culling changes.
   if (name !== 'SFCurbs') window.NYC.RideGeometry?.addTriangles(g.attributes.position.array, g.index.array,
-    name === 'SFParkLawns' ? 'grass' : 'pavement', { replacesTerrain: true });
+    name === 'SFParkLawns' ? 'grass' : 'pavement', { replacesTerrain: true, packed: true });
   return mesh;
 }
 
@@ -267,27 +267,34 @@ function buildSFGround(scene, { deferCurbSurfaces = false } = {}) {
     try {
       const cuts = curbCavityCuts(terrainCuts, tops, gradeTopStart, topStart);
       const ground = (x, z) => curbTerrain.groundAt(x, z), normal = (x, z, o) => curbTerrain.normalAt(x, z, o);
+      // Group blocks by cell first (same cell order and same block order within each cell), then Drape and finish one
+      // cell at a time: only one cell's plain JS vertex arrays exist at once (phone startup memory). Drape is a pure
+      // function of the block ring and the snapshotted terrain, so every cell's arrays are unchanged.
       const cells = new Map();
       for (const { block: b } of sidewalks) {
         const key = Math.floor((b.minX + b.maxX) / 2 / CELL) + ',' + Math.floor((b.minZ + b.maxZ) / 2 / CELL);
         let c = cells.get(key);
-        if (!c) cells.set(key, (c = { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity,
-          top: { pos: [], nrm: [], idx: [] }, curb: { pos: [], nrm: [], idx: [] }, lawn: { pos: [], nrm: [], idx: [] } }));
+        if (!c) cells.set(key, (c = { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity, blocks: [] }));
         c.minX = Math.min(c.minX, b.minX); c.maxX = Math.max(c.maxX, b.maxX);
         c.minZ = Math.min(c.minZ, b.minZ); c.maxZ = Math.max(c.maxZ, b.maxZ);
-        const ring = Drape.densify(b.poly, OUTLINE_STEP);
-        Drape.polygon(ring, ground, normal, CURB_H, c.top);
-        Drape.wall(ring, ground, -CURB_BURY, CURB_H, c.curb);
-        if (b.park > 0.5 && !b.median) Drape.polygon(ring, ground, normal, CURB_H + 0.012, c.lawn);
+        c.blocks.push(b);
       }
       const sidewalkMat = createSidewalkMaterial(), curbMat = createCurbMaterial(), lawnMat = createParkLawnMaterial(false);
       let islandTris = 0;
       for (const c of cells.values()) {
+        c.top = { pos: [], nrm: [], idx: [] }; c.curb = { pos: [], nrm: [], idx: [] }; c.lawn = { pos: [], nrm: [], idx: [] };
+        for (const b of c.blocks) {
+          const ring = Drape.densify(b.poly, OUTLINE_STEP);
+          Drape.polygon(ring, ground, normal, CURB_H, c.top);
+          Drape.wall(ring, ground, -CURB_BURY, CURB_H, c.curb);
+          if (b.park > 0.5 && !b.median) Drape.polygon(ring, ground, normal, CURB_H + 0.012, c.lawn);
+        }
         const local = cuts.filter(cut => overlaps(c, cut));
         if (c.top.idx.length) group.add(drapedMesh(c.top, sidewalkMat, 'SFCurbIslands', local));
         if (c.curb.idx.length) group.add(drapedMesh(c.curb, curbMat, 'SFCurbs', local));
         if (c.lawn.idx.length) group.add(drapedMesh(c.lawn, lawnMat, 'SFParkLawns', local));
         islandTris += (c.top.idx.length + c.curb.idx.length + c.lawn.idx.length) / 3;
+        c.top = c.curb = c.lawn = c.blocks = null; // this cell's plain arrays are garbage now
       }
       if (tops) insertTail(tops, topInsertion, topStart);
       insertTail(group.children, meshInsertion, meshStart);

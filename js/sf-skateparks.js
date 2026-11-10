@@ -106,10 +106,18 @@ function bounds(poly) {
 // A low furniture cap is an obstacle, never a reason to raise the pavement to it.
 function sourceSnapshot(city) {
   const un = SF_SKATEPARKS[0], box = bounds(rectangle(un.frame, un.court.width + 2, un.court.length + 2)), tops = [];
-  for (const top of city.ride.tops) {
-    if (top.replacesTerrain !== true || !(top.top >= un.sourceHeight.min && top.top <= un.sourceHeight.max) || !top.poly?.length) continue;
+  const consider = (top) => {
+    if (top.replacesTerrain !== true || !(top.top >= un.sourceHeight.min && top.top <= un.sourceHeight.max) || !top.poly?.length) return;
     const b = bounds(top.poly);
     if (b.minX <= box.maxX && b.maxX >= box.minX && b.minZ <= box.maxZ && b.maxZ >= box.minZ) tops.push(top);
+  };
+  for (const top of city.ride.tops) {
+    if (top.packedTops !== true) { consider(top); continue; }
+    // Packed draped facets: test the height first, materialize only candidates (same record values).
+    if (top.template.replacesTerrain !== true) continue;
+    for (let i = 0; i < top.length; i++) {
+      if (top.top[i] >= un.sourceHeight.min && top.top[i] <= un.sourceHeight.max) consider(top.record(i));
+    }
   }
   return new SfTerrainSampler({ city: null, ride: null, grade: null, terrain: city.Terrain, data: city.DATA,
     tops, boxes: [], prisms: [], colliders: [], topViewCacheSize: 0 });

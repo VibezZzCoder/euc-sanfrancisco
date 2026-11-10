@@ -162,14 +162,31 @@ function finishBuildingTunnelOpenings(batches, colliders, grade) {
     };
     return half(sorted).concat(half(sorted.reverse())).reverse();
   };
-  const floorTops = (ride?.tops || []).filter(t => t.replacesTerrain).map(t => ({ ...bounds(t.poly), top: t }));
   // The sparse index avoids a city-masses × tunnel-stations scan. It is construction
   // scratch, released on return; neither sampler nor actor queries retain it.
   const grid = new Map(), cell = 64;
+  const cuts = [];
   for (const c of grade?.terrainCuts || []) {
     const sides = c.planes.filter(p => p[1] === 0), roof = c.planes.find(p => p[1] < 0);
     if (sides.length !== 4 || !roof) continue;
-    const cut = { ...c, sides, roof, floors: floorTops.filter(t => overlaps(c, t)) };
+    cuts.push({ ...c, sides, roof, floors: [] });
+  }
+  // Floor facets per cut, in registry order: only facets overlapping a cut are kept (millions of draped facets
+  // used to be copied into a bounds object each, a large transient startup allocation).
+  const addFloor = (t) => {
+    if (!t.replacesTerrain) return;
+    let b = null;
+    for (const cut of cuts) {
+      b ??= bounds(t.poly);
+      if (overlaps(cut, b)) cut.floors.push({ ...b, top: t });
+    }
+  };
+  if (cuts.length) for (const t of ride?.tops || []) {
+    if (t.packedTops !== true) addFloor(t);
+    else if (t.template.replacesTerrain) for (let i = 0; i < t.length; i++) addFloor(t.record(i)); // packed facets
+  }
+  for (const cut of cuts) {
+    const c = cut;
     for (let x = Math.floor(c.minX / cell); x <= Math.floor(c.maxX / cell); x++)
       for (let z = Math.floor(c.minZ / cell); z <= Math.floor(c.maxZ / cell); z++) {
         const key = `${x},${z}`;

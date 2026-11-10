@@ -44,7 +44,12 @@ async function loadCityData(onProgress) {
   const d = GEO.data;
   let done = 0;
   const step = () => onProgress && onProgress(++done / 3);
-  const [t, b, m, fullRegion] = await Promise.all([fetchBin(d.terrain.url, step), fetchBin(d.buildings.url, step), fetchBin(d.groundMask.url, step), window.NYC.loadSFRegion(fetchBin)]);
+  // One core file at a time (the region loader runs its own small bounded queue afterwards), so at most one
+  // large file is in flight and being inflated at once.
+  const t = await fetchBin(d.terrain.url, step);
+  const b = await fetchBin(d.buildings.url, step);
+  const m = await fetchBin(d.groundMask.url, step);
+  const fullRegion = await window.NYC.loadSFRegion(fetchBin);
   const DATA = {
     terrain: { header: t.header, q: new Uint16Array(t.buf, t.offset, t.header.w * t.header.h) },
     buildings: {

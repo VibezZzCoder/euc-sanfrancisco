@@ -10,14 +10,29 @@ const bodyCellKey = (x, z) => x > -BODY_CELL_OFFSET && x < BODY_CELL_OFFSET && z
   ? (x + BODY_CELL_OFFSET) * BODY_CELL_SPAN + (z + BODY_CELL_OFFSET) : `${x},${z}`;
 
 function createSfDynamicBodyIndex(cellSize = 16) {
-  const cells = new Map(), spare = [], used = [];
+  const cells = new Map(), spare = [];
+  // Keep only current/previous rebuild keys, plus a small key-free pool. Counts delimit live
+  // bodies; nulling slots releases actors without truncating/reallocating bucket backing arrays.
+  const MAX_SPARE = 256, SMALL_BUCKET = 128;
+  let spareCount = 0, activeCells = 0;
   const seen = new WeakMap();
   let version = 0, query = 0;
   const stats = { bodies: 0, cells: 0, queryCells: 0, candidates: 0 };
   function begin() {
-    for (const bucket of used) { bucket.length = 0; spare.push(bucket); }
-    used.length = 0;
-    cells.clear();
+    for (const bucket of cells.values()) {
+      if (bucket.count === 0) {
+        // Not reused since the previous begin: expire its key, never retain travel history.
+        cells.delete(bucket.key); bucket.key = null;
+        if (spareCount < MAX_SPARE && bucket.bodies.length <= SMALL_BUCKET) spare[spareCount++] = bucket;
+      } else {
+        // A sustained crowd can use any size. After occupancy falls, release a large historical
+        // allocation rather than pinning its high-water mark forever in a still-active cell.
+        if (bucket.bodies.length > Math.max(SMALL_BUCKET, bucket.count * 2)) bucket.bodies = [];
+        else for (let i = 0; i < bucket.count; i++) bucket.bodies[i] = null;
+        bucket.count = 0;
+      }
+    }
+    activeCells = 0;
     stats.bodies = 0;
   }
   function add(body) {
@@ -28,13 +43,18 @@ function createSfDynamicBodyIndex(cellSize = 16) {
       for (let iz = Math.floor((body.z - rz) / cellSize); iz <= Math.floor((body.z + rz) / cellSize); iz++) {
         const key = bodyCellKey(ix, iz);
         let bucket = cells.get(key);
-        if (!bucket) { bucket = spare.pop() || []; cells.set(key, bucket); used.push(bucket); }
-        bucket.push(body);
+        if (!bucket) {
+          if (spareCount) { bucket = spare[--spareCount]; spare[spareCount] = null; }
+          else bucket = { key: null, bodies: [], count: 0 };
+          bucket.key = key; cells.set(key, bucket);
+        }
+        if (bucket.count === 0) activeCells++;
+        bucket.bodies[bucket.count++] = body;
       }
     }
     stats.bodies++;
   }
-  function commit() { stats.cells = cells.size; version++; }
+  function commit() { stats.cells = activeCells; version++; }
   function dynamicBodiesNear(x, z, radius, out) {
     stats.queryCells = stats.candidates = 0;
     if (!Number.isFinite(x) || !Number.isFinite(z) || !Number.isFinite(radius) || radius < 0) return;
@@ -44,7 +64,8 @@ function createSfDynamicBodyIndex(cellSize = 16) {
         stats.queryCells++;
         const bucket = cells.get(bodyCellKey(ix, iz));
         if (!bucket) continue;
-        for (const b of bucket) {
+        for (let i = 0; i < bucket.count; i++) {
+          const b = bucket.bodies[i];
           if (seen.get(b) === query) continue;
           seen.set(b, query);
           stats.candidates++;

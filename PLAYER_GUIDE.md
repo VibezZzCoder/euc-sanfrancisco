@@ -113,6 +113,8 @@ level. The marker disappears when the chase ends; it is not a waypoint or an arr
   **Medium (yellow)** removes screen-space reflections and lowers sun-shadow resolution; **Low (red)** also removes
   bloom and cast sun shadows. SF fog, lighting, environment reflections, city detail, actors and riding stay intact.
   Switching reuses three effect pipelines and releases large inactive buffers; a tier change does not rebuild the city.
+- Fresh phones start at **Medium graphics / 75% 3D**; desktop starts at **High / 100%**. Existing saved selections
+  take precedence independently, and orientation changes do not reset them.
 - The speedometer displays **mph and km/h together**. The green/yellow/red FPS number beside the frame-rate selector
   measures submitted frames; the selector sets a limit. Menus/maps can correctly lower that measured number while
   gameplay is paused. Warning colors, tilt-back and the get-up prompt reflect the native riding state.
@@ -131,6 +133,18 @@ the toolbar. These are submission/RAF observations, not GPU execution or display
 Remove `perf=1` and reload to disable it; normal play creates no diagnostics panel or timing buffers.
 
 ## Help and feedback
+
+**iPhone stability is still unresolved.** The owner has experienced map-open reloads in Safari and eventual failure
+after longer Home Screen play, even at Medium/75 over plain HTTP LAN (WebGL2). These settings are not a guaranteed fix.
+WebGPU is preferred where available, including phones on supported HTTPS browsers. Add `?webgpu=0` to force WebGL2;
+remove `webgpu=0` and any `fallback` parameter to retry the default policy. A covered WebGPU failure can reload once
+into WebGL2 automatically. HTTPS availability alone does not establish successful or stable WebGPU operation.
+
+The pause menu shows **Build [UTC timestamp] · [actual backend]**, including an automatic-fallback label when applicable.
+After an update, reload and check this ID; an already-open tab/Home Screen session may still have older code.
+The game does not install a service worker. A previous-attempt loading note gives the last recorded stage, not a
+confirmed crash cause. Report Safari-tab and Home Screen results separately, plus OS/browser versions and whether
+the page or the whole device restarted.
 
 The pause menu's **Player guide** and **Feedback / bugs** links open GitHub in a new tab, keeping SF paused.
 Read the [public player guide](https://github.com/VibezZzCoder/euc-sanfrancisco/blob/main/PLAYER_GUIDE.md) or send

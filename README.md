@@ -3,6 +3,8 @@
 > **Early Access / Work in Progress.** Every destination can be reached and ridden, and the game runs with both
 > WebGPU and WebGL2. Expect rough visuals, a long first load and unfinished corners; see
 > [Known rough spots](#known-rough-spots). Feedback is very welcome.
+> **iPhone stability remains unresolved:** loading, map opening, rotation or longer play can reload the game,
+> including in Home Screen mode. The memory/startup update is available for further device testing, not a confirmed phone fix.
 
 **[▶ Play now](https://vibezzzcoder.github.io/euc-sanfrancisco/)**
 
@@ -46,6 +48,9 @@ owner-approved exception. Street, district and landmark names are kept as place 
 
 Open the [play link](https://vibezzzcoder.github.io/euc-sanfrancisco/) in an up-to-date desktop browser with hardware
 acceleration. WebGPU is preferred; the renderer falls back to WebGL2 automatically when WebGPU is unavailable.
+This policy also applies to phones on supported HTTPS browsers. Add [`?webgpu=0`](https://vibezzzcoder.github.io/euc-sanfrancisco/?webgpu=0)
+to explicitly select WebGL2. Covered WebGPU validation failures, and startup device-loss/out-of-memory failures,
+also trigger one reload into WebGL2; this does not guarantee a device has enough memory.
 The first load downloads and builds a large city, so allow about **30 seconds on a desktop** (longer on slower
 machines or connections). Choose a rider if you like, then press **Ride**. Sound starts after your first interaction.
 
@@ -78,18 +83,21 @@ The upper-left **3D resolution** (100/75/50%) and **Graphics** (High/Medium/Low)
 **Frame rate** sets a rendering cap, with Auto following your display. They change rendering only;
 routes, physics, traffic and the city stay the same. The speedometer
 shows mph and km/h. The [player guide](PLAYER_GUIDE.md) covers every control, the map, recovery and settings.
+Fresh phone sessions default to **Medium / 75%**; desktop defaults to **High / 100%**. Your saved choices take
+precedence, and rotation does not reset them. The pause menu shows **Build [UTC timestamp] · [actual backend]**;
+include that text with reports. A loading note can identify the last recorded stage of an interrupted attempt.
 
 For optional read-only rendering diagnostics, open the game with
 [`?perf=1`](https://vibezzzcoder.github.io/euc-sanfrancisco/?perf=1). The panel shows the rendering backend, submitted
 draw calls/triangles, frame-interval mean/p95 and intervals over 50 ms. It samples the last five seconds, up to 600
 intervals, and resets when riding is suspended. These intervals are not GPU timings or proof of displayed FPS.
 
-Recent rendering updates reduce offscreen tree/paint submissions and tighten shadow-caster culling. The latest
-update also stops road markings from being re-copied on almost every moving frame (desktop moving-camera CPU time
-about 11.7→10.0 ms per frame in a controlled test, GPU unchanged) and spreads the first build of distant Golden Gate /
-Twin Peaks scenery over a few frames, removing a 70–140 ms hitch on first arrival (distant scenery may appear a
-moment later). The owner reports a clearly better framerate playing at night with a PS5 controller. Results vary by
-device; integrated-GPU and physical-phone benefits remain unverified.
+Recent rendering updates reduce offscreen tree/paint submissions, tighten shadow-caster culling and spread the first
+build of distant Golden Gate / Twin Peaks scenery across frames; distant scenery may appear a moment later.
+The owner previously reported a clearly better framerate playing at night with a PS5 controller.
+The current update reduces retained support/collision and graphics-resource memory, narrows map allocation peaks,
+and addresses a Firefox shader-validation incompatibility. Most changes also apply to desktop. Some packing/query
+work adds CPU cost, and startup memory peaks remain substantial; lower retained memory is not a universal speedup.
 
 ## Officer Dorkins
 
@@ -146,8 +154,13 @@ This is an early release. Known issues include:
   downloading city data are now retried automatically.
 - **Dorkins:** chase, booking and map-marker behavior are still being tested across routes and devices; the map
   cannot show whether the officer is on a different elevation.
-- **Phones, tablets and foldables:** touch layouts are tested in desktop browser emulation, but physical phones and
-  foldables are not fully verified. Performance on phones may be low; the 3D resolution and Graphics options can help.
+- **iPhone reloads remain:** the owner's latest plain-HTTP LAN test (WebGL2, Medium/75) reloaded when opening the map
+  in Safari. Home Screen mode allowed a longer Maribel/UN skatepark/Dorkins/rotation session before another reboot.
+  No Safari/device memory trace confirms the cause. Live HTTPS/WebGPU behavior needs a separate physical test.
+- **Other phones, tablets and foldables:** emulated layouts do not establish physical-device stability. Android,
+  foldable transitions and sustained-play/thermal behavior still need review. Lower graphics settings are not a guaranteed remedy.
+- **macOS Firefox:** the shader change and fallback have Linux/compiler evidence; current macOS behavior still needs
+  confirmation. Report the actual backend and any fallback URL, rather than assuming WebGPU succeeded.
 
 ## Feedback
 
@@ -156,7 +169,7 @@ Please report bugs and ideas through
 **Feedback / bugs** link. The pause menu's **Player guide** opens this repository's guide; both links open a new tab
 and keep SF paused. Helpful details: where you were (street
 or destination), the rider, your device, browser and graphics card, the graphics backend shown on screen if any,
-your Frame rate / 3D resolution / Graphics settings, the input device and the steps that led to the problem.
+your Frame rate / 3D resolution / Graphics settings, the pause-menu build ID, the input device and the steps that led to the problem.
 Please say whether you used a physical phone or tablet, a foldable or a desktop browser. See also
 [CONTRIBUTING.md](CONTRIBUTING.md).
 

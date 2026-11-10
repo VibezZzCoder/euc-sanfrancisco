@@ -80,14 +80,16 @@ function adjacent(value, up) {
   return adjacentView.getFloat64(0);
 }
 
-test('grid keys: exact 9028c5b source is pinned; only key representation changes', () => {
+test('grid keys: exact 9028c5b source is pinned; changes stay in grid keys and grid ownership', () => {
   assert.equal(hash(before), baselineSHA256);
   const start = after.indexOf('// Grid keys:'), end = after.indexOf('function createSfDynamicBodyIndex(');
   assert.ok(start >= 0 && end > start);
   const restored = (after.slice(0, start) + after.slice(end))
     .replace('const key = bodyCellKey(ix, iz);', 'const key = `${ix},${iz}`;')
     .replace('cells.get(bodyCellKey(ix, iz))', 'cells.get(`${ix},${iz}`)');
-  assert.equal(restored, before, 'all bounds, actor visits, ordering, queries, stats, epochs, writer and reactions remain source-exact');
+  // Grid pooling is separately pinned/differentially checked against 9e9416b in dynamic-grid-pooling.
+  const withoutGrid = source => source.replace(/function createSfDynamicBodyIndex\(cellSize = 16\) \{[^]*?\n\}/, '/* grid */');
+  assert.equal(withoutGrid(restored), withoutGrid(before), 'shape/writer/reaction/social code remains source-exact');
 });
 
 test('grid keys: signed packing boundaries, extreme cells and mixed text/number buckets preserve membership and insertion order', () => {
@@ -105,7 +107,8 @@ test('grid keys: signed packing boundaries, extreme cells and mixed text/number 
   assert.deepEqual([...candidateMap.keys()].map(textCell), [...baselineMap.keys()]);
   for (const [key, bucket] of candidateMap) {
     if (typeof key === 'number') assert.ok(Number.isInteger(key) && key >= 0 && key <= 2 ** 30 - 1);
-    assert.deepEqual(bucket, baselineMap.get(textCell(key)), 'no packed/text alias or bucket insertion change');
+    const bodies = Array.isArray(bucket) ? bucket : bucket.bodies.slice(0, bucket.count);
+    assert.deepEqual(bodies, baselineMap.get(textCell(key)), 'no packed/text alias or bucket insertion change');
   }
   for (const body of bodies) assert.ok(query(indexes, body.x, body.z, 0).includes(body));
   // These queries cross packed/text seams in both signs and both axes within a single query.
@@ -261,12 +264,12 @@ function runner(api) {
   };
 }
 
-test('grid keys: separate counters confirm native Map work is unchanged while ordinary cell keys become numeric', t => {
+test('grid keys: counters confirm equal lookups, numeric ordinary keys and fewer retained-cell insertions', t => {
   const old = inspect(before), now = inspect(after);
   const checksums = [runner(old.api)(64), runner(now.api)(64)];
   assert.equal(checksums[1], checksums[0]);
   assert.equal(old.calls.stringGet, now.calls.numberGet);
-  assert.equal(old.calls.stringSet, now.calls.numberSet);
+  assert.ok(now.calls.numberSet < old.calls.stringSet, 'pooling retains live cell entries between rebuilds');
   assert.equal(old.calls.numberGet + old.calls.numberSet + now.calls.stringGet + now.calls.stringSet, 0);
   assert.ok(old.calls.stringGet > 64 * gridWorkload().count);
   t.diagnostic(JSON.stringify({ epochs: 64, actorsPerEpoch: gridWorkload().count, baseline: old.calls, current: now.calls,

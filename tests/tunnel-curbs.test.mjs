@@ -102,6 +102,8 @@ function setup({ terrain, blocks, old = false, pier = true, groundSource = sourc
   return { N, scene };
 }
 
+// Draped facets are registered as packed batches (2026-11-09, phone memory); compare their exact plain records.
+const expanded = N => ({ ...N.ride, tops: N.RideGeometry.expandTops(N.ride.tops) });
 function marker(N, x) { return N.RideGeometry.addTop(block(x, 5000).poly, 100, 'wood'); }
 function actual(old, clipped, options = {}) {
   const w = world(), f = setup({ terrain: { ...w.N.Terrain, patches: w.N.Terrain.patches.slice() }, blocks: w.blocks, old, ...options });
@@ -150,7 +152,7 @@ function fixtures() {
 baselineTest('actual core controls: deferred no-cut geometry and complete support order match committed immediate ground', t => {
   const { old, deferred, clipped } = fixtures();
   sameDrawing(old.city, deferred.city);
-  assert.equal(JSON.stringify(old.N.ride), JSON.stringify(deferred.N.ride), 'support planes, metadata, bodies and source-order ties');
+  assert.equal(JSON.stringify(old.N.ride), JSON.stringify(expanded(deferred.N)), 'support planes, metadata, bodies and source-order ties');
   t.diagnostic(JSON.stringify({ scope: 'core DEM + actual curb polygons, no building obstacles or renderer', blocks: world().blocks.length,
     cuts: world().grade.terrainCuts.length, setupMs: world().setupMs, oldBuildMs: old.buildMs, deferredBuildMs: deferred.buildMs,
     clippedBuildMs: clipped.buildMs, gradeSHA256: sha(source['grade-separation']), groundSHA256: sha(source['sf-ground']) }));
@@ -296,7 +298,7 @@ baselineTest('deferred Drape uses the original patch view even after regional pa
   };
   const a = make(true), b = make(false);
   sameDrawing(a.city, b.city);
-  assert.equal(JSON.stringify(a.N.ride), JSON.stringify(b.N.ride));
+  assert.equal(JSON.stringify(expanded(a.N)), JSON.stringify(expanded(b.N)));
 });
 
 test('ordered broadphase: actual clipped curb buffers and registered support match the pre-optimization scan exactly', t => {

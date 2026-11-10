@@ -178,12 +178,13 @@ function installOrderedPaintCulling(mesh) {
 
 // Preserve source-order blending of overlapping SF rail/paint ribbons.
 function buildRoadPaint(scene, network) {
-  const position = [];
-  const normal = [];
-  const side = [];
-  const paint = [];
-  const colors = [];
-  const index = [];
+  // Phone memory: the markings (~1.6 M vertices) used to grow plain JS number arrays and then copy them into Float32
+  // attributes, holding both at once. The pass below only records each strip; the exact vertex/index counts then size
+  // typed arrays that `emit` fills with the same values, in the same order (Float32 rounding happens on write, as in
+  // Float32BufferAttribute's copy).
+  const calls = [];
+  let vertexCount = 0, indexCount = 0;
+  let position, normal, side, paint, colors, index, vp = 0, ip = 0;
   const T = window.NYC.Terrain;
   const loaded = T && T.loaded;
   const n = { x: 0, y: 1, z: 0 };
@@ -193,10 +194,16 @@ function buildRoadPaint(scene, network) {
   function strip(ax, az, bx, bz, w, col, period = 1, duty = 1, onIslands = false, lift = 0) {
     const len = Math.hypot(bx - ax, bz - az);
     if (len < 0.05) return;
+    const steps = Math.max(1, Math.ceil(len / STEP));
+    calls.push([ax, az, bx, bz, w, col, period, duty, onIslands, lift]);
+    vertexCount += 2 * (steps + 1); indexCount += 6 * steps;
+  }
+  function emit(ax, az, bx, bz, w, col, period, duty, onIslands, lift) {
+    const len = Math.hypot(bx - ax, bz - az);
     const sx = ((az - bz) / len) * w * 0.5;
     const sz = ((bx - ax) / len) * w * 0.5;
     const steps = Math.max(1, Math.ceil(len / STEP));
-    const i0 = position.length / 3;
+    const i0 = vp;
     for (let k = 0; k <= steps; k++) {
       const u = (len * k) / steps;
       const x = ax + ((bx - ax) * k) / steps;
@@ -204,16 +211,17 @@ function buildRoadPaint(scene, network) {
       for (const s of [-1, 1]) {
         const px = x + sx * s, pz = z + sz * s;
         const island = onIslands && blockAt(px, pz) ? window.NYC.CURB_H : 0;
-        position.push(px, (loaded ? T.groundAt(px, pz) : 0) + island + HEIGHT + lift, pz);
+        position[vp * 3] = px; position[vp * 3 + 1] = (loaded ? T.groundAt(px, pz) : 0) + island + HEIGHT + lift; position[vp * 3 + 2] = pz;
         if (loaded) T.normalAt(px, pz, n);
-        normal.push(n.x, n.y, n.z);
-        side.push(sx * s, sz * s);
-        paint.push(u, period, duty);
-        colors.push(col.r, col.g, col.b);
+        normal[vp * 3] = n.x; normal[vp * 3 + 1] = n.y; normal[vp * 3 + 2] = n.z;
+        side[vp * 2] = sx * s; side[vp * 2 + 1] = sz * s;
+        paint[vp * 3] = u; paint[vp * 3 + 1] = period; paint[vp * 3 + 2] = duty;
+        colors[vp * 3] = col.r; colors[vp * 3 + 1] = col.g; colors[vp * 3 + 2] = col.b;
+        vp++;
       }
       if (k > 0) {
         const i = i0 + 2 * (k - 1);
-        index.push(i, i + 1, i + 3, i, i + 3, i + 2);
+        index[ip++] = i; index[ip++] = i + 1; index[ip++] = i + 3; index[ip++] = i; index[ip++] = i + 3; index[ip++] = i + 2;
       }
     }
   }
@@ -359,12 +367,19 @@ function buildRoadPaint(scene, network) {
     for (let i = 2; i < t.pts.length; i += 2) strip(t.pts[i - 2], t.pts[i - 1], t.pts[i], t.pts[i + 1], 0.05, SLOT, 1, 1, true, 0.006);
   }
 
+  position = new Float32Array(vertexCount * 3); normal = new Float32Array(vertexCount * 3); side = new Float32Array(vertexCount * 2);
+  paint = new Float32Array(vertexCount * 3); colors = new Float32Array(vertexCount * 3);
+  // Same index type three's setIndex(array) picks: Uint32 once any index reaches 65535.
+  index = vertexCount - 1 >= 65535 ? new Uint32Array(indexCount) : new Uint16Array(indexCount);
+  for (const c of calls) emit(...c);
+  calls.length = 0;
+  if (vp !== vertexCount || ip !== indexCount) throw new Error('Road paint sizing mismatch');
   const material = createRoadPaintMaterial();
   const attributes = { position: [position, 3], normal: [normal, 3], color: [colors, 3], side: [side, 2], paint: [paint, 3] };
   function makeMesh(data, indices, name) {
     const geometry = new THREE.BufferGeometry();
-    for (const [key, [values, size]] of Object.entries(data)) geometry.setAttribute(key, new THREE.Float32BufferAttribute(values, size));
-    geometry.setIndex(indices);
+    for (const [key, [values, size]] of Object.entries(data)) geometry.setAttribute(key, new THREE.BufferAttribute(values, size));
+    geometry.setIndex(new THREE.BufferAttribute(indices, 1));
     geometry.computeBoundingBox();
     geometry.computeBoundingSphere();
     // Bound the uploaded Float32 positions + side vectors, not a nominal cell.

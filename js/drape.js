@@ -31,33 +31,46 @@ function densify(ring, step) {
 
 // Sutherland-Hodgman clip of a ring to an axis-aligned rectangle
 function clipToRect(ring, x0, z0, x1, z1) {
+  // Public results own their workspace; subsequent calls cannot overwrite them.
+  return clipToRectInto(ring, x0, z0, x1, z1, clipWorkspace());
+}
+
+function clipWorkspace() { return { a: [], b: [], clean: [], cuts: [] }; }
+
+function clipToRectInto(ring, x0, z0, x1, z1, work) {
   let pts = ring;
-  const planes = [
-    [(p) => p.x >= x0, (a, b) => (x0 - a.x) / (b.x - a.x)],
-    [(p) => p.x <= x1, (a, b) => (x1 - a.x) / (b.x - a.x)],
-    [(p) => p.z >= z0, (a, b) => (z0 - a.z) / (b.z - a.z)],
-    [(p) => p.z <= z1, (a, b) => (z1 - a.z) / (b.z - a.z)]
-  ];
-  for (const [inside, cut] of planes) {
+  let cuts = 0;
+  // Original plane/edge order and interpolation (including both computed coordinates).
+  // Do not snap intersections to a plane or change the duplicate-point inequalities.
+  for (let plane = 0; plane < 4; plane++) {
     if (!pts.length) break;
-    const next = [];
+    const next = plane % 2 ? work.b : work.a;
+    let count = 0;
     for (let i = 0; i < pts.length; i++) {
       const a = pts[i], b = pts[(i + 1) % pts.length];
-      const ia = inside(a), ib = inside(b);
-      if (ia) next.push(a);
+      const ia = plane === 0 ? a.x >= x0 : plane === 1 ? a.x <= x1 : plane === 2 ? a.z >= z0 : a.z <= z1;
+      const ib = plane === 0 ? b.x >= x0 : plane === 1 ? b.x <= x1 : plane === 2 ? b.z >= z0 : b.z <= z1;
+      if (ia) next[count++] = a;
       if (ia !== ib) {
-        const t = cut(a, b);
-        next.push({ x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t });
+        const t = plane === 0 ? (x0 - a.x) / (b.x - a.x) : plane === 1 ? (x1 - a.x) / (b.x - a.x)
+          : plane === 2 ? (z0 - a.z) / (b.z - a.z) : (z1 - a.z) / (b.z - a.z);
+        const p = work.cuts[cuts] || (work.cuts[cuts] = { x: 0, z: 0 });
+        cuts++;
+        p.x = a.x + (b.x - a.x) * t; p.z = a.z + (b.z - a.z) * t;
+        next[count++] = p;
       }
     }
+    next.length = count;
     pts = next;
   }
   // drop repeated points
-  const clean = [];
+  const clean = work.clean;
+  let count = 0;
   for (const p of pts) {
-    const q = clean[clean.length - 1];
-    if (!q || Math.abs(q.x - p.x) > 1e-6 || Math.abs(q.z - p.z) > 1e-6) clean.push(p);
+    const q = clean[count - 1];
+    if (!q || Math.abs(q.x - p.x) > 1e-6 || Math.abs(q.z - p.z) > 1e-6) clean[count++] = p;
   }
+  clean.length = count;
   while (clean.length > 1 && Math.abs(clean[0].x - clean[clean.length - 1].x) < 1e-6 && Math.abs(clean[0].z - clean[clean.length - 1].z) < 1e-6) clean.pop();
   return clean;
 }
@@ -107,9 +120,10 @@ function earClip(pts) {
   return tris;
 }
 
-const _n = { x: 0, y: 1, z: 0 };
-
 function polygon(ring, ground, normal, offset, out) {
+  // Invocation-local: ground/normal callbacks may reenter Drape. Each recursion depth
+  // owns its clip points until all four children finish; siblings reuse only their depth.
+  const work = [], _n = { x: 0, y: 1, z: 0 };
   // counter-clockwise from above, so every piece clipped from it is too
   const ccw = signedArea(ring) < 0 ? ring : ring.slice().reverse();
   let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
@@ -159,20 +173,21 @@ function polygon(ring, ground, normal, offset, out) {
     return true;
   };
   // each square clips its parent's piece (the same as clipping the whole ring, for a fraction of the points)
-  const visit = (parent, qx, qz, s) => {
-    const piece = clipToRect(parent, qx, qz, qx + s, qz + s);
+  const visit = (parent, qx, qz, s, depth) => {
+    const frame = work[depth] || (work[depth] = clipWorkspace());
+    const piece = clipToRectInto(parent, qx, qz, qx + s, qz + s, frame);
     if (piece.length < 3) return;
     if (s > MIN_LEAF && (s > MAX_LEAF || !flatEnough(qx, qz, s))) {
       const h = s / 2;
-      visit(piece, qx, qz, h);
-      visit(piece, qx + h, qz, h);
-      visit(piece, qx, qz + h, h);
-      visit(piece, qx + h, qz + h, h);
+      visit(piece, qx, qz, h, depth + 1);
+      visit(piece, qx + h, qz, h, depth + 1);
+      visit(piece, qx, qz + h, h, depth + 1);
+      visit(piece, qx + h, qz + h, h, depth + 1);
       return;
     }
     emit(piece);
   };
-  visit(ccw, x0, z0, size);
+  visit(ccw, x0, z0, size, 0);
   return out;
 }
 

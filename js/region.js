@@ -387,7 +387,11 @@ function buildSFRegion(scene, { paintIntervals = null } = {}) {
     const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(pos.subarray(0,positionCount),3));
     // Match Three's arrayNeedsUint32 (65535 itself also selects Uint32); keep exact-sized owned outputs.
     const Index=maxIndex>=65535?THREE.Uint32BufferAttribute:THREE.Uint16BufferAttribute;
-    geo.setIndex(new Index(idx.subarray(0,indexCount),1));if(far)geo.setAttribute('color',new THREE.Float32BufferAttribute(color,3));computeRegionVertexNormals(geo);geo.computeBoundingSphere();return geo;
+    geo.setIndex(new Index(idx.subarray(0,indexCount),1));if(far)geo.setAttribute('color',new THREE.Float32BufferAttribute(color,3));computeRegionVertexNormals(geo);geo.computeBoundingSphere();
+    // Drawing-only, immutable output. The upload owner can drop CPU copies, including later LODs. This recipe
+    // binds only already-owned source grids/tile metadata. An arrow here would retain closure-shared clip arenas.
+    geo.userData.sfTerrainCpuRebuild=geometry.bind(null,g,t,stride,far,transition);
+    return geo;
   }
   for(const [g,far]of[[C,false],[H,true]])for(const t of g.tiles){
     const bounds={x0:t.x,z0:t.z,x1:t.x+t.size,z1:t.z+t.size},exclude=far?C:innerCore;
@@ -429,12 +433,12 @@ function buildSFRegion(scene, { paintIntervals = null } = {}) {
     }
   }
   const roadMeshes=[];
-  for(const [key,cell]of roadCells){const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(cell.pos,3));geo.setAttribute('uv',new THREE.Float32BufferAttribute(cell.uv,2));geo.computeBoundingSphere();const mesh=new THREE.Mesh(geo,paintMat);mesh.name='SFRegionRoadPaint:'+key;group.add(mesh);roadMeshes.push(mesh);}
+  for(const [key,cell]of roadCells){const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(cell.pos,3));geo.setAttribute('uv',new THREE.Float32BufferAttribute(cell.uv,2));geo.computeBoundingSphere();geo.userData.sfStaticGeometry=true;const mesh=new THREE.Mesh(geo,paintMat);mesh.name='SFRegionRoadPaint:'+key;group.add(mesh);roadMeshes.push(mesh);}
   roadCells.clear();
   const buildings=[],palette=[[0.82,0.78,0.67],[0.7,0.73,0.72],[0.74,0.64,0.52],[0.65,0.72,0.65],[0.8,0.8,0.78]];
   for(const file of data.buildings){const h=file.header,q=file.records;for(let k=0;k<q.length;k+=7){const base=q[k+2]*0.1;buildings.push({x:h.originX+q[k]*0.1,z:h.originZ+q[k+1]*0.1,y:base-1,h:Math.max(1,(q[k+3]-q[k+2])*0.1+1),w:q[k+4]*0.1,d:q[k+5]*0.1,rot:q[k+6]*0.0001,seed:(k/7+1)*0.137,tint:palette[(k/7)%palette.length],style:0});}}
   const buildingCount=buildings.length;
-  for (const b of buildings) ride?.addBox({ x: b.x, y: b.y + b.h / 2, z: b.z },
+  for (const b of buildings) ride?.addRegionalBox({ x: b.x, y: b.y + b.h / 2, z: b.z },
     { x: b.w / 2, y: b.h / 2, z: b.d / 2 }, b.rot, { support: false });
   const buildingMeshes=buildBuildingChunks(buildings,createBoroughBuildingMaterial(),1200,'SFRegionBuildings');
   buildings.length=0;
@@ -448,7 +452,7 @@ function buildSFRegion(scene, { paintIntervals = null } = {}) {
       const k=ks[i],h=data.trees[k+3],x=data.trees[k],y=data.trees[k+1],z=data.trees[k+2];
       // Physical trunks are unchanged: the drawn far trunk (and the near species trunk) cover this prism.
       const radius=Math.max(.08,h*.022),height=h*.5;
-      ride?.addPrism(Array.from({length:8},(_,j)=>({x:x+Math.sin(j*Math.PI/4)*radius,z:z+Math.cos(j*Math.PI/4)*radius})),
+      ride?.addRegionalPrism(Array.from({length:8},(_,j)=>({x:x+Math.sin(j*Math.PI/4)*radius,z:z+Math.cos(j*Math.PI/4)*radius})),
         y,y+height,{support:false});
     }
     const mesh=regionTrees.farChunk(ks);mesh.name='SFRegionTrees:'+key;group.add(mesh);treeMeshes.push(mesh);

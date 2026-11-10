@@ -14,7 +14,12 @@ const transitionOf = (capabilities, plane) => capabilities.transition === 'slope
   ? Math.hypot(plane?.dx ?? 0, plane?.dz ?? 0) > 1e-6 : capabilities.transition === true;
 
 function addTop(poly, top, surface = 'pavement', options = {}) {
-  const p = ring(poly);
+  return addTopRing(ring(poly), top, surface, options);
+}
+// `p` is an already-copied ring of {x, z} objects. addTriangles passes rings whose point objects are shared by every
+// facet using the same mesh vertex (read-only: no consumer mutates registered points), instead of one fresh copy per
+// facet corner. Millions of draped-ground facets made those copies the largest startup allocation (phone memory).
+function addTopRing(p, top, surface = 'pavement', options = {}) {
   if (!validRing(p) || !finite(top)) return null;
   const r = { poly: p, top, surface, layered: !!options.layered, shore: !!options.shore };
   if (options.plane) {
@@ -49,12 +54,39 @@ function addPrism(outer, minY, maxY, options = {}) {
   return r;
 }
 
+// Only region.js's building boxes / eight-sided trunks have this ownership contract:
+// no rendering, acoustic, navigation or external collider owner keeps the returned body.
+// Keep ordinary records throughout construction (notably the later tunnel foundation scan).
+// The sampler may transfer these records ONLY at the explicit successful registry handoff.
+// Weak certificates neither retain bodies nor alter their keys/geometry/default caller API.
+function regionalBody(body, kind) {
+  if (!body) return body;
+  let regionalBodies = N.ride.regionalBodies;
+  if (!regionalBodies) {
+    regionalBodies = Object.freeze({ boxes: new WeakSet(), prisms: new WeakSet(),
+      objectPrototype: Object.prototype, arrayPrototype: Array.prototype });
+    Object.defineProperty(N.ride, 'regionalBodies', { value: regionalBodies, configurable: true });
+  }
+  regionalBodies[kind].add(body);
+  return body;
+}
+function addRegionalBox(centre, halfExtents, rotationY, options) {
+  return regionalBody(addBox(centre, halfExtents, rotationY, options), 'boxes');
+}
+function addRegionalPrism(outer, minY, maxY, options) {
+  return regionalBody(addPrism(outer, minY, maxY, options), 'prisms');
+}
+
 // Only exact shared edges, opposite interiors and coplanar triangles may merge. One bounded
 // map per call; pairs become quads, never hulls that fill concave gaps or holes.
 function addTriangles(pos, idx, surface = 'pavement', options = {}) {
+  if (options.packed) return addTrianglesPacked(pos, idx, surface, options);
   const records = [];
   const length = idx ? idx.length : pos.length / 3;
   const get = (i) => { const k = (idx ? idx[i] : i) * 3; return { x: pos[k], y: pos[k + 1], z: pos[k + 2] }; };
+  // One shared {x, z} per mesh vertex for registered rings (the same values ring() would copy).
+  const points = new Array(Math.ceil(pos.length / 3));
+  const pointAt = (i) => { const v = idx ? idx[i] : i; return points[v] ??= { x: pos[v * 3], z: pos[v * 3 + 2] }; };
   // Edge identity is unchanged from the original `${x},${z}` text keys. Merged vertices always have
   // finite x/z (any non-finite coordinate makes `ny` non-finite and the triangle is skipped), and
   // shortest round-trip number formatting is injective on finite doubles except -0/+0, which ===
@@ -117,6 +149,7 @@ function addTriangles(pos, idx, surface = 'pavement', options = {}) {
     const dx = (uy * vz - uz * vy) / -ny, dz = (ux * vy - uy * vx) / -ny;
     const plane = { x: a.x, y: a.y, z: a.z, dx, dz };
     let pts = ny > 0 ? [a, b, c] : [a, c, b], joined = false;
+    const shared = ny > 0 ? [pointAt(t), pointAt(ib), pointAt(ic)] : [pointAt(t), pointAt(ic), pointAt(ib)];
     const keys = merging && (ny > 0 ? [keyAt(t), keyAt(ib), keyAt(ic)] : [keyAt(t), keyAt(ic), keyAt(ib)]);
     if (merging) for (let e = 0; e < 3; e++) {
       const u = pts[e], v = pts[(e + 1) % 3];
@@ -130,13 +163,13 @@ function addTriangles(pos, idx, surface = 'pavement', options = {}) {
       const w = other.poly[(k + 2) % 3], q = pts[(e + 2) % 3];
       const side = (p) => (v.x - u.x) * (p.z - u.z) - (v.z - u.z) * (p.x - u.x);
       if (side(w) * side(q) >= 0) continue;
-      other.poly = [other.poly[k], { x: q.x, z: q.z }, other.poly[(k + 1) % 3], w];
+      other.poly = [other.poly[k], shared[(e + 2) % 3], other.poly[(k + 1) % 3], w]; // shared[(e+2)%3] has q's x/z
       other.top = Math.max(other.top, a.y, b.y, c.y);
       joined = true;
       break;
     }
     if (joined) continue;
-    const r = addTop(pts, Math.max(a.y, b.y, c.y), surface, { ...options, plane: Math.abs(dx) + Math.abs(dz) > 1e-12 ? plane : undefined });
+    const r = addTopRing(shared, Math.max(a.y, b.y, c.y), surface, { ...options, plane: Math.abs(dx) + Math.abs(dz) > 1e-12 ? plane : undefined });
     if (!r) continue;
     records.push(r);
     if (merging) for (let e = 0; e < 3; e++) edgeSet(keys[e], keys[(e + 1) % 3], r);
@@ -224,5 +257,233 @@ function boxPoly(centre, halfExtents, rotationY = 0) {
     z: centre.z - a * halfExtents.x * s + b * halfExtents.z * c
   }));
 }
-N.RideGeometry = { addTop, addBox, addPrism, addMesh, addTriangles, boxPoly, convexSlices };
+// Packed facets (phone memory). Millions of small facets used to be one JS record object each (plus ring and plane
+// objects): the largest startup allocation, and iOS kills the tab when it crosses its memory limit. A PackedTops batch
+// is ONE registry entry holding facets in typed arrays, in creation order: record(i) materializes exactly the record
+// addTriangles would have registered (same keys, order and values) and SfSupportStore packs batches directly.
+// `packed: true` gives a call its own batch; `packed: run` (RideGeometry.packedRun()) lets consecutive calls share one,
+// appending only while that batch is still the registry's last entry (so registry order never changes).
+// Vertices used by facets are copied into the batch with the input's own element type (Float32 or Float64), so every
+// coordinate reads back as the same number. Only options that cannot change a record are accepted.
+const PACKED_OPTIONS = new Set(['packed', 'replacesTerrain', 'layered', 'shore', 'flipWinding', 'sides']);
+// One byte per facet: bit 0 = quad, bits 1–3 = plane anchor's ring slot + 1 (0 = no plane),
+// bits 4–5 = top's ring slot, bit 6 = sparse exact top override. A merged near-coplanar edge can
+// discard a duplicate vertex with a different Y: its old Math.max result is NOT always a ring Y.
+const TOP_OVERRIDE = 64;
+class PackedTops {
+  constructor(PosArray, template) {
+    this.packedTops = true;
+    this.template = template; // same COMMON metadata fields, in the same order, as each record addTopRing builds
+    this.length = 0; this.vertices = 0;
+    this.pos = new PosArray(48);
+    this.facet = new Uint8Array(16);
+    this.ids = new Uint16Array(64);          // promoted before any vertex index could wrap
+    this.topOverrides = null;               // only exceptional merged heights; no ordinary per-facet doubles
+    this.slope = new Float64Array(32);       // plane dx, dz
+    // Construction's skatepark scan still reads batch.top[i]. Keep that read-only indexed interface
+    // without allocating another array (or one accessor per facet). Store/query hot paths use topAt.
+    this.top = new Proxy(Object.freeze({}), { get: (_, key) => {
+      if (key === 'length') return this.length;
+      if (typeof key !== 'string') return undefined;
+      const i = Number(key);
+      return Number.isInteger(i) && i >= 0 && i < this.length && String(i) === key ? this.topAt(i) : undefined;
+    } });
+  }
+  reserve(facets, vertices) {
+    const grow = (a, n) => { if (a.length >= n) return a; const b = new a.constructor(Math.max(n, a.length * 2)); b.set(a); return b; };
+    const f = this.length + facets, v = this.vertices + vertices;
+    // Construction's edge/local tables use signed indices and -1 sentinels. Fail explicitly beyond
+    // their existing representable range; within it, wide batches retain every index as Uint32.
+    if (!Number.isSafeInteger(f) || !Number.isSafeInteger(v) || f < 0 || v < 0 || f > 0x7fffffff || v > 0x7fffffff) {
+      throw new RangeError('Packed ride tops exceed construction index bounds');
+    }
+    if (v > 0x10000 && this.ids.BYTES_PER_ELEMENT === 2) this.ids = new Uint32Array(this.ids);
+    this.facet = grow(this.facet, f); this.ids = grow(this.ids, f * 4);
+    this.slope = grow(this.slope, f * 2); this.pos = grow(this.pos, v * 3);
+  }
+  trim() {
+    const n = this.length;
+    this.facet = this.facet.slice(0, n); this.ids = this.ids.slice(0, n * 4);
+    this.slope = this.slope.slice(0, n * 2); this.pos = this.pos.slice(0, this.vertices * 3);
+    return this;
+  }
+  countAt(i) { return 3 + (this.facet[i] & 1); }
+  anchorAt(i) {
+    const slot = ((this.facet[i] >>> 1) & 7) - 1;
+    return slot < 0 ? -1 : this.ids[i * 4 + slot];
+  }
+  topAt(i) {
+    const f = this.facet[i];
+    return f & TOP_OVERRIDE ? this.topOverrides.get(i) : this.pos[this.ids[i * 4 + ((f >>> 4) & 3)] * 3 + 1];
+  }
+  setTop(i, top) {
+    // Object.is preserves signed zero as well as all finite Float64 values. Keep Math.max's NaN in
+    // the override rather than substituting a source NaN payload. Never reconstruct Y from the plane:
+    // even equivalent plane arithmetic can round differently from the source vertex.
+    const n = Number.isNaN(top) ? 0 : this.countAt(i), base = i * 4;
+    for (let k = 0; k < n; k++) if (Object.is(this.pos[this.ids[base + k] * 3 + 1], top)) {
+      this.facet[i] = (this.facet[i] & 15) | (k << 4);
+      this.topOverrides?.delete(i);
+      return;
+    }
+    this.facet[i] = (this.facet[i] & 15) | TOP_OVERRIDE;
+    (this.topOverrides ??= new Map()).set(i, top);
+  }
+  record(i) {
+    const pos = this.pos, n = this.countAt(i), poly = new Array(n), T = this.template;
+    for (let k = 0; k < n; k++) { const v = this.ids[i * 4 + k] * 3; poly[k] = { x: pos[v], z: pos[v + 2] }; }
+    const r = { poly, top: this.topAt(i), surface: T.surface, layered: T.layered, shore: T.shore };
+    const a = this.anchorAt(i);
+    if (a >= 0) r.plane = { x: pos[a * 3], y: pos[a * 3 + 1], z: pos[a * 3 + 2], dx: this.slope[i * 2], dz: this.slope[i * 2 + 1] };
+    if ('replacesTerrain' in T) r.replacesTerrain = T.replacesTerrain;
+    return r;
+  }
+}
+class PackedRun {
+  constructor() { this.batch = null; this.closed = false; }
+  // The run's batch if it is still the registry's last entry with the same element type and metadata, else a new one.
+  batchFor(tops, PosArray, template) {
+    if (this.closed) throw new Error('Packed ride-top run is closed');
+    const b = this.batch;
+    if (b && tops[tops.length - 1] === b && b.pos instanceof PosArray && sameTemplate(b.template, template)) return b;
+    if (b) b.trim();
+    return (this.batch = new PackedTops(PosArray, template));
+  }
+  close() { this.batch?.trim(); this.batch = null; this.closed = true; }
+}
+const sameTemplate = (a, b) => a.surface === b.surface && a.layered === b.layered && a.shore === b.shore
+  && ('replacesTerrain' in a) === ('replacesTerrain' in b) && a.replacesTerrain === b.replacesTerrain;
+// Registry entries with packed batches expanded to plain records (tests, diagnostics; allocates every record).
+function expandTops(list) {
+  const out = [];
+  for (const t of list) if (t?.packedTops === true) for (let i = 0; i < t.length; i++) out.push(t.record(i)); else out.push(t);
+  return out;
+}
+
+// addTriangles' algorithm (same interning, edge table, merge tests and arithmetic) writing typed arrays. Packed options
+// exclude doubleSided/capabilities/plane/merge:false/reference heights, so every kept face has ny > 0.
+function addTrianglesPacked(pos, idx, surface, options) {
+  for (const k of Object.keys(options)) if (!PACKED_OPTIONS.has(k)) throw new Error(`Packed ride tops do not support option '${k}'`);
+  if (!ArrayBuffer.isView(pos)) throw new Error('Packed ride tops need typed positions');
+  const template = { surface, layered: !!options.layered, shore: !!options.shore };
+  if (options.replacesTerrain !== undefined) template.replacesTerrain = options.replacesTerrain;
+  const tops = N.ride.tops, run = options.packed === true ? null : options.packed;
+  const batch = run ? run.batchFor(tops, pos.constructor, template) : new PackedTops(pos.constructor, template);
+  let registered = tops[tops.length - 1] === batch;
+  const length = idx ? idx.length : pos.length / 3;
+  const vertexCount = Math.ceil(pos.length / 3);
+  batch.reserve(Math.floor(length / 3), vertexCount);
+  const { facet, ids, slope } = batch, B = batch.pos;
+  const local = new Int32Array(vertexCount).fill(-1); // mesh vertex -> batch vertex
+  const vid = (v) => {
+    let b = local[v];
+    if (b < 0) { b = local[v] = batch.vertices++; B[b * 3] = pos[v * 3]; B[b * 3 + 1] = pos[v * 3 + 1]; B[b * 3 + 2] = pos[v * 3 + 2]; }
+    return b;
+  };
+  const vertexIds = new Int32Array(vertexCount).fill(-1);
+  let slots = 1024, slotX = new Float64Array(slots), slotZ = new Float64Array(slots), slotId = new Int32Array(slots).fill(-1), interned = 0;
+  const slotOf = (x, z) => {
+    BITS[0] = x; let h = Math.imul(WORDS[0] ^ 0x9e3779b9, 0x85ebca6b) ^ WORDS[1];
+    BITS[0] = z; h = Math.imul(h ^ WORDS[0], 0xc2b2ae35) ^ Math.imul(WORDS[1], 0x27d4eb2f);
+    let s = (h ^ (h >>> 15)) & (slots - 1);
+    while (slotId[s] >= 0 && !(slotX[s] === x && slotZ[s] === z)) s = (s + 1) & (slots - 1);
+    return s;
+  };
+  const intern = (x, z) => {
+    if (x === 0) x = 0; if (z === 0) z = 0;
+    const s = slotOf(x, z);
+    if (slotId[s] >= 0) return slotId[s];
+    slotX[s] = x; slotZ[s] = z; slotId[s] = interned;
+    if (++interned * 2 > slots) {
+      const ox = slotX, oz = slotZ, oid = slotId;
+      slots *= 2; slotX = new Float64Array(slots); slotZ = new Float64Array(slots); slotId = new Int32Array(slots).fill(-1);
+      for (let o = 0; o < oid.length; o++) if (oid[o] >= 0) {
+        const n = slotOf(ox[o], oz[o]); slotX[n] = ox[o]; slotZ[n] = oz[o]; slotId[n] = oid[o];
+      }
+    }
+    return interned - 1;
+  };
+  const edgeHead = new Int32Array(vertexCount).fill(-1);
+  let edgeTo = new Int32Array(64), edgeNext = new Int32Array(64), edgeRecord = new Int32Array(64), edges = 0;
+  const edgeGet = (from, to) => {
+    for (let e = edgeHead[from]; e >= 0; e = edgeNext[e]) if (edgeTo[e] === to) return edgeRecord[e];
+    return -1;
+  };
+  const edgeSet = (from, to, r) => {
+    for (let e = edgeHead[from]; e >= 0; e = edgeNext[e]) if (edgeTo[e] === to) { edgeRecord[e] = r; return; }
+    if (edges === edgeTo.length) {
+      const to2 = new Int32Array(edges * 2), next2 = new Int32Array(edges * 2), rec2 = new Int32Array(edges * 2);
+      to2.set(edgeTo); next2.set(edgeNext); rec2.set(edgeRecord); edgeTo = to2; edgeNext = next2; edgeRecord = rec2;
+    }
+    edgeTo[edges] = to; edgeNext[edges] = edgeHead[from]; edgeRecord[edges] = r; edgeHead[from] = edges++;
+  };
+  const keyOf = (v) => {
+    let id = vertexIds[v];
+    if (id < 0) { id = intern(pos[v * 3], pos[v * 3 + 2]); vertexIds[v] = id; }
+    return id;
+  };
+  const flip = !!options.flipWinding, P = [0, 0, 0], keys = [0, 0, 0];
+  for (let t = 0; t + 2 < length; t += 3) {
+    const ib = t + (flip ? 2 : 1), ic = t + (flip ? 1 : 2);
+    const va = idx ? idx[t] : t, vb = idx ? idx[ib] : ib, vc = idx ? idx[ic] : ic;
+    const ax = pos[va * 3], ay = pos[va * 3 + 1], az = pos[va * 3 + 2];
+    const bx = pos[vb * 3], by = pos[vb * 3 + 1], bz = pos[vb * 3 + 2];
+    const cx = pos[vc * 3], cy = pos[vc * 3 + 1], cz = pos[vc * 3 + 2];
+    const ux = bx - ax, uy = by - ay, uz = bz - az;
+    const vx = cx - ax, vy = cy - ay, vz = cz - az;
+    const ny = uz * vx - ux * vz;
+    if (!finite(ny) || Math.abs(ny) < 1e-10 || ny < 0) continue;
+    const dx = (uy * vz - uz * vy) / -ny, dz = (ux * vy - uy * vx) / -ny;
+    keys[0] = keyOf(va); keys[1] = keyOf(vb); keys[2] = keyOf(vc);
+    P[0] = vid(va); P[1] = vid(vb); P[2] = vid(vc); // batch vertices; same coordinates as a, b, c
+    let joined = false;
+    for (let e = 0; e < 3; e++) {
+      const u = P[e], v = P[(e + 1) % 3];
+      const other = edgeGet(keys[(e + 1) % 3], keys[e]);
+      if (other < 0 || batch.countAt(other) !== 3) continue;
+      const o = batch.anchorAt(other);
+      const opx = o >= 0 ? B[o * 3] : 0, opy = o >= 0 ? B[o * 3 + 1] : batch.topAt(other), opz = o >= 0 ? B[o * 3 + 2] : 0;
+      const opdx = o >= 0 ? slope[other * 2] : 0, opdz = o >= 0 ? slope[other * 2 + 1] : 0;
+      if (Math.abs(opdx - dx) > 1e-8 || Math.abs(opdz - dz) > 1e-8) continue;
+      let off = false;
+      for (let j = 0; j < 3 && !off; j++) {
+        const p = P[j] * 3;
+        off = Math.abs(opy + opdx * (B[p] - opx) + opdz * (B[p + 2] - opz) - B[p + 1]) > 1e-5;
+      }
+      if (off) continue;
+      const base = other * 4, vX = B[v * 3], vZ = B[v * 3 + 2];
+      let k = -1;
+      for (let j = 0; j < 3; j++) { const q = ids[base + j] * 3; if (B[q] === vX && B[q + 2] === vZ) { k = j; break; } }
+      const w = ids[base + (k + 2) % 3], q = P[(e + 2) % 3];
+      const uX = B[u * 3], uZ = B[u * 3 + 2];
+      const side = (p) => (vX - uX) * (B[p * 3 + 2] - uZ) - (vZ - uZ) * (B[p * 3] - uX);
+      if (side(w) * side(q) >= 0) continue;
+      const k0 = ids[base + k], k1 = ids[base + (k + 1) % 3];
+      const top = Math.max(batch.topAt(other), ay, by, cy);
+      ids[base] = k0; ids[base + 1] = q; ids[base + 2] = k1; ids[base + 3] = w;
+      // All three original vertices survive the merge; retain the original anchor, not a newly
+      // chosen coplanar point (anchored arithmetic and its rounding must remain identical).
+      const anchorSlot = o < 0 ? -1 : o === k0 ? 0 : o === k1 ? 2 : 3;
+      facet[other] = 1 | ((anchorSlot + 1) << 1);
+      batch.setTop(other, top);
+      joined = true;
+      break;
+    }
+    if (joined) continue;
+    // addTopRing's checks: finite top, and a finite plane when one is attached.
+    const y = Math.max(ay, by, cy), planar = Math.abs(dx) + Math.abs(dz) > 1e-12;
+    if (!finite(y) || (planar && ![ax, ay, az, dx, dz].every(finite))) continue;
+    const r = batch.length++;
+    ids[r * 4] = P[0]; ids[r * 4 + 1] = P[1]; ids[r * 4 + 2] = P[2];
+    facet[r] = planar ? 2 : 0; batch.setTop(r, y);
+    slope[r * 2] = planar ? dx : 0; slope[r * 2 + 1] = planar ? dz : 0;
+    for (let e = 0; e < 3; e++) edgeSet(keys[e], keys[(e + 1) % 3], r);
+    if (!registered) { tops.push(batch); registered = true; }
+  }
+  if (!run) batch.trim();
+  return batch;
+}
+
+N.RideGeometry = { addTop, addBox, addPrism, addRegionalBox, addRegionalPrism, addMesh, addTriangles, boxPoly, convexSlices, expandTops, PackedTops,
+  packedRun: () => new PackedRun() };
 })();

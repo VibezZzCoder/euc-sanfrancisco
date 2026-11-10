@@ -18,6 +18,41 @@
     }
   };
 
+  // Boot breadcrumb. iOS kills a tab that exceeds its memory limit without any script error, reloads it and
+  // eventually shows "A problem repeatedly occurred". sessionStorage survives those automatic reloads in the same
+  // tab, so every loading-stage change is recorded here and cleared on a clean exit (error panel, page hide).
+  // A crumb found at the next boot means the previous attempt died at that stage; it is shown under the bar.
+  // Riding keeps a crumb too, so a crash while playing is reported the same way.
+  const CRUMB_KEY = 'euc-sanfrancisco-boot-crumb';
+  const bootStarted = performance.now();
+  let previousCrumb = null, attempt = 1;
+  const readCrumb = () => { try { return JSON.parse(sessionStorage.getItem(CRUMB_KEY) || 'null'); } catch { return null; } };
+  const writeCrumb = (stage) => {
+    try {
+      sessionStorage.setItem(CRUMB_KEY, JSON.stringify({ stage: String(stage).slice(0, 160), attempt,
+        t: Math.round(performance.now() - bootStarted), backend: document.body.dataset.backend || '',
+        build: document.querySelector('meta[name="euc-build"]')?.content || '',
+        heapMB: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : undefined }));
+    } catch { /* Private mode or full storage: the breadcrumb is diagnostic only. */ }
+  };
+  const clearCrumb = () => { try { sessionStorage.removeItem(CRUMB_KEY); } catch { /* Diagnostic only. */ } };
+  previousCrumb = readCrumb();
+  if (previousCrumb && typeof previousCrumb.stage === 'string') {
+    attempt = (Number(previousCrumb.attempt) || 1) + 1;
+    const seconds = Math.max(0, Math.round((Number(previousCrumb.t) || 0) / 1000));
+    const where = previousCrumb.stage === 'riding' ? `while riding (${seconds} s after start)`
+      : `at: ${previousCrumb.stage.replace(/…$/, '')} (${seconds} s in${previousCrumb.backend ? `, ${previousCrumb.backend === 'webgl2' ? 'WebGL2' : 'WebGPU'}` : ''})`;
+    const build = typeof previousCrumb.build === 'string' && previousCrumb.build ? ` · build ${previousCrumb.build.slice(0, 40)}` : '';
+    const note = document.getElementById('loading-crumb');
+    if (note) { note.textContent = `Last attempt stopped ${where}${build}`; note.hidden = false; }
+    console.warn('[startup] previous attempt stopped without an error', previousCrumb);
+  }
+  writeCrumb(status.textContent);
+  new MutationObserver(() => { if (!failed && !ready) writeCrumb(status.textContent); })
+    .observe(status, { childList: true, characterData: true, subtree: true });
+  addEventListener('pagehide', clearCrumb);
+  addEventListener('pageshow', (event) => { if (event.persisted && ready) writeCrumb('riding'); });
+
   const removeListeners = () => {
     window.removeEventListener('error', onError);
     window.removeEventListener('unhandledrejection', onRejection);
@@ -36,6 +71,7 @@
   const fail = (error) => {
     if (failed) return false;
     failed = true;
+    clearCrumb(); // a visible error panel is not a crash
     removeListeners();
     // Drain once, including if cleanup reenters fail or registers another stop callback.
     const callbacks = stop ? [stop, ...stops] : [...stops];
@@ -86,6 +122,8 @@
     complete() {
       if (failed) return false;
       ready = true;
+      writeCrumb('riding');
+      setInterval(() => { if (!document.hidden) writeCrumb('riding'); }, 10000);
       removeListeners();
       return true;
     }

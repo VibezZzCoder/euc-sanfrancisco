@@ -31,6 +31,105 @@ const METER_NHOODS = new Set(['Financial District/South Beach', 'South of Market
 const POLE_H = 6.4; // signal mast
 const HEAD_Y = 5.42; // signal head centre above the mast's ground (the lens material's red / amber / green heights)
 
+// Furniture-only counterpart of RideGeometry.addMesh/convexSlices at 282e6f1.
+// Keep world-space transform, band/edge order, stable sort and hull tolerances exact.
+// The few shared furniture meshes reuse scratch, never registered tops/body rings.
+function streetContactsWorkspace() {
+  let pos = new Float64Array(0), points = new Float64Array(0);
+  let order = new Uint32Array(0), sorted = new Uint32Array(0), hull = new Uint32Array(0);
+  let busy = false;
+  return function register(geo, matrix, R, packed) {
+    // A nested construction (including an attribute/registry callback) owns fresh scratch.
+    if (busy) return streetContactsWorkspace()(geo, matrix, R, packed);
+    busy = true;
+    try {
+      const attr = geo.getAttribute('position'), m = matrix.elements;
+      if (!attr || !Number.isFinite(attr.count)) return;
+      if (pos.length !== attr.count * 3) pos = new Float64Array(attr.count * 3);
+      for (let i = 0; i < attr.count; i++) {
+        const x = attr.getX(i), y = attr.getY(i), z = attr.getZ(i), k = i * 3;
+        pos[k] = m[0] * x + m[4] * y + m[8] * z + m[12];
+        pos[k + 1] = m[1] * x + m[5] * y + m[9] * z + m[13];
+        pos[k + 2] = m[2] * x + m[6] * y + m[10] * z + m[14];
+      }
+      const determinant = m[0] * (m[5] * m[10] - m[9] * m[6]) - m[4] * (m[1] * m[10] - m[9] * m[2]) + m[8] * (m[1] * m[6] - m[5] * m[2]);
+      const idx = geo.index?.array || null, n = idx ? idx.length : pos.length / 3;
+      R.addTriangles(pos, idx, 'pavement', { layered: true, packed, flipWinding: determinant < 0 });
+      let lo = Infinity, hi = -Infinity;
+      for (let k = 1; k < pos.length; k += 3) { lo = Math.min(lo, pos[k]); hi = Math.max(hi, pos[k]); }
+      if (!(hi - lo > 1e-6)) return;
+      const count = Math.min(8, Math.max(1, Math.ceil((hi - lo) / 0.16)));
+      // At most one endpoint and two band crossings per directed triangle edge.
+      if (order.length < n * 3) {
+        points = new Float64Array(n * 6);
+        order = new Uint32Array(n * 3); sorted = new Uint32Array(n * 3); hull = new Uint32Array(n * 6);
+      }
+      let prev = null;
+      for (let j = 0; j < count; j++) {
+        const y0 = lo + (hi - lo) * j / count, y1 = lo + (hi - lo) * (j + 1) / count;
+        let length = 0;
+        for (let t = 0; t + 2 < n; t += 3) for (let k = 0; k < 3; k++) {
+          const ai = t + k, bi = t + (k + 1) % 3;
+          const a = (idx ? idx[ai] : ai) * 3, b = (idx ? idx[bi] : bi) * 3;
+          const ax = pos[a], ay = pos[a + 1], az = pos[a + 2], bx = pos[b], by = pos[b + 1], bz = pos[b + 2];
+          if (ay >= y0 && ay <= y1) { points[length * 2] = ax; points[length * 2 + 1] = az; length++; }
+          for (let band = 0; band < 2; band++) {
+            const y = band === 0 ? y0 : y1;
+            if ((ay < y && by > y) || (ay > y && by < y)) {
+              const f = (y - ay) / (by - ay);
+              points[length * 2] = ax + (bx - ax) * f; points[length * 2 + 1] = az + (bz - az) * f; length++;
+            }
+          }
+        }
+        for (let i = 0; i < length; i++) order[i] = i;
+        // Stable merge sort of the active prefix: no per-band sort scratch or point objects.
+        // Equal (incl. signed-zero) coordinates retain the original edge emission order.
+        for (let width = 1; width < length; width *= 2) {
+          for (let start = 0; start < length; start += width * 2) {
+            const mid = Math.min(start + width, length), end = Math.min(start + width * 2, length);
+            let a = start, b = mid;
+            for (let dst = start; dst < end; dst++) {
+              const ai = order[a] * 2, bi = order[b] * 2;
+              const cmp = points[ai] - points[bi] || points[ai + 1] - points[bi + 1];
+              sorted[dst] = a < mid && (b >= end || !(cmp > 0)) ? order[a++] : order[b++];
+            }
+          }
+          const swap = order; order = sorted; sorted = swap;
+        }
+        let h = 0;
+        for (let side = 0; side < 2; side++) {
+          const start = h;
+          for (let i = 0; i < length; i++) {
+            const p = order[side ? length - 1 - i : i], c = p * 2;
+            while (h - start > 1) {
+              const a = hull[h - 2] * 2, b = hull[h - 1] * 2;
+              const cross = (points[b] - points[a]) * (points[c + 1] - points[a + 1])
+                - (points[b + 1] - points[a + 1]) * (points[c] - points[a]);
+              if (!(cross <= 1e-10)) break;
+              h--;
+            }
+            hull[h++] = p;
+          }
+          if (h > start) h--; // half(pts).pop(), then half(reverse(pts)).pop()
+        }
+        if (h < 3) continue;
+        let same = prev && prev.outer.length === h;
+        for (let k = 0; same && k < h; k++) {
+          const p = hull[k] * 2;
+          same = Math.abs(points[p] - prev.outer[k].x) < 1e-8 && Math.abs(points[p + 1] - prev.outer[k].z) < 1e-8;
+        }
+        if (same) prev.maxY = y1;
+        else {
+          const outer = [];
+          for (let k = 0; k < h; k++) { const p = hull[k] * 2; outer.push({ x: points[p], z: points[p + 1] }); }
+          prev = { outer, minY: y0, maxY: y1, surface: 'pavement', support: false };
+          window.NYC.ride.prisms.push(prev);
+        }
+      }
+    } finally { busy = false; }
+  };
+}
+
 function buildSFStreetDetails(scene, network, buildingColliders = []) {
   const group = new THREE.Group();
   group.name = 'SFStreetDetails';
@@ -379,10 +478,13 @@ function buildSFStreetDetails(scene, network, buildingColliders = []) {
     new THREE.CylinderGeometry(0.06, 0.06, 0.42, 6).rotateZ(Math.PI / 2).translate(0, 0.08, 0)
   ].map((g) => g.toNonIndexed()));
 
+  const meshContacts = streetContactsWorkspace(); // released with this construction, not retained by the scene
   const add = (geo, mat, list, name, cast = true, attr = null) => {
     if (!list.length) return null;
     if (attr) geo.setAttribute(attr.name, new THREE.InstancedBufferAttribute(new Float32Array(attr.data), attr.size));
     const mesh = new THREE.InstancedMesh(geo, mat, list.length);
+    // Consecutive per-instance mesh tops share one packed registry batch (phone startup memory; same records).
+    const run = window.NYC.RideGeometry?.packedRun?.();
     list.forEach((m, i) => {
       mesh.setMatrixAt(i, m);
       const R = window.NYC.RideGeometry;
@@ -402,10 +504,10 @@ function buildSFStreetDetails(scene, network, buildingColliders = []) {
         R.addTop(poly, e[13] + e[5] / 2, 'pavement', { layered: true });
       } else {
         // Each individual head/hydrant/sign; never the furniture placement footprint.
-        R.addMesh({ geometry: geo, matrixWorld: m }, 'pavement', { layered: true,
-          sides: { sliceHeight: 0.16, maxSlices: 8 } });
+        meshContacts(geo, m, R, run);
       }
     });
+    run?.close();
     mesh.name = name;
     mesh.castShadow = cast;
     mesh.receiveShadow = true;

@@ -5,6 +5,7 @@ import * as THREE from 'three/webgpu';
 import { pass, mrt, output, normalView, positionView, metalness, roughness, vec2, vec4, smoothstep } from 'three/tsl';
 import { ssr } from 'three/addons/tsl/display/SSRNode.js';
 import { ClusteredLighting } from 'three/addons/lighting/ClusteredLighting.js';
+import { releaseStaticGeometryCopies, staticSfMeshes, installSfGeometryResidency } from './geometry-residency.js';
 import { ThirdPersonControllerManager } from './controllers.js';
 import { CameraSystem, CAMERA_PRESETS } from './cameras.js';
 import { TouchControls } from './touch-controls.js';
@@ -21,7 +22,7 @@ import { TitleScreen } from './title-screen.js';
 import { createViewPreferences } from './view-preferences.js';
 import { createPlayerState } from './player-state.js';
 import { createFrameRatePreference, createFramePacer, frameRateHealth } from './frame-rate.js';
-import { createRenderResolutionPreference, drawingBufferRatio } from './render-resolution.js';
+import { createRenderResolutionPreference, drawingBufferRatio, initialRenderPreferences } from './render-resolution.js';
 import { createGraphicsQualityPreference, createGraphicsQuality } from './graphics-quality.js';
 import { buildSFSkateparks, skateparkPaintIntervals } from './sf-skateparks.js';
 import { createSfNemesis } from './sf-nemesis.js';
@@ -101,8 +102,9 @@ export async function initApp(startup) {
   const renderer = new THREE.WebGPURenderer({ antialias: true, powerPreference: 'high-performance',
     reversedDepthBuffer: true, forceWebGL: params.get('webgpu') === '0' });
   renderer.outputColorSpace = THREE.SRGBColorSpace;
-  const resolutionPreference = createRenderResolutionPreference();
-  const graphicsPreference = createGraphicsQualityPreference();
+  const initialRendering = initialRenderPreferences();
+  const resolutionPreference = createRenderResolutionPreference(undefined, initialRendering.resolution);
+  const graphicsPreference = createGraphicsQualityPreference(undefined, initialRendering.quality);
   let renderScale = resolutionPreference.scale;
   let renderWidth = Math.max(1, container.clientWidth || innerWidth);
   let renderHeight = Math.max(1, container.clientHeight || innerHeight);
@@ -116,7 +118,33 @@ export async function initApp(startup) {
   let stopRuntime = async () => {};
   const ownedDisposals = [];
   const startupPreparation = new AbortController();
+  // Stricter WebGPU implementations (Firefox's wgpu/Naga) can reject a shader or pipeline that Chrome accepts.
+  // Three's automatic WebGL2 fallback only covers WebGPU failing to start, so a validation failure would otherwise
+  // be fatal although WebGL2 was never tried. Reload once into WebGL2 instead; ?webgpu=0 prevents any loop.
+  let webglFallbackStarted = false;
+  const fallbackToWebGL2 = (reason, detail) => {
+    if (webglFallbackStarted) return true;
+    if (params.get('webgpu') === '0' || !renderer.backend?.isWebGPUBackend) return false;
+    webglFallbackStarted = true;
+    console.warn(`[graphics] WebGPU ${reason}; reloading with WebGL2.`, detail);
+    const url = new URL(location.href);
+    url.searchParams.set('webgpu', '0'); url.searchParams.set('fallback', reason);
+    location.replace(url.href);
+    return true;
+  };
+  const consoleFunction = THREE.getConsoleFunction?.();
+  THREE.setConsoleFunction?.((type, message, ...rest) => {
+    if (type === 'error' && /pipeline creation failed/i.test(String(message))) fallbackToWebGL2('pipeline-validation', message);
+    if (consoleFunction) consoleFunction(type, message, ...rest); else console[type](message, ...rest);
+  });
+  ownedDisposals.push(() => THREE.setConsoleFunction?.(consoleFunction ?? null));
   const graphicsFailed = error => {
+    // Startup only for out-of-memory/device loss (a phone-sized GPU budget may still suit WebGL2); a validation
+    // error means this browser's WebGPU rejects our shaders, so WebGL2 is the better session at any time.
+    if (error?.api === 'WebGPU' && /validation/i.test(String(error.type))
+      && fallbackToWebGL2('shader-validation', error.message)) return;
+    if (error?.api === 'WebGPU' && !window.__NYC_APP?.ready && (/outofmemory/i.test(String(error.type)) || 'reason' in error)
+      && fallbackToWebGL2(/outofmemory/i.test(String(error.type)) ? 'out-of-memory' : 'device-lost', error.message)) return;
     startup.phase('graphics');
     startup.fail(error instanceof Error ? error : new Error(error?.message || 'The graphics device was lost.'));
   };
@@ -147,7 +175,13 @@ export async function initApp(startup) {
   await rendererInit;
   if (startup.failed) return;
   document.body.dataset.backend = renderer.backend.isWebGPUBackend ? 'webgpu' : 'webgl2';
-  document.getElementById('hud-backend').textContent = renderer.backend.isWebGPUBackend ? 'WebGPU' : 'WebGL2';
+  const backendName = renderer.backend.isWebGPUBackend ? 'WebGPU' : 'WebGL2';
+  document.getElementById('hud-backend').textContent = backendName;
+  // A device report should name the build it tested (a home-screen app can keep running an old cached build).
+  const buildId = document.querySelector('meta[name="euc-build"]')?.content || 'dev';
+  const automaticFallback = backendName === 'WebGL2' && params.get('fallback');
+  const buildNote = document.getElementById('menu-build');
+  if (buildNote) buildNote.textContent = `Build ${buildId} · ${backendName}${automaticFallback ? ' (automatic fallback)' : ''}`;
 
   startup.phase('city');
   await stage('Creating San Francisco sky and environment lighting…', 'lighting');
@@ -301,6 +335,19 @@ export async function initApp(startup) {
   if (renderer.backend.isWebGPUBackend) scene.traverse(object => {
     if (object.isInstancedMesh) object.instanceMatrix = new THREE.StorageInstancedBufferAttribute(object.instanceMatrix.array, 16);
   });
+  // Keep the accepted pre-compile upload/release boundary for existing static city meshes; postponing that large
+  // release until the first frame overlaps their CPU copies with shader compilation. New regional/proxy candidates
+  // release only after native consumption, including later LODs. Core terrain keeps its CPU chunk data.
+  const initialCopies = params.get('geocopies') === 'keep' ? { attributes: 0, bytes: 0 }
+    : releaseStaticGeometryCopies(renderer, staticSfMeshes(scene));
+  const geometryResidency = installSfGeometryResidency(renderer, scene, { search: params.toString() });
+  const geometryCopies = {
+    get attributes() { return initialCopies.attributes + geometryResidency.stats.attributes; },
+    get bytes() { return initialCopies.bytes + geometryResidency.stats.bytes; },
+    get rebuilds() { return geometryResidency.stats.rebuilds; },
+    get restoredBytes() { return geometryResidency.stats.restoredBytes; }
+  };
+  ownedDisposals.push(() => geometryResidency.dispose());
 
   await stage('Setting up San Francisco fog, reflections and bloom…', 'effects');
   const scenePass = pass(scene, cameraSystem.camera);
@@ -789,7 +836,7 @@ export async function initApp(startup) {
   // Existing inspection API: ordinary runtime objects, no alternate simulation or test-only control path.
   window.__NYC_APP = { renderer, scene, renderPipeline, postFX: { scenePass, ssrPass, graphics,
       get bloomPass() { return graphics.current?.grade.bloomPass; }, get colorGrade() { return graphics.current?.grade; } },
-    cityGrid, cityBlocks, quadtree: cityBlocks.quadtree, cullingStats, region, bridges, gradeSeparation, roadNetwork,
+    cityGrid, cityBlocks, quadtree: cityBlocks.quadtree, cullingStats, geometryCopies, region, bridges, gradeSeparation, roadNetwork,
     trafficSystem, highwayTraffic, transit, controllerManager, cameraSystem, touchControls, gamepadControls,
     lightingSystem, mapSystem, audioSystem, titleScreen, gameMenu, riderSelection, dynamicWorld,
     selectCamera, cycleCamera, selectTime, getFps: () => currentFps, ready: false,
@@ -838,7 +885,10 @@ export async function initApp(startup) {
         }
       };
       // Drain every native compiler even if a peer fails; no early attachment/geometry disposal.
-      const results = await Promise.allSettled(Array.from({ length: 16 }, worker));
+      // Touch devices (phones/tablets) run fewer concurrent native compiles: each in-flight pipeline holds compiler
+      // memory in the GPU process, and iOS terminates a tab that crosses its memory limit during startup.
+      const pool = matchMedia('(pointer: coarse)').matches ? 4 : 16;
+      const results = await Promise.allSettled(Array.from({ length: pool }, worker));
       const failure = results.find(result => result.status === 'rejected');
       if (failure) throw failure.reason;
       compiled = true;

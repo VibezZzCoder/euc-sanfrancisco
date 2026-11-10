@@ -4,12 +4,12 @@
 export const GRAPHICS_QUALITY_KEY = 'euc-sanfrancisco-graphics-quality';
 const choices = new Set(['high', 'medium', 'low']);
 
-export function createGraphicsQualityPreference(getStorage = () => globalThis.localStorage) {
-  let value = 'high';
+export function createGraphicsQualityPreference(getStorage = () => globalThis.localStorage, initial = 'high') {
+  let value = choices.has(initial) ? initial : 'high';
   try {
     const saved = getStorage().getItem(GRAPHICS_QUALITY_KEY);
     if (choices.has(saved)) value = saved;
-  } catch { /* Keep full quality when storage is unavailable. */ }
+  } catch { /* Keep this device's initial default when storage is unavailable. */ }
   return {
     get value() { return value; },
     set(next) {

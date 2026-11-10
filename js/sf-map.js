@@ -168,30 +168,35 @@ class TiledLayer {
   }
 }
 
-// Lazy, once-per-session 8 m relief raster. Both maps retain their existing static-layer caches.
+// Lazy, once-per-session 8 m relief raster; view-sized caches live only while needed.
 let RELIEF = null;
 function mapRelief() {
   if (RELIEF) return RELIEF;
   const g = window.NYC.DATA?.fullRegion?.city;
   if (!g) return null;
   const canvas = document.createElement('canvas'); canvas.width = g.w; canvas.height = g.h;
-  const ctx = canvas.getContext('2d'), image = ctx.createImageData(g.w, g.h);
+  // One reusable strip avoids a second full-city RGBA buffer on the first map
+  // open (the radar is hidden on narrow phones). Keep every native 8 m pixel.
+  const ctx = canvas.getContext('2d'), rows = Math.min(32, g.h), image = ctx.createImageData(g.w, rows);
   const water = window.NYC.Terrain.waterLevel;
-  for (let z = 1; z < g.h - 1; z++) for (let x = 1; x < g.w - 1; x++) {
-    const k = z * g.w + x, y = g.heights[k];
-    if (y <= water + 0.05) continue;
-    const dx = (g.heights[k+1] - g.heights[k-1]) / (2*g.step);
-    const dz = (g.heights[k+g.w] - g.heights[k-g.w]) / (2*g.step);
-    const light = Math.max(0, (-dx*0.5 + 0.7 - dz*0.5) / Math.hypot(dx, 1, dz));
-    const shade = 20 + light * 35;
-    // Keep Uint8Clamped conversion/rounding, without a temporary array per land pixel.
-    const p = k * 4;
-    image.data[p] = shade * 0.85;
-    image.data[p + 1] = shade;
-    image.data[p + 2] = shade * 1.07;
-    image.data[p + 3] = 255;
+  for (let start = 0; start < g.h; start += rows) {
+    image.data.fill(0);
+    for (let z = Math.max(1, start); z < Math.min(g.h - 1, start + rows); z++) for (let x = 1; x < g.w - 1; x++) {
+      const k = z * g.w + x, y = g.heights[k];
+      if (y <= water + 0.05) continue;
+      const dx = (g.heights[k+1] - g.heights[k-1]) / (2*g.step);
+      const dz = (g.heights[k+g.w] - g.heights[k-g.w]) / (2*g.step);
+      const light = Math.max(0, (-dx*0.5 + 0.7 - dz*0.5) / Math.hypot(dx, 1, dz));
+      const shade = 20 + light * 35;
+      // Keep Uint8Clamped conversion/rounding, without a temporary array per land pixel.
+      const p = ((z - start) * g.w + x) * 4;
+      image.data[p] = shade * 0.85;
+      image.data[p + 1] = shade;
+      image.data[p + 2] = shade * 1.07;
+      image.data[p + 3] = 255;
+    }
+    ctx.putImageData(image, 0, start, 0, 0, g.w, Math.min(rows, g.h - start));
   }
-  ctx.putImageData(image, 0, 0);
   return RELIEF = { canvas, x:g.x0, z:g.z0, width:(g.w-1)*g.step, height:(g.h-1)*g.step };
 }
 
@@ -308,6 +313,14 @@ for (const r of ROADS) {
   });
 }
 const ROAD_NAME_COUNT = new Set(ROAD_LABELS.map((l) => l.text)).size;
+
+// Shrink axes before growing them: portrait→landscape must not transiently
+// request a square bitmap with both long edges. Context state resets as before.
+function resizeMapBitmap(canvas, width, height) {
+  if (height < canvas.height) canvas.height = height;
+  if (width !== canvas.width) canvas.width = width;
+  if (height !== canvas.height) canvas.height = height;
+}
 
 /** A map viewport: centre (cx, cz) in world metres, s pixels per metre, w x h CSS pixels on a canvas of pixel ratio dpr */
 class MapView {
@@ -610,7 +623,7 @@ class NYCMapSystem {
     if (document.fonts) {
       document.fonts.ready.then(() => {
         this.textWidths.clear();
-        this.miniCache = null;
+        this.releaseMiniCache();
         this.fullStaticKey = '';
         if (this.isFullMapOpen) this.layoutStatus();
       });
@@ -1098,6 +1111,13 @@ class NYCMapSystem {
       this.modal.focus({ preventScroll: true });
     } else {
       this.modal.close?.();
+      // Hidden full-map bitmaps are not needed while riding. Keep geographic
+      // layers/view/search, and rebuild the view cache at the same DPR on open.
+      if (this.fullCanvas) resizeMapBitmap(this.fullCanvas, 1, 1);
+      if (this.fullStatic) resizeMapBitmap(this.fullStatic, 1, 1);
+      this.fullStaticKey = '';
+      this.fullStaticPlaced.length = 0;
+      this.fullStaticPins.length = 0;
       for (const { element, inert } of this.inertBackground) element.inert = inert;
       this.inertBackground.length = 0;
       const target = [...(pointer ? [document.getElementById('canvas-container')] : []), this.returnFocus,
@@ -1115,9 +1135,14 @@ class NYCMapSystem {
   /** Called by the host's coalesced CSS-size resize path; no 3D-resolution coupling. */
   resize() {
     this.cancelGestures();
-    this.miniCache = null;
+    this.releaseMiniCache();
     this.fullStaticKey = '';
     if (this.isFullMapOpen) { this.resizeFullCanvas(); this.renderFullMap(); }
+  }
+
+  releaseMiniCache() {
+    if (this.miniCache) resizeMapBitmap(this.miniCache.canvas, 1, 1);
+    this.miniCache = null;
   }
 
   resizeFullCanvas() {
@@ -1132,8 +1157,9 @@ class NYCMapSystem {
     if (this.fullDpr === dpr && this.fullCanvas.width === width && this.fullCanvas.height === height) return;
     this.resetGamepadInput();
     this.fullDpr = dpr;
-    this.fullCanvas.width = width;
-    this.fullCanvas.height = height;
+    if (this.fullStatic) resizeMapBitmap(this.fullStatic, 1, 1);
+    this.fullStaticKey = '';
+    resizeMapBitmap(this.fullCanvas, width, height);
   }
 
   layoutStatus() {
@@ -1348,7 +1374,11 @@ class NYCMapSystem {
   renderMinimap() {
     if (!this.miniCtx || !this.miniCanvas) return;
     // Nothing to draw while the radar is hidden (narrow screens, clean view)
-    if (!this.miniCanvas.offsetParent || document.body.classList.contains('hud-minimized')) return;
+    if (!this.miniCanvas.offsetParent || document.body.classList.contains('hud-minimized')) {
+      this.releaseMiniCache();
+      resizeMapBitmap(this.miniCanvas, 1, 1);
+      return;
+    }
     const ctx = this.miniCtx;
     // Radar size in CSS pixels, backed at the device pixel ratio (crisp street names on HiDPI screens)
     const w = this.miniCanvas.clientWidth;
@@ -1357,9 +1387,8 @@ class NYCMapSystem {
     const bw = Math.round(w * dpr);
     const bh = Math.round(h * dpr);
     if (this.miniCanvas.width !== bw || this.miniCanvas.height !== bh) {
-      this.miniCanvas.width = bw;
-      this.miniCanvas.height = bh;
-      this.miniCache = null;
+      this.releaseMiniCache();
+      resizeMapBitmap(this.miniCanvas, bw, bh);
     }
 
     const ent = this.controllerManager.getActiveEntity();
@@ -1533,8 +1562,7 @@ class NYCMapSystem {
       this.fullStaticKey = key;
       const sc = this.fullStatic;
       if (sc.width !== this.fullCanvas.width || sc.height !== this.fullCanvas.height) {
-        sc.width = this.fullCanvas.width;
-        sc.height = this.fullCanvas.height;
+        resizeMapBitmap(sc, this.fullCanvas.width, this.fullCanvas.height);
       }
       const staticBounds = this.renderFullMapStatic(sc.getContext('2d'), v);
       this.fullStaticPlaced = staticBounds?.placed || [];
