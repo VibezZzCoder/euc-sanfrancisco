@@ -177,8 +177,9 @@ body::after {
   inset: 0;
   z-index: 100;
   display: grid;
-  place-items: center;
-  overflow: hidden;
+  place-items: start center;
+  align-content: safe center;
+  overflow-y: auto;
   background:
     radial-gradient(70% 45% at 30% 78%, rgba(232, 112, 64, 0.38) 0%, rgba(232, 112, 64, 0) 70%),
     linear-gradient(180deg, #070a14 0%, #121a30 42%, #2a2c45 64%, #6b4a4e 80%, #a8664e 92%);
@@ -238,6 +239,17 @@ body::after {
   margin-bottom: 18vh;
   animation: rise-in 0.8s var(--ease-out) both;
 }
+
+.loader-return {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  margin-top: 12px;
+  color: var(--text);
+  text-decoration: underline;
+}
+.loader-return:focus-visible { outline: 2px solid var(--taxi); outline-offset: 2px; }
 
 .mta-bullet.loader-bullet {
   width: 56px;

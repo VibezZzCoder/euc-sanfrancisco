@@ -125,10 +125,8 @@ export class GameMenu {
     });
     find('menu-resume').addEventListener('click', () => this.close());
     find('menu-rider').addEventListener('click', () => this.openPicker());
-    find('menu-return').addEventListener('click', () => this.show('return', 'return-keep'));
-    find('return-keep').addEventListener('click', () => this.show('pause', 'menu-return'));
-    find('return-confirm').addEventListener('click', () => {
-      if (this.view === 'return' && !this.leaving) { this.leaving = true; this.onLeave(); }
+    find('menu-return').addEventListener('click', () => {
+      if (this.view === 'pause' && !this.leaving) { this.leaving = true; this.onLeave(); }
     });
     this.confirm.addEventListener('click', () => this.prepare());
     this.retry.addEventListener('click', () => this.retryPreparation());
@@ -151,7 +149,7 @@ export class GameMenu {
 
   openPicker(id = this.getRider()) {
     if (!this.isOpen && !this.canOpen('picker')) return;
-    if (this.view === 'return' || this.state === 'preparing') return;
+    if (this.state === 'preparing') return;
     if (this.view !== 'picker') this.parent = this.view;
     this.highlighted = this.riders.includes(id) ? id : this.getRider();
     this.state = 'idle';
@@ -184,7 +182,7 @@ export class GameMenu {
     this.blocked = new Set(this.keys); this.activation.clear(); this.resetPad();
     this.root.dataset.view = view;
     this.root.dataset.state = this.state;
-    this.root.setAttribute('aria-labelledby', view === 'picker' ? 'rider-heading' : view === 'return' ? 'return-heading' : 'game-menu-heading');
+    this.root.setAttribute('aria-labelledby', view === 'picker' ? 'rider-heading' : 'game-menu-heading');
     for (const section of this.root.querySelectorAll('[data-menu-view]')) section.hidden = section.dataset.menuView !== view;
     this.root.inert = false; // never include the modal itself in its background snapshot
     if (opening) this.root.showModal();
@@ -270,7 +268,6 @@ export class GameMenu {
   }
 
   cancel(cancelWork = true) {
-    if (this.view === 'return') { this.show('pause', 'menu-return'); return; }
     if (this.view === 'picker') {
       this.preparation = null;
       if (cancelWork) this.onCancel();
@@ -356,7 +353,7 @@ export class GameMenu {
     if (!previous) return;
     const edge = i => pressed[i] && !previous[i];
     if (edge(1) || edge(8)) { this.cancel(); return; }
-    if (this.view !== 'return' && (edge(4) || edge(5))) { this.browse(edge(5) ? 1 : -1); return; }
+    if (edge(4) || edge(5)) { this.browse(edge(5) ? 1 : -1); return; }
     if (this.view === 'picker' && Math.abs(axes[3]) > .15) {
       const detail = this.root.querySelector('.rider-detail');
       const seconds = Number.isFinite(dt) ? Math.max(0, Math.min(.05, dt)) : 0;

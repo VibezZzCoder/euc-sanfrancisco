@@ -4,6 +4,13 @@
   const status = document.getElementById('loading-status');
   const panel = document.getElementById('startup-error');
   const retry = document.getElementById('startup-retry');
+  for (const id of ['loading-main-menu', 'title-main-menu']) {
+    document.getElementById(id).addEventListener('click', event => {
+      if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      window.location.replace(event.currentTarget.href);
+    });
+  }
   let phase = 'download';
   let failed = false;
   let ready = false;

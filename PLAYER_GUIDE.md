@@ -125,7 +125,7 @@ level. The marker disappears when the chase ends; it is not a waypoint or an arr
 - Only committed rider/checked location preferences are eligible for SF-specific local saves after Ride. A failed
   rider change should preserve the committed identity. Retry/Cancel handles recoverable preparation failures;
   **Reload SF** is the recovery path for a failed native appearance import.
-- The title link or confirmed pause-menu return opens the **EUC Thrills main menu in the same tab**.
+- The loading, error and title links or pause-menu return open the **EUC Thrills main menu in the same tab**, replacing the city in that tab's history.
 
 ## Optional rendering diagnostics
 

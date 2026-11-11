@@ -577,7 +577,7 @@ export async function initApp(startup) {
       try { history.replaceState(history.state, '', url); } catch { /* Reload remains usable. */ }
       location.reload();
     },
-    onLeave: () => { savePlayerState(); pageAway = true; riderSelection.cancel(); syncLifecycle(); location.assign(MAIN_MENU_URL); }
+    onLeave: () => { savePlayerState(); pageAway = true; riderSelection.cancel(); syncLifecycle(); location.replace(MAIN_MENU_URL); }
   });
   titleScreen = new TitleScreen({ root: document.getElementById('title-overlay'), riders: PLAYABLE_RIDERS,
     onRider: id => gameMenu.openPicker(id), onBrowse: step => gameMenu.browse(step),
@@ -809,7 +809,10 @@ export async function initApp(startup) {
   const suspendPage = () => {
     savePlayerState(); riderSelection.cancel(); titleScreen.cancelPreparation(); syncLifecycle(); resetFrameClock();
   };
-  listen(document.getElementById('title-main-menu'), 'click', () => { pageAway = true; suspendPage(); });
+  listen(document.getElementById('title-main-menu'), 'click', event => {
+    if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    pageAway = true; suspendPage();
+  });
   listen(window, 'pagehide', () => { pageAway = true; suspendPage(); });
   listen(window, 'pageshow', () => { pageAway = false; gameMenu.leaving = false; gameMenu.reset(); syncLifecycle(); resetFrameClock(); scheduleViewportResize(); });
   listen(document, 'visibilitychange', () => { if (document.hidden) suspendPage(); else { syncLifecycle(); resetFrameClock(); } });
