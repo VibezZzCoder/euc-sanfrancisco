@@ -1,6 +1,29 @@
 <!DOCTYPE html>
 <html lang="en" prefix="og: https://ogp.me/ns#">
 <head>
+  <script>
+    // The page never scrolls. If iOS shifts it anyway (installed copies on
+    // iOS 26+, a closing keyboard), put it back, or taps land below what is
+    // drawn. A focused text field is left alone, because iOS scrolls to
+    // keep it above the keyboard.
+    (() => {
+      const editing = () => {
+        const el = document.activeElement;
+        return !!el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
+      };
+      const snap = () => {
+        if (!editing() && (window.scrollX !== 0 || window.scrollY !== 0)) window.scrollTo(0, 0);
+      };
+      for (const type of ['load', 'pageshow', 'resize', 'orientationchange', 'scroll']) {
+        window.addEventListener(type, snap, { passive: true });
+      }
+      window.addEventListener('focusout', () => setTimeout(snap, 0));
+      if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', snap);
+        window.visualViewport.addEventListener('scroll', snap);
+      }
+    })();
+  </script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>SF Spin-off: EUC Thrills</title>
@@ -11,7 +34,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-title" content="EUC SF" />
   <!-- Build id: "dev" in source; the public exporter stamps the release date (shown in the pause menu). -->
-  <meta name="euc-build" content="2026-11-11 0030Z" />
+  <meta name="euc-build" content="2026-11-11 0354Z" />
   <meta name="description" content="Ride an electric unicycle through San Francisco's hills, streets and marine fog. A free EUC Thrills city destination in Early Access." />
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="EUC Thrills" />
