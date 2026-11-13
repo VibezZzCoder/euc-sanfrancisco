@@ -12,6 +12,7 @@ import { RiderTricks } from '../js/euc-tricks.js';
 import * as nearSolids from '../js/euc/app/nearSolids.js';
 import * as recovery from '../js/euc-recovery.js';
 import { SfTerrainSampler } from '../js/sf-terrain-sampler.js';
+import { isCertifiedCompactSupport } from '../js/sf-support-store.js';
 import { createEucDynamicWorld } from '../js/euc-dynamic.js';
 import { createBookingDirector } from '../js/booking.js';
 import { createChaseDirector } from '../js/nemesis-chase.js';
@@ -41,8 +42,8 @@ const createEucEntity = new Function(...Object.keys(bindings), `${riderSource}\n
 const managerSource = read('controllers').replace(/^import[^;]+;\s*/gm, '')
   .replace('export { ThirdPersonControllerManager };', 'return ThirdPersonControllerManager;');
 const events = { addEventListener: noop, removeEventListener: noop };
-const Manager = new Function('createEucEntity', 'getCity', 'SfTerrainSampler', 'window', 'document', managerSource)
-  (createEucEntity, () => city, SfTerrainSampler, events, { ...events, hidden: false });
+const Manager = new Function('createEucEntity', 'getCity', 'SfTerrainSampler', 'isCertifiedCompactSupport', 'window', 'document', managerSource)
+  (createEucEntity, () => city, SfTerrainSampler, isCertifiedCompactSupport, events, { ...events, hidden: false });
 
 function sampler({ dx = 0, dz = 0, ...options } = {}) {
   return new SfTerrainSampler({ terrain: { originX: -512, originZ: -512, cell: 1024, w: 2, h: 2, waterLevel: 0,

@@ -8,6 +8,7 @@ import vm from 'node:vm';
 import * as THREE from '../vendor/three/build/three.webgpu.js';
 import * as TSL from '../vendor/three/build/three.tsl.js';
 import { SfTerrainSampler } from '../js/sf-terrain-sampler.js';
+import { isCertifiedCompactSupport } from '../js/sf-support-store.js';
 import * as physics from '../js/euc/simulation/EucController.js';
 import { NEUTRAL_ACTIONS } from '../js/euc/input/actions.js';
 import { SIMULATION, INPUT } from '../js/euc/data/tuning.js';
@@ -280,8 +281,8 @@ function managerFor(N, sampler, spawn, dynamicWorld) {
   const events = { addEventListener: noop, removeEventListener: noop };
   const managerSource = source('controllers').replace(/^import[^;]+;\s*/gm, '')
     .replace('export { ThirdPersonControllerManager };', 'return ThirdPersonControllerManager;');
-  const Manager = new Function('createEucEntity', 'getCity', 'SfTerrainSampler', 'window', 'document', managerSource)
-    (createEucEntity, () => N, SfTerrainSampler, events, { ...events, hidden: false });
+  const Manager = new Function('createEucEntity', 'getCity', 'SfTerrainSampler', 'isCertifiedCompactSupport', 'window', 'document', managerSource)
+    (createEucEntity, () => N, SfTerrainSampler, isCertifiedCompactSupport, events, { ...events, hidden: false });
   return new Manager(new THREE.Scene(), [], { sampler, spawn, dynamicWorld });
 }
 

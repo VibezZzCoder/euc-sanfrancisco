@@ -5,7 +5,7 @@
 import { PlanTerrainSampler } from './euc/simulation/planSampler.js';
 import { findPlacementTarget, findRecoveryTarget } from './euc-recovery.js';
 import { lightMaskValue } from './sf-light-data.js';
-import { SfSupportStore } from './sf-support-store.js';
+import { SfSupportStore, isCertifiedCompactSupport } from './sf-support-store.js';
 import { SfStaticBoxStore, SfRegionalPrismStore, prepareStaticBox as prepareBox } from './sf-static-body-store.js';
 import { WHEEL, TERRAIN } from './euc/data/tuning.js';
 
@@ -592,7 +592,7 @@ class ConvexContact {
 export class SfTerrainSampler {
   constructor({ city = globalThis.window?.NYC, colliders = [], ride = city?.ride, terrain = city?.Terrain,
     data = city?.DATA, grade = city?.GradeSeparation, boxes = [], tops = [], prisms = [],
-    waterAt = null, offLimitsAt = null, supportReach = REACH, topViewCacheSize = 256 } = {}) {
+    waterAt = null, offLimitsAt = null, supportReach = REACH, topViewCacheSize = 256 } = {}, compactSupport = null) {
     // Retain only dependencies, never a city -> ride -> raw support registry alias.
     this.terrain = terrain; this.data = data; this.grade = grade;
     this.waterAt = waterAt; this.offLimitsAt = offLimitsAt; this.supportReach = supportReach;
@@ -626,7 +626,13 @@ export class SfTerrainSampler {
     this.boxIndex = new SparseIndex(this.boxStore, 8);
     this.prismIndex = new SparseIndex(this.prisms, 16);
     this._nextContactId = this.boxRecords.length + this.prisms.length;
-    this.topStore = new SfSupportStore([ride?.tops ?? EMPTY, tops, gradeTops(grade)], { cacheSize: topViewCacheSize });
+    const rideSupport = ride?.tops ?? EMPTY, gradeSupport = gradeTops(grade);
+    // Only the host's native Light registry and the sampler's own empty lists
+    // qualify. Explicit caller lists and legacy grade floors remain raw.
+    const compactCertificate = isCertifiedCompactSupport(compactSupport) && ride === compactSupport.registry && tops === compactSupport.emptyTops && !gradeSupport.length
+      ? compactSupport : null;
+    this.topStore = new SfSupportStore([rideSupport, tops, gradeSupport], { cacheSize: topViewCacheSize },
+      compactCertificate, compactCertificate ? gradeSupport : null);
     this.topIndex = new SparseIndex(this.topStore, 8);
     const store = this.topStore;
     this.capabilityIndex = new SparseIndex(new CapabilityBounds(store), 8);

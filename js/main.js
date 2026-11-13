@@ -195,6 +195,8 @@ export async function initApp(startup) {
   const buildNote = document.getElementById('menu-build');
   if (buildNote) buildNote.textContent = `Build ${buildId} · ${backendName}${backendDetail ? ` (${backendDetail})` : ''}${worldTier.light ? ' · Light world' : ''}`;
 
+  const compactSupport = worldTier.light ? city.RideGeometry.beginCompactSupport() : null;
+  if (compactSupport) startup.onStop(() => compactSupport.release());
   startup.phase('city');
   await stage('Creating San Francisco sky and environment lighting…', 'lighting');
   const scene = new THREE.Scene();
@@ -282,7 +284,7 @@ export async function initApp(startup) {
   const dynamicWorld = createEucDynamicWorld(combineBodySources(trafficSystem, highwayTraffic, transit));
   const controllerManager = new ThirdPersonControllerManager(scene,
     [...allColliders.filter(c => !c.rideIgnore).flatMap(c => c.parts || [c]), ...gradeSeparation.colliders],
-    { rider, appearance, dynamicWorld, inputEnabled: false });
+    { rider, appearance, dynamicWorld, inputEnabled: false }, compactSupport);
   // Static construction is finished. The sampler owns exact packed support and
   // shared bodies; retire the build registry only after full manager creation.
   controllerManager.eucSampler.releaseConstructionRegistry(city.ride);

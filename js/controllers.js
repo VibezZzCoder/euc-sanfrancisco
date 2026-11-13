@@ -1,5 +1,6 @@
 import { getCity, getSfSpawn, isTypingInField } from './city-api.js';
 import { SfTerrainSampler } from './sf-terrain-sampler.js';
+import { isCertifiedCompactSupport } from './sf-support-store.js';
 import { createEucEntity } from './euc-rider.js';
 
 // js/controllers.js — the player: one electric unicycle (EUC Thrills' controller and rider, see euc-rider.js).
@@ -26,13 +27,16 @@ function interactiveTarget(target) {
 class ThirdPersonControllerManager {
   // Await prepareEucRider(rider) before construction, and pass the returned appearance here.
   constructor(scene, colliders = [], { ride = getCity().ride, rider = 'cool-rider', appearance, dynamicWorld,
-    inputEnabled = true, sampler, spawn } = {}) {
+    inputEnabled = true, sampler, spawn } = {}, compactSupport = null) {
     this.scene = scene;
     this.colliders = colliders;
     this._colliderCells = null; // built on first use, see nearColliders()
     this.activeMode = 'euc'; // the only mode; kept as a field for the systems that read it
     this.inputEnabled = !!inputEnabled;
-    this.eucSampler = sampler ?? new SfTerrainSampler({ city: getCity(), colliders, ride });
+    const certificate = isCertifiedCompactSupport(compactSupport) ? compactSupport : null;
+    try { this.eucSampler = sampler ?? new SfTerrainSampler({ city: getCity(), colliders, ride,
+      ...(certificate ? { tops: certificate.emptyTops } : {}) }, certificate); }
+    finally { certificate?.release(); }
     spawn ??= getSfSpawn();
 
     this.keys = {

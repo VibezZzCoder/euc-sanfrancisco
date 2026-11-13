@@ -2,7 +2,16 @@
 // Construction-time, world-space EUC contacts. MIT; city derivations retain ../NOTICE.md.
 // No Three dependency, visibility queries, mesh retention or global spatial grid here.
 const N = window.NYC;
-N.ride = N.ride || { tops: [], solids: [], prisms: [] };
+let ownedRide = null;
+N.ride = N.ride || (ownedRide = { tops: [], solids: [], prisms: [] });
+// Opt-in only: the host starts this before building a Light world. Unknown or
+// caller-owned records are never certified, and the weak tables are discarded
+// immediately after the authoritative sampler is built.
+let supportCertificate = null;
+const compactSupportTokens = new WeakSet();
+const weakSetHas = Function.call.bind(WeakSet.prototype.has), weakSetAdd = Function.call.bind(WeakSet.prototype.add),
+  weakSetDelete = Function.call.bind(WeakSet.prototype.delete), weakMapGet = Function.call.bind(WeakMap.prototype.get),
+  weakMapSet = Function.call.bind(WeakMap.prototype.set);
 const finite = Number.isFinite;
 const xyz = (p) => ({ x: p.x, y: p.y, z: p.z });
 const ring = (p) => p.map((v) => ({ x: v.x ?? v[0], z: v.z ?? v[1] }));
@@ -30,6 +39,7 @@ function addTopRing(p, top, surface = 'pavement', options = {}) {
   for (const k of ['replacesTerrain', 'minReferenceY', 'maxReferenceY']) if (options[k] !== undefined) r[k] = options[k];
   if (options.capabilities) r.capabilities = { ...options.capabilities, transition: transitionOf(options.capabilities, r.plane) };
   if (options.source !== undefined) r.source = options.source;
+  if (supportCertificate) weakSetAdd(supportCertificate.records, r);
   N.ride.tops.push(r);
   return r;
 }
@@ -347,10 +357,93 @@ class PackedRun {
     const b = this.batch;
     if (b && tops[tops.length - 1] === b && b.pos instanceof PosArray && sameTemplate(b.template, template)) return b;
     if (b) b.trim();
-    return (this.batch = new PackedTops(PosArray, template));
+    return (this.batch = rememberPacked(new PackedTops(PosArray, template)));
   }
   close() { this.batch?.trim(); this.batch = null; this.closed = true; }
 }
+const packedMethods = { countAt: PackedTops.prototype.countAt, anchorAt: PackedTops.prototype.anchorAt,
+  topAt: PackedTops.prototype.topAt };
+const typedPrototype = Object.getPrototypeOf(Uint8Array.prototype);
+const typedGetters = Object.fromEntries(['length', 'buffer', 'byteLength', 'byteOffset']
+  .map(key => [key, Object.getOwnPropertyDescriptor(typedPrototype, key).get]));
+const resizableGetter = Object.getOwnPropertyDescriptor(ArrayBuffer.prototype, 'resizable')?.get;
+function rememberPacked(batch) {
+  if (supportCertificate) weakMapSet(supportCertificate.batches, batch, { template: batch.template, top: batch.top });
+  return batch;
+}
+
+// Inspect only objects made here; a foreign Proxy or getter is never probed for
+// certification. Ordinary records keep their complete existing sparse extras.
+function plainDataProperties(object) {
+  if (Object.getPrototypeOf(object) !== Object.prototype) return false;
+  for (const key of Reflect.ownKeys(object)) {
+    if (!('value' in Object.getOwnPropertyDescriptor(object, key))) return false;
+  }
+  return true;
+}
+function certifiedPacked(batch, certificate) {
+  const { template, top } = certificate;
+  if (Object.getPrototypeOf(batch) !== PackedTops.prototype) return false;
+  for (const [key, method] of Object.entries(packedMethods)) {
+    if (Object.getOwnPropertyDescriptor(PackedTops.prototype, key)?.value !== method || Object.hasOwn(batch, key)) return false;
+  }
+  const own = key => Object.getOwnPropertyDescriptor(batch, key);
+  for (const key of ['packedTops', 'template', 'length', 'vertices', 'pos', 'facet', 'ids', 'slope', 'top', 'topOverrides']) {
+    if (!own(key) || !('value' in own(key))) return false;
+  }
+  if (Reflect.ownKeys(batch).length !== 10 || batch.packedTops !== true || batch.template !== template || batch.top !== top
+    || !plainDataProperties(template)) return false;
+  const keys = Reflect.ownKeys(template);
+  if (keys.some(k => !['surface', 'layered', 'shore', 'replacesTerrain'].includes(k))
+    || !Object.hasOwn(template, 'surface') || typeof template.surface !== 'string'
+    || !Object.hasOwn(template, 'layered') || typeof template.layered !== 'boolean'
+    || !Object.hasOwn(template, 'shore') || typeof template.shore !== 'boolean'
+    || (Object.hasOwn(template, 'replacesTerrain') && typeof template.replacesTerrain !== 'boolean')
+    || keys.some(k => !Object.getOwnPropertyDescriptor(template, k).enumerable)) return false;
+  const n = batch.length, vertices = batch.vertices, { pos, facet, ids, slope } = batch;
+  const typed = (value, types) => {
+    if (!ArrayBuffer.isView(value) || !types.some(type => Object.getPrototypeOf(value) === type.prototype)) return false;
+    const prototype = Object.getPrototypeOf(value);
+    for (const key of Object.keys(typedGetters)) {
+      if (Object.hasOwn(value, key) || Object.hasOwn(prototype, key)
+        || Object.getOwnPropertyDescriptor(typedPrototype, key)?.get !== typedGetters[key]) return false;
+    }
+    const buffer = typedGetters.buffer.call(value);
+    return Object.getPrototypeOf(buffer) === ArrayBuffer.prototype && !Object.hasOwn(buffer, 'resizable')
+      && Object.getOwnPropertyDescriptor(ArrayBuffer.prototype, 'resizable')?.get === resizableGetter
+      && !(resizableGetter && resizableGetter.call(buffer));
+  };
+  return Number.isSafeInteger(n) && n > 0 && Number.isSafeInteger(vertices) && vertices >= 0
+    && typed(pos, [Float32Array, Float64Array]) && typed(facet, [Uint8Array])
+    && typed(ids, [Uint16Array, Uint32Array]) && typed(slope, [Float64Array])
+    && typedGetters.length.call(pos) >= vertices * 3 && typedGetters.length.call(facet) >= n
+    && typedGetters.length.call(ids) >= n * 4 && typedGetters.length.call(slope) >= n * 2
+    && batch.topOverrides === null;
+}
+function beginCompactSupport() {
+  if (!ownedRide || N.ride !== ownedRide || supportCertificate) return null;
+  const state = { records: new WeakSet(), batches: new WeakMap() };
+  supportCertificate = state;
+  const token = Object.freeze({
+    registry: ownedRide,
+    tops: ownedRide.tops,
+    emptyTops: Object.freeze([]),
+    owns(entry) {
+      if (!state.records) return null;
+      if (weakSetHas(state.records, entry)) return plainDataProperties(entry) ? 'ordinary' : null;
+      const batch = weakMapGet(state.batches, entry);
+      return batch && certifiedPacked(entry, batch) ? 'packed' : null;
+    },
+    release() {
+      if (supportCertificate === state) supportCertificate = null;
+      state.records = null; state.batches = null;
+      weakSetDelete(compactSupportTokens, token);
+    }
+  });
+  weakSetAdd(compactSupportTokens, token);
+  return token;
+}
+function isCompactSupportToken(token) { return weakSetHas(compactSupportTokens, token); }
 const sameTemplate = (a, b) => a.surface === b.surface && a.layered === b.layered && a.shore === b.shore
   && ('replacesTerrain' in a) === ('replacesTerrain' in b) && a.replacesTerrain === b.replacesTerrain;
 // Registry entries with packed batches expanded to plain records (tests, diagnostics; allocates every record).
@@ -368,7 +461,7 @@ function addTrianglesPacked(pos, idx, surface, options) {
   const template = { surface, layered: !!options.layered, shore: !!options.shore };
   if (options.replacesTerrain !== undefined) template.replacesTerrain = options.replacesTerrain;
   const tops = N.ride.tops, run = options.packed === true ? null : options.packed;
-  const batch = run ? run.batchFor(tops, pos.constructor, template) : new PackedTops(pos.constructor, template);
+  const batch = run ? run.batchFor(tops, pos.constructor, template) : rememberPacked(new PackedTops(pos.constructor, template));
   let registered = tops[tops.length - 1] === batch;
   const length = idx ? idx.length : pos.length / 3;
   const vertexCount = Math.ceil(pos.length / 3);
@@ -484,6 +577,6 @@ function addTrianglesPacked(pos, idx, surface, options) {
   return batch;
 }
 
-N.RideGeometry = { addTop, addBox, addPrism, addRegionalBox, addRegionalPrism, addMesh, addTriangles, boxPoly, convexSlices, expandTops, PackedTops,
+N.RideGeometry = { addTop, addBox, addPrism, addRegionalBox, addRegionalPrism, addMesh, addTriangles, boxPoly, convexSlices, expandTops, PackedTops, beginCompactSupport, isCompactSupportToken,
   packedRun: () => new PackedRun() };
 })();
