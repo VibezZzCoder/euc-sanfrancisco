@@ -5,8 +5,9 @@
 > [Known rough spots](#known-rough-spots). Feedback is very welcome.
 > **Phone-ready Light world:** phones start on WebGL2 with a terrain-only **Light world**. The core is retained;
 > outer terrain and destination ground replace the previous void, while regional buildings, trees and boats remain
-> omitted. The owner reports a playable, approximately five-minute iPhone Air Safari session with no reboots;
-> longer sessions and other phones still need testing.
+> omitted. The owner completed a **15-minute iOS Home Screen playtest** of the compact-support Light build,
+> with the full playtest checklist completed, no reloads, and the session ended voluntarily. Longer sessions and
+> other phones still need testing.
 
 **[▶ Play now](https://vibezzzcoder.github.io/euc-sanfrancisco/)**
 
@@ -60,7 +61,8 @@ acceleration. Phones start on **WebGL2**; desktops and tablets retain WebGPU-fir
 
 Covered WebGPU validation failures, and startup device-loss/out-of-memory failures, can still trigger one reload
 into WebGL2 (`automatic fallback`). A session already on WebGL2 does not repeat that reload. Remove `webgpu` and
-`fallback` parameters to return to the device default. The successful short Safari playtest is not universal stability acceptance.
+`fallback` parameters to return to the device default. The successful Home Screen playtest is evidence for that session,
+not a guarantee for every device or rendering backend.
 World choice is independent: `?tier=light` or `?tier=full` overrides the boot choice on any device. Without an explicit
 tier, `?region=1` still opts a phone back into Full world. An explicit tier wins a conflicting `region` option.
 `?tier=full&region=0` retains the old scenery-off diagnostic mode and its downloads. Remove `tier` and `region` to
@@ -73,6 +75,10 @@ is a safe spot to stand.
 
 The title link and the pause menu's confirmed return action go back to the
 [EUC Thrills main menu](https://vibezzzcoder.github.io/EUC-thrills/) in the same tab.
+
+**On iPhone:** open the play link in Safari, then use **Share → Add to Home Screen** to create a separate SF web app.
+A Home Screen app created from a local preview address still needs that computer/server; it is separate from the live
+GitHub Pages installation.
 
 ### Controls
 
@@ -111,10 +117,19 @@ intervals, and resets when riding is suspended. These intervals are not GPU timi
 Recent rendering updates reduce offscreen tree/paint submissions, tighten shadow-caster culling and spread the first
 build of distant Golden Gate / Twin Peaks scenery across frames; distant scenery may appear a moment later.
 The owner previously reported a clearly better framerate playing at night with a PS5 controller.
-Earlier updates reduced retained support/collision and graphics-resource memory, narrowed map allocation peaks,
-and addressed a Firefox shader-validation incompatibility. This update adds the terrain-only phone world, checked
-outer-edge returns and map coverage guidance. Startup memory peaks remain substantial; lower retained memory is not
-a universal speedup.
+Earlier updates reduced retained support/collision and graphics-resource memory, narrowed map allocations,
+and addressed a Firefox shader-validation incompatibility. The terrain-only Light world includes checked outer-edge
+returns and map coverage guidance. The compact-support update stores the same riding-surface addresses more tightly:
+matched Chromium phone emulation measured about **27 MiB less retained JavaScript plus backing storage** at the title
+and first map. This is not an iPhone memory measurement. Some synthetic support-query batches cost slightly more;
+startup memory peaks remain substantial and lower retained memory is not a universal speedup.
+
+The porting follow-up corrects destination location labels, removes invented opposite-shore night reflections and
+preserves the Light horizon's true outer endpoints. Complex intersections now give each approach group its own full
+signal phase, shared by vehicle behavior, pedestrian WALK timing, visible lights and horn eligibility. Ordinary
+two-phase timing stays the same; complex junctions can have longer red waits. Overlapping signal heads are separated
+with matching physical geometry. Terrain/geometry/texture budgets are unchanged; this is not a measured guarantee that
+every browser-memory category or loading peak is lower.
 
 ## Officer Dorkins
 
@@ -129,8 +144,9 @@ on another level; it disappears when the chase ends and is not a waypoint or arr
 [player guide](PLAYER_GUIDE.md#officer-dorkins-experimental) for booking and controller details.
 
 The chase and booking are experimental. The owner has playtested on Ubuntu Chrome with Xbox and PS5 controllers
-(Seal on a Wheel at blue hour; Wyldist at night). Booking pauses correctly when the window loses focus. Broader
-routes, devices, long sessions and booking fallback transitions still need review.
+(Seal on a Wheel at blue hour; Wyldist at night), and completed the iOS Home Screen checklist including capture/release.
+Booking pauses correctly when the window loses focus. Broader routes, devices, longer sessions and booking fallback
+transitions still need review.
 
 ## Skateparks
 
@@ -160,7 +176,7 @@ This is an early release. Known issues include:
 
 - **Tunnel approaches:** some approach ramps sit awkwardly behind the newer tunnel portal walls.
 - **Bay Bridge:** upper-west traffic may extend beyond the visible deck.
-- **Recent local repairs:** the I-80 W off-ramp near Clementina, a terrain step near Vermont St, and Lombard's
+- **Earlier geometry repairs:** the I-80 W off-ramp near Clementina, a terrain step near Vermont St, and Lombard's
   conspicuous planting boxes have been improved. Selected riding segments were tested on both graphics backends;
   complete routes, other boundary locations and physical devices still need broader review.
 - **Outer neighbourhoods** look bland and low in detail.
@@ -168,10 +184,11 @@ This is an early release. Known issues include:
 - **Alcatraz and Yerba Buena Island** are undercooked.
 - **Golden Gate Park** has sparse trees.
 - **Long first load:** around 30 seconds on a desktop, longer on slower devices. Brief hosting errors while
-  downloading city data are now retried automatically.
+  downloading city data are retried automatically. Other assets can still receive transient hosting errors;
+  a reload may be needed. One module returned HTTP503 during the latest live check; an unchanged retry passed.
 - **Dorkins:** chase, booking and map-marker behavior are still being tested across routes and devices; the map
   cannot show whether the officer is on a different elevation.
-- **Earlier iPhone reloads — seen by the owner on a device:** live HTTPS build `2026-11-10 0528Z` on the iPhone Air
+- **Historical iPhone reloads, before Light world:** live HTTPS build `2026-11-10 0528Z` on the iPhone Air
   repeatedly returned to the first loading screen in Home Screen WebGPU sessions, in portrait and landscape.
   Breadcrumbs reported 67, 61 and 34 seconds after startup in the old broad “riding” state, and 17 seconds at scene
   visibility/shadows; loading time is included. WebGL2 in a Safari tab lasted clearly longer but was not reported stable.
@@ -181,19 +198,28 @@ This is an early release. Known issues include:
 - **Phone region-off mode — seen by the owner on a device:** on the same build, WebGL2 plus `?region=0`, Home Screen,
   Medium/75 ran a full session without reload: rider changes, rotation, a Dorkins escape, the map and several location
   changes. WebGPU with the region off lasted longer than with it on but eventually reloaded during rotation.
-- **Light world — implemented, with scoped Chromium checks:** a separate terrain-only package avoids
+- **Light world — automated checks and a successful 15-minute physical session:** a separate terrain-only package avoids
   unused regional downloads, retaining the original outer city heights/ground classes and detailed core. A cheap
   horizon and near-rider terrain replace the void around destinations. Regional buildings, trees and boats are still
   omitted, so the outer landscape is bare. The map marks distant scenery-only coverage, unsupported arrivals remain
   checked, and leaving supported terrain makes a checked return to the last verified safe point with a notice.
-  Desktop and tablet defaults retain Full world. The owner reports a playable approximately five-minute iPhone Air
-  Safari session with no reboots, covering three riders, repeated rotations, map teleports/Golden Gate riding checks,
-  cop capture/release and UN skatepark. They stopped voluntarily while multitasking. This is short-session physical
-  evidence; ten-minute endurance, detailed outer visuals, full routes and other devices remain unverified.
+  Desktop and tablet defaults retain Full world. The earlier compact-support test lasted **15 minutes** in a separate iOS Home
+  Screen web app created from the local preview. They reported completing the full ten-minute checklist—rider changes,
+  map use and rotations, park riding, destination visits, capture/release and crash recovery—with everything working,
+  no reloads, and a voluntary close. That tested compact-support runtime is published in **build `2026-11-13 0024Z`**.
+  The test used local HTTP/WebGL2; physical live-HTTPS/WebGPU, longer endurance, complete routes and other devices remain
+  separate checks. No device-memory measurement or controlled before/after stability comparison was made.
+  The owner subsequently retested the porting-follow-up preview with rotations, teleporting and rider switching and
+  reported no reboots, then approved publication. That follow-up session's duration was not specified.
+- **iOS viewport recovery:** during that session, one corner-zoom/page-shift incident immediately corrected itself.
+  This supports the existing recovery fix; it does not mean the initial jump can never occur. Report persistent offsets.
 - **Other phones, tablets and foldables:** emulated layouts do not establish physical-device stability. Android,
   foldable transitions and sustained-play/thermal behavior still need review. Lower graphics settings are not a guaranteed remedy.
-- **macOS Firefox:** the shader change and fallback have Linux/compiler evidence; current macOS behavior still needs
-  confirmation. Report the actual backend and any fallback URL, rather than assuming WebGPU succeeded.
+- **Firefox:** prior Linux WebGL2 checks pass. Experimental Linux Firefox WebGPU can run out of memory and stall at the
+  first frame after falling back to WebGL2. Fresh Firefox testing was explicitly waived for the compact-support and
+  porting-follow-up releases;
+  current macOS behavior still needs confirmation. Report the actual backend and fallback URL rather than assuming
+  WebGPU succeeded.
 
 ## Feedback
 

@@ -2,6 +2,7 @@
 // Builder and numerical-fixture patterns adapted from NYC tests/oct29-materials.test.mjs @ 9c4cfc9 (cf56976).
 const assert = require('node:assert/strict');
 const { createHash } = require('node:crypto');
+const { execFileSync } = require('node:child_process');
 const { readFileSync } = require('node:fs');
 const { join } = require('node:path');
 const { pathToFileURL } = require('node:url');
@@ -13,6 +14,8 @@ const root = join(__dirname, '..');
 const source = readFileSync(join(root, 'js/tsl-materials.js'), 'utf8');
 // Verbatim SF 09977d521fb6c9083448fe4b91cdebf9444fa2df, js/tsl-materials.js lines 2820–2903.
 const baseline = readFileSync(join(__dirname, 'fixtures/sf-water-emissive-09977d5.txt'), 'utf8');
+// Frozen legacy geography is intentionally wrong for SF; keep it as a regression control, never a runtime fallback.
+const legacyGeography = readFileSync(join(__dirname, 'fixtures/sf-water-geography-2a4cf85.txt'), 'utf8');
 const between = (src, start, end) => {
   const a = src.indexOf(start), b = src.indexOf(end, a + start.length);
   assert.ok(a >= 0 && b > a, `source region: ${start} … ${end}`);
@@ -20,7 +23,8 @@ const between = (src, start, end) => {
 };
 const water = between(source, 'function createWaterMaterial()', '/**');
 const emission = between(water, '  const night = smoothstep(0.55, 1.35, cityUniforms.uInteriorGlow);', '\n\n  return mat;');
-const oldWater = water.replace(emission, baseline.trimEnd());
+const prefix = water.slice(0, water.indexOf('  // Night:'));
+const oldWater = prefix + legacyGeography + baseline + '\n  return mat;\n}\n';
 const helpers = between(source, 'const hash2D = Fn(', '/**') +
   between(source, 'const filteredPulse = Fn(', '/**') + between(source, 'const waterBoxCover = Fn(', '/**');
 // Small nonrectangular SF-schema geography: empty NYC tables, zero streetZ and CP bounds, actual SF water/tower hooks.
@@ -32,22 +36,28 @@ const config = {
   CENTRAL_PARK_BOUNDS: { minX: 0, maxX: 0, minZ: 0, maxZ: 0 }, streetZ: () => 0,
   GEO: { bridges: { goldenGate: { towers: [{ c: [-1500, -2200] }, { c: [-1200, -2400] }] } } }
 };
-let THREE, TSL, materials;
+let THREE, TSL, materials, realConfig;
 test.before(async () => {
   THREE = await import(pathToFileURL(join(root, 'vendor/three/build/three.webgpu.js')).href);
   TSL = await import(pathToFileURL(join(root, 'vendor/three/build/three.tsl.js')).href);
-  const NYC = { ...config, THREE, TSL };
+  const geography = { window: { NYC: {} } };
+  vm.runInNewContext(readFileSync(join(root, 'js/sf-geodata.js'), 'utf8'), geography);
+  const cityConfig = readFileSync(join(root, 'js/city-config.js'), 'utf8');
+  realConfig = vm.runInNewContext(between(cityConfig, 'const GEO =', 'function ordinal') +
+    between(cityConfig, 'const LAND_RINGS =', 'const CUT_Z =') +
+    '\n({ ISLAND_BOUNDS, getIslandBoundsAtZ, GEO });', geography);
+  const NYC = { ...config, ...realConfig, THREE, TSL };
   vm.runInNewContext(source, { window: { NYC } });
   materials = NYC;
 });
 
 // No renderer/context/device is created. Keep this helper restricted to shader-source generation.
-function build(material, backend) {
+function build(material, backend, stats = {}) {
   const geometry = new THREE.BoxGeometry();
   const renderer = {
     contextNode: TSL.context({}), library: new THREE.StandardNodeLibrary(),
     coordinateSystem: backend === 'wgsl' ? THREE.WebGPUCoordinateSystem : THREE.WebGLCoordinateSystem,
-    backend: { isWebGPUBackend: backend === 'wgsl', isWebGLBackend: backend === 'glsl',
+    backend: { isWebGPUBackend: backend === 'wgsl', isWebGLBackend: backend === 'glsl', has: () => false,
       capabilities: { getUniformBufferLimit: () => 65536 }, utils: { getTextureSampleData: () => ({ primarySamples: 1 }) } },
     debug: { diagnostics: {} }, lighting: { enabled: false }, shadowMap: { enabled: false },
     getRenderTarget: () => null, getMRT: () => null, getOutputRenderTarget: () => null,
@@ -60,18 +70,30 @@ function build(material, backend) {
     const builder = new (backend === 'wgsl' ? THREE.WGSLNodeBuilder : THREE.GLSLNodeBuilder)(new THREE.Mesh(geometry, material), renderer);
     builder.scene = new THREE.Scene(); builder.camera = new THREE.PerspectiveCamera();
     builder.build();
+    stats.nodes = builder.nodes.size;
+    stats.bindings = builder.getBindings().flatMap(group => group.bindings.map(binding => binding.constructor.name)).sort();
     return builder.fragmentShader;
   } finally { geometry.dispose(); }
 }
 
-test('the original SF raycast/filter/region expressions are retained verbatim', () => {
-  const start = '    const P = positionWorld.xz;';
-  const end = '    return city.mul(brightness).mul(treeline).mul(fresnel).mul(night).mul(region);';
-  assert.equal(between(emission, start, end), between(baseline, start, end));
-  // Pin the independent fixture and the untouched water factory prefix (waves, GG chop, geography and band fix).
+test('frozen legacy evidence, daylight waves/optics and window/shop/lamp filtering stay intact', () => {
+  // Geography and absolute NYC heights are deliberately superseded, not the appearance/filtering of local lights.
+  const start = '    const sigma2 = sqrt(variance).mul(2.0);';
+  const end = '    const region =';
+  const codeOnly = text => text.replace(/\/\/[^\n]*/g, '').replace(/\s+/g, '');
+  assert.equal(codeOnly(between(emission, start, end)), codeOnly(between(baseline, start, '    const treeline =')));
   const sha = text => createHash('sha256').update(text).digest('hex');
   assert.equal(sha(baseline), 'ac263e5e0ae23ccb6948a80f4e1ae93853949705a6a96d7caac6aab3eefd0fa0');
-  assert.equal(sha(water.slice(0, water.indexOf('  const night ='))), '43e3d61ecab8d38aa78421f27b2b245f9663cc11149b87d09f065f2db072d2ff');
+  // Exact frozen 2a4cf85 factory prefix, ending before night geography. Includes datum, GG waves, body and Fresnel.
+  assert.equal(sha(prefix), '5cbf56fc6a52b24dac32a769eb43167bdeffc494821cb7ac70bec303acb0b1b8');
+  assert.equal(sha(prefix + legacyGeography), '43e3d61ecab8d38aa78421f27b2b245f9663cc11149b87d09f065f2db072d2ff',
+    'retain the original pre-night prefix hash, including frozen legacy geography');
+  assert.doesNotMatch(water, /NJ_SHORELINE|LONG_ISLAND|CENTRAL_PARK|MANHATTAN|shoreAt|westShore|eastShore|streetZ|midtown|jerseyCity|treeline/);
+  assert.match(emission, /const S = float\(70\.0\)/);
+  assert.match(emission, /return city\.mul\(fresnel\)\.mul\(night\)\.mul\(region\)\.mul\(landHit\)/);
+  assert.equal(between(emission, '    const region =', '\n    return'), between(baseline, '    const region =', '\n    return'));
+  assert.equal(between(water, '  const N =', '  const night =').replaceAll('SF_LAND_BOXES', 'MANHATTAN_BOXES'),
+    between(legacyGeography, '  const N =', '  const crossings ='));
 });
 
 for (const backend of ['wgsl', 'glsl']) test(`real e27dfa9 water emits a uniform-only skyline branch (${backend})`, () => {
@@ -109,43 +131,111 @@ for (const backend of ['wgsl', 'glsl']) test(`real e27dfa9 water emits a uniform
   } finally { material.dispose(); isolated.dispose(); }
 });
 
-test('exact-zero daylight skips work; every nonzero night sample matches independent pre-port SF', () => {
-  const { env, context, arr, reset } = waterTSL(THREE, config);
-  const make = code => vm.runInNewContext(`${helpers}\n${code}\ncreateWaterMaterial;`, { ...context })();
-  const before = make(oldWater), after = make(water);
-  const locations = [[-2200, -2.2, 500], [1500, -2.2, -500], [-1350, -2.2, -2300], [80, 4, -60],
-    [-2200, -2.2, -2950], [-2200, -2.2, 2150], [-2200, -2.2, -4000], [-2200, -2.2, 3000]];
-  let positive = 0, tinyPositive = 0, faded = 0, samples = 0;
+// Observe production intermediates in this fixture only. No hooks or extra nodes enter the game.
+const observedWater = water
+  .replace('const tHit = mix(float(8000.0), tIsland, landHit).toVar();',
+    'const tHit = mix(float(8000.0), tIsland, landHit).toVar("distance");\n    landHit.toVar("landHit");')
+  .replace('  return mat;', '  mat.landBoxes = SF_LAND_BOXES;\n  return mat;');
+const numericMaterial = (code, context) => vm.runInNewContext(`${helpers}\n${code}\ncreateWaterMaterial;`, { ...context })();
+
+for (const geography of ['schema', 'actual SF']) test(`${geography}: sea misses are zero, land lights survive, daylight skips work`, () => {
+  const cfg = geography === 'schema' ? config : { ...config, ...realConfig };
+  const { env, context, arr, reset } = waterTSL(THREE, cfg);
+  const before = numericMaterial(oldWater, context), after = numericMaterial(observedWater, context);
+  const { minX, maxX, minZ, maxZ, waterLevel: y } = cfg.ISLAND_BOUNDS;
+  const z = (minZ + maxZ) / 2;
+  const locations = [
+    { name: 'west toward land', p: [minX - 500, y, z], dx: 180, hit: true },
+    { name: 'east toward land', p: [maxX + 500, y, z], dx: -180, hit: true },
+    { name: 'west toward invented shore', p: [minX - 500, y, z], dx: -180, hit: false },
+    { name: 'east toward invented shore', p: [maxX + 500, y, z], dx: 180, hit: false },
+    { name: 'north open sea', p: [minX - 500, y, minZ - 2000], dx: 180, hit: false },
+    { name: 'south open sea', p: [maxX + 500, y, maxZ + 2000], dx: -180, hit: false },
+    { name: 'elevated west, no Central Park rim', p: [minX - 500, y + 8, z], dx: -180, hit: false }
+  ];
+  let positive = 0, tinyPositive = 0, legacyFalseLights = 0;
   for (const glow of [0.24, 0.48, 0.55, 0.550001, 0.78, 0.95, 1.35, 1.38, 0.48]) {
     env.glow = glow;
-    for (const footprint of [0.001, 0.02, 1.2]) for (const [x, y, z] of locations) {
-      env.world = [x, y, z]; env.camera = [x - 180, y + 15, z]; env.footprint = footprint;
+    for (const footprint of [0.001, 0.02, 1.2]) for (const sample of locations) {
+      // Low outward views actually see the legacy short invented-shore facades; high views can look above them.
+      env.world = sample.p; env.camera = [sample.p[0] - sample.dx, sample.p[1] + (sample.hit ? 15 : 3), sample.p[2]];
+      env.footprint = footprint;
       reset();
-      const expected = arr(before.emissiveNode);
-      const oldCounts = { hashes: env.hashes, derivatives: env.derivatives };
-      assert.ok(oldCounts.hashes > 0 && oldCounts.derivatives > 0, 'baseline really executes the expensive path');
+      const legacy = arr(before.emissiveNode);
+      assert.ok(env.hashes > 0 && env.derivatives > 0, 'legacy fixture executes even by day');
       reset();
       const actual = arr(after.emissiveNode);
-      assert.ok(actual.every(Number.isFinite));
-      assert.deepEqual(actual, expected, `glow=${glow}, footprint=${footprint}, location=${x}/${y}/${z}`);
+      assert.ok(actual.every(Number.isFinite), sample.name);
       assert.deepEqual(env.gates, [{ matched: glow > 0.55, spatial: false }]);
-      assert.equal(env.unsafe, 0, 'no varying-dependent derivative execution');
+      assert.equal(env.unsafe, 0);
       if (glow <= 0.55) {
         assert.deepEqual(actual, [0, 0, 0]);
         assert.equal(env.hashes, 0); assert.equal(env.derivatives, 0);
       } else {
-        assert.equal(env.hashes, oldCounts.hashes); assert.equal(env.derivatives, oldCounts.derivatives);
-        if (actual.some(v => v > 0)) {
+        assert.equal(env.derivatives, 2, 'hits and misses both evaluate the same two derivatives');
+        assert.ok(env.hashes > 0);
+        assert.equal(arr(env.variables.landHit)[0], +sample.hit, sample.name);
+        const distance = arr(env.variables.distance)[0];
+        assert.ok(Number.isFinite(distance) && distance >= 0 && distance < 1e5);
+        if (!sample.hit) {
+          assert.equal(distance, 8000);
+          assert.deepEqual(actual, [0, 0, 0], sample.name);
+          if (legacy.some(v => v > 0)) legacyFalseLights++;
+        } else if (actual.some(v => v > 0)) {
           positive++;
           if (glow === 0.550001) tinyPositive++;
+          // On the schema's low base-height local land, the old night look is exactly the retained appearance.
+          if (geography === 'schema') assert.deepEqual(actual, legacy);
         }
-        else faded++;
       }
-      samples++;
     }
   }
-  assert.equal(samples, 216);
-  assert.ok(positive > 30, 'night controls include real emission');
-  assert.ok(tinyPositive > 0, 'a tiny nonzero twilight contribution must not be dropped');
-  assert.ok(faded >= 30, 'night still executes the existing regional fade rather than a new spatial early-out');
+  assert.ok(positive >= 24, 'both land-facing waterfront controls keep city sparkle');
+  assert.ok(tinyPositive > 0, 'no epsilon cutoff for twilight');
+  assert.ok(legacyFalseLights >= 24, 'negative controls reproduce the old imaginary-shore emission');
+});
+
+test('empty land proxy and vertical/grazing rays remain finite without derivative branches', () => {
+  const cfg = { ...config, getIslandBoundsAtZ: () => ({ westX: 0, eastX: 50 }) };
+  const { env, context, arr, reset } = waterTSL(THREE, cfg);
+  const material = numericMaterial(observedWater, context);
+  assert.equal(material.landBoxes.length, 0);
+  env.glow = 1.38;
+  // Flat texture slopes expose exactly vertical and axis-parallel rays; variance/filtering is still nonzero.
+  env.waveSample = [0, 0, 0.015, 0.2];
+  for (const world of [[0, -2.2, 0], [-30000, -2.2, 30000]]) {
+    for (const offset of [[0, 15, 0], [180, 0, 0], [0, 0.000001, 180]]) {
+      env.world = world; env.camera = world.map((v, i) => v + offset[i]);
+      reset();
+      assert.deepEqual(arr(material.emissiveNode), [0, 0, 0]);
+      assert.equal(arr(env.variables.distance)[0], 8000);
+      assert.equal(arr(env.variables.landHit)[0], 0);
+      assert.equal(env.derivatives, 2); assert.equal(env.unsafe, 0);
+      assert.deepEqual(env.gates, [{ matched: true, spatial: false }]);
+    }
+  }
+});
+
+test('optional frozen 2a4cf85 source/shader size comparison (no device)', t => {
+  let frozen;
+  try { frozen = execFileSync('git', ['show', '2a4cf85:js/tsl-materials.js'], { cwd: root, encoding: 'utf8', timeout: 10000, stdio: ['ignore', 'pipe', 'pipe'] }); }
+  catch { t.skip('private frozen source unavailable in portable export'); return; }
+  const oldFactory = between(frozen, 'function createWaterMaterial()', '/**');
+  assert.equal(prefix, oldFactory.slice(0, oldFactory.indexOf('  // Night:')));
+  assert.equal(legacyGeography, between(oldFactory, '  // Night:', '  const night ='));
+  const NYC = { ...config, ...realConfig, THREE, TSL };
+  vm.runInNewContext(frozen, { window: { NYC } });
+  const before = NYC.createWaterMaterial(), after = materials.createWaterMaterial();
+  t.diagnostic(`factory UTF-8 bytes: ${Buffer.byteLength(oldFactory)} -> ${Buffer.byteLength(water)}`);
+  try {
+    for (const backend of ['wgsl', 'glsl']) {
+      const oldStats = {}, newStats = {};
+      const oldShader = build(before, backend, oldStats), newShader = build(after, backend, newStats);
+      assert.ok(newShader.length < oldShader.length, 'geographic correction must shrink emitted shader');
+      assert.ok(newStats.nodes < oldStats.nodes, 'fewer actual builder graph nodes');
+      assert.deepEqual(newStats.bindings, oldStats.bindings, 'no added buffer/texture/sampler bindings');
+      t.diagnostic(`${backend} full fragment UTF-8 bytes: ${Buffer.byteLength(oldShader)} -> ${Buffer.byteLength(newShader)}`);
+      t.diagnostic(`${backend} builder nodes: ${oldStats.nodes} -> ${newStats.nodes}; bindings unchanged: ${newStats.bindings.join(', ')}`);
+    }
+  } finally { before.dispose(); after.dispose(); }
 });

@@ -284,12 +284,12 @@
   },
   "outputs": {
     "data/light-terrain.bin": {
-      "sha256": "b6ca186fa24957a2106c173f36417e74863ff3c0c439f9a21d5c09a3c5c752a8",
-      "bytes": 19051628
+      "sha256": "c38d7f63bede58bd77a10bda4ee06612ee93784c2a80096e88c843125aa5ede2",
+      "bytes": 19051592
     },
     "data/light-terrain.bin.gz": {
-      "sha256": "ecdeb469986812e2298c6cf5a742cdfd51611d9d3aa1cdc9d6beee0645ec4975",
-      "bytes": 4772171
+      "sha256": "8b1e8eae789674f1bfc12c73982fd739f19a29af60a03024a4b5b37d58e1b477",
+      "bytes": 4772157
     }
   },
   "decodedBytes": {

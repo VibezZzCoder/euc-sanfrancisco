@@ -9,7 +9,7 @@
 // - Vehicles and pedestrians are only ever moved while out of the camera's view, so nothing pops in or out.
 // - EUC contact is owned by the native controller, via the indexed logical body snapshots below.
 
-const { THREE, buildRoadNetwork, signalPhase, walkSignal, CROSSWALK } = window.NYC;
+const { THREE, buildRoadNetwork, signalGroupPhase, signalGroupWalk, CROSSWALK } = window.NYC;
 const {
   cityUniforms,
   createContactShadowMaterial,
@@ -448,8 +448,8 @@ function createTrafficSystem(scene, sidewalks, obstacles, opts = {}) {
   // =========================================================================
   let clock = 0;
   // A signal's phase for the traffic arriving over edge e: each junction runs the city's cycle (city-config.js
-  // SIGNAL_TIMING) from its own offset (road-network.js signalOffset), group 0 on the first phase, the others on the second
-  const phaseOf = (e) => signalPhase(clock + (e.to.signalOffset || 0), e.axisIndex === 0);
+  // SIGNAL_TIMING) from its own offset (road-network.js signalOffset), one full slot per right-of-way group.
+  const phaseOf = (e) => signalGroupPhase(clock + (e.to.signalOffset || 0), e.axisIndex, e.to.groupCount);
   let focusX = 0;
   let focusZ = 140;
   const player = { active: false, x: 0, z: 0, vx: 0, vz: 0, halfW: 0.35, halfL: 0.5 };
@@ -1512,16 +1512,16 @@ function createTrafficSystem(scene, sidewalks, obstacles, opts = {}) {
     return false;
   }
 
-  // Do people on crosswalk `side` of junction n have the WALK? At a signal, across a road while the other roads have
-  // their green (early in it: walkSignal), so on the phase the crossed road's traffic waits at its red; at a stop sign
+  // Do people on crosswalk `side` of junction n have the WALK? At a signal, early in the designated other group's
+  // green, so the crossed road's traffic waits at red; complex junctions use the next group's full slot. At a stop sign
   // always (the traffic gives way to them, see mayEnter)
   const walkOn = (n, side) => {
     if (!n.signal) return true;
     const arm = n.sideArms && n.sideArms[side];
-    return walkSignal(clock + (n.signalOffset || 0), !!arm && arm.group !== 0);
+    return signalGroupWalk(clock + (n.signalOffset || 0), arm ? arm.group : 0, n.groupCount);
   };
 
-  // May p step off the curb onto its crosswalk? On the WALK (early in the parallel traffic's green, so red for the
+  // May p step off the curb onto its crosswalk? On the WALK (early in the designated other group's green, so red for the
   // traffic arriving over it), once no vehicle is crossing it or committed to, and none is too close to stop
   function mayCross(p) {
     const n = p.node;

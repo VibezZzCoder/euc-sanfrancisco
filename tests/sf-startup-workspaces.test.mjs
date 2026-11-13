@@ -9,6 +9,7 @@ import { createHash } from 'node:crypto';
 import { Session } from 'node:inspector/promises';
 import vm from 'node:vm';
 import * as THREE from '../vendor/three/build/three.core.js';
+import { signalPlacements } from './helpers/sf-signal-heads.mjs';
 
 const ROOT = new URL('../', import.meta.url), REF = '282e6f1b3c9d756786a619d1136e67e32c83c12e';
 const read = path => readFileSync(new URL(path, ROOT), 'utf8');
@@ -226,8 +227,19 @@ test('full committed street placement: exact geometry, instances, footprints, or
   // Exact core terrain/curbs/road graph, all inventory entries; no prior landmark/building registration.
   // Rendering/materials, tree construction and downstream sidewalk scenes are outside these two edits.
   const network = N.buildRoadNetwork(N.BLOCKS.map(b => ({ ...b, block: b })), []);
+  const {mats:signalMats,metadata:signalMetadata}=signalPlacements(N,network);
+  // Explicit one-head whitelist for the reported browser node136 pair (this
+  // core-only fixture numbers it node137). This whitelist transforms reference
+  // contacts AND drawing before construction; no contact or matrix is excluded.
+  const movedIndex=signalMetadata.findIndex(m=>m.node===137&&m.edge===4468&&m.group===1);
+  assert.equal(movedIndex,1219);
+  const oldHead=signalMats.head[movedIndex].elements,oldPole=signalMats.pole[movedIndex].elements;
+  assert.ok(Math.hypot(oldHead[12]-653.6570434570312,oldHead[14]+166.41065979003906)<.0001);
+  const distance=Math.hypot(oldHead[12]-oldPole[12],oldHead[14]-oldPole[14]);
+  const newX=oldHead[12]-(oldHead[12]-oldPole[12])*.6/distance;
+  const newZ=oldHead[14]-(oldHead[14]-oldPole[14])*.6/distance;
   const chain = { mul() { return this; }, add() { return this; } };
-  const build = code => {
+  const build = (code,candidate=false) => {
     const c = context({ ...N, THREE: { ...THREE, MeshStandardNodeMaterial: THREE.MeshStandardMaterial, MeshBasicNodeMaterial: THREE.MeshBasicMaterial, LineBasicNodeMaterial: THREE.LineBasicMaterial },
       Addons: { mergeGeometries }, TSL: { uniform: v => ({value:v}), color: () => chain, mix: () => chain, smoothstep: () => chain },
       cityUniforms: { uInteriorGlow: {} }, createTrafficSignalLensMaterial: () => new THREE.MeshBasicMaterial(),
@@ -235,17 +247,55 @@ test('full committed street placement: exact geometry, instances, footprints, or
     load(c, sources['sf-ride-geometry'], 'js/sf-ride-geometry.js'); load(c, code, 'js/sf-street-details.js');
     const X = c.window.NYC;
     const built = X.buildSFStreetDetails(new THREE.Group(), network, []);
-    const contacts = numericDigest(), meshes = numericDigest(); let tops = 0, meshCount = 0, instances = 0;
+    const contacts = numericDigest(), meshes = numericDigest(); let tops = 0, meshCount = 0, instances = 0, checked=0, typedBytes=0;
+    const buffers=new Set();
+    for(const batch of X.ride.tops)if(batch.packedTops)for(const value of Object.values(batch))
+      if(ArrayBuffer.isView(value)&&!buffers.has(value.buffer)){buffers.add(value.buffer);typedBytes+=value.buffer.byteLength;}
     for (const batch of X.ride.tops) { if (batch.packedTops) for (let i = 0; i < batch.length; i++) { contacts.add(batch.record(i)); tops++; }
       else { contacts.add(batch); tops++; } }
     contacts.add(X.ride.solids); contacts.add(X.ride.prisms); contacts.add(built.footprints);
     built.group.traverse(o => { if (!o.geometry) return; meshCount++; meshes.add(o.name);
+      if(candidate&&['SignalHeads','SignalLenses','SignalArms'].includes(o.name)) {
+        const key=o.name==='SignalArms'?'arm':o.name==='SignalHeads'?'head':'lens';
+        const original=signalMats[key][movedIndex].elements,expected=original.slice();
+        if(key==='arm') {
+          expected[12]=(oldPole[12]+newX)/2;expected[14]=(oldPole[14]+newZ)/2;
+          expected[8]=newX-oldPole[12];expected[10]=newZ-oldPole[14];
+        } else {expected[12]=newX;expected[14]=newZ;}
+        for(let k=0;k<16;k++)assert.equal(o.instanceMatrix.array[movedIndex*16+k],Math.fround(expected[k]),`${o.name} exact allowed matrix[${k}]`);
+        checked++;
+      }
       for (const k of Object.keys(o.geometry.attributes)) { meshes.add(k); meshes.add(o.geometry.attributes[k].array); }
       meshes.add(o.geometry.index?.array ?? null); if (o.instanceMatrix) { meshes.add(o.instanceMatrix.array); instances += o.count; }
       o.geometry.dispose(); });
-    return { tops, solids: X.ride.solids.length, prisms: X.ride.prisms.length, footprints: built.footprints.length, meshCount, instances, contacts: contacts.end(), meshes: meshes.end() };
+    assert.equal(checked,candidate?3:0);
+    assert.deepEqual([tops,X.ride.solids.length,X.ride.prisms.length,built.footprints.length,meshCount,instances],
+      [972833,22966,43375,11321,18,59783],'original furniture facet/body/footprint/instance counts');
+    return { tops, solids: X.ride.solids.length, prisms: X.ride.prisms.length, footprints: built.footprints.length, meshCount, instances, typedBytes, contacts: contacts.end(), meshes: meshes.end() };
   };
-  const before = await measured(() => build(sources['sf-street-details'])), after = await measured(() => build(changed['sf-street-details']));
+  // This fixture isolates construction-workspace equivalence. Apply the later
+  // signal metadata contract to its frozen baseline too; keep every geometry,
+  // placement, buffer length and physical registration in the exact comparison.
+  // Independent legacy/multigroup timing, actual encoding and shader resource
+  // parity are exercised in sf-signals.test.cjs.
+  const oldSignal = 'mats.lensBase.push(base, n.signalOffset || 0, e.axisIndex === 0 ? 1 : 0);';
+  assert.equal(sources['sf-street-details'].split(oldSignal).length, 2, 'one frozen signal encoding site');
+  let baseline = sources['sf-street-details'].replace(oldSignal,
+    'mats.lensBase.push(base, (n.signalOffset || 0) - (n.groupCount > 2 ? e.axisIndex * 30 : 0), n.groupCount > 2 ? n.groupCount : e.axisIndex === 0 ? 1 : 0);');
+  // Independently authored 0.6 m translation/reconnection for ONLY assembly1219.
+  // Frozen registration code then generates the expected contacts itself. This
+  // catches invisible old contacts as well as any unrelated physical change.
+  const registration='    list.forEach((m, i) => {';
+  assert.equal(baseline.split(registration).length,2);
+  baseline=baseline.replace(registration,registration+`
+      if(i===${movedIndex}&&(name==='SignalHeads'||name==='SignalLenses'||name==='SignalArms')) {
+        const e=m.elements;
+        if(name==='SignalArms') {
+          e[12]=${(oldPole[12]+newX)/2};e[14]=${(oldPole[14]+newZ)/2};
+          e[8]=${newX-oldPole[12]};e[10]=${newZ-oldPole[14]};
+        } else {e[12]=${newX};e[14]=${newZ};}
+      }`);
+  const before = await measured(() => build(baseline)), after = await measured(() => build(changed['sf-street-details'],true));
   assert.deepEqual(after.result, before.result);
   t.diagnostic(JSON.stringify({ baseline: REF, source: hash(changed['sf-street-details']), before, after }));
 });

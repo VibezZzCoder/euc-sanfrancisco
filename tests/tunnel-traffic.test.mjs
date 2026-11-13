@@ -22,8 +22,9 @@ const digest = value => sha(JSON.stringify(value, (_, v) => typeof v === 'number
 const FROZEN = Object.freeze({
   roadSource: 'bb55891475d2a06bdf16d6475cdad80b99d73b783960a8f0d56a4861d7ab81fb',
   gradeSource: '685429a840680e45ef6fd9ef862653f44ed0322e6dd404d4d618c6aec32d6ebc',
-  // Booking adds spawn-only exclusions and pedestrian draw clearance; routing and pose checks remain frozen below.
-  trafficSource: 'c6e9beb14bc82d67fd9d1e7482c45803e7fe301621b1f0ea7261e141c91fa5f3',
+  // Reviewed SF multigroup phase/WALK consumer-only diff; routing/occupancy/pose logic is unchanged.
+  // All independent graph, tunnel, upper-road and actual axle-pose hashes remain frozen below.
+  trafficSource: '20365f1d36f5c8001e7fc07980b53c391927ec0a445a036639c919b8b90f867d',
   graph: 'f702c29efb17b09eb0d9024391f1b2545d55dca22a2b21f8ad27cf2cb5c18c8d',
   baselineRouting: '2c6ac0523f4fd067c3d60afe9af57ee23a11424cc3602efc1125f57113501a7f', // 67f0686, not the candidate
   tunnels: 'b65fe8d264ce76951ab84af4f57650830391c8c7753ef5107cc30b8098972c3a',

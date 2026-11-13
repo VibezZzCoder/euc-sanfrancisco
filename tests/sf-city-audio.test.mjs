@@ -91,6 +91,85 @@ test('incomplete optional actor fields stay finite; invalid/unlocated/unknown/di
   assert.equal(streetCollector.collect({ x: car.x, y: car.y, z: car.z }, 1).motors.length, 0);
 });
 
+test('horn eligibility follows actual multigroup SF approaches and reuses bounded source storage', () => {
+  const car = { ...traffic.cars.find(car => car.edge), speed: 0, wait: 5, gap: 2, leaderSpeed: 0,
+    conn: null, yielding: false, disabled: false, isNYPD: false };
+  const collector = new CityAudioSources({ trafficSystem: { cars: [car] } });
+  const listener = { x: car.x, y: car.y + 1, z: car.z };
+  const snapshot = collector.snapshot, items = snapshot.motors;
+  const pool = collector.motors.pool, scores = collector.motors.scores, backing = scores.buffer;
+  const record = collector.collect(listener, 0).motors[0];
+  for (const nodeId of [74, 15]) {
+    const node = traffic.network.nodes.find(n => n.id === nodeId);
+    assert.ok(node?.signal && node.groupCount === 4);
+    for (const edge of node.in) {
+      car.edge = edge;
+      for (const cycle of [-1, 0, 1]) for (let slot = 0; slot < node.groupCount; slot++)
+        for (const inside of [0.001, 7, 25.999, 26.001, 29.999]) {
+          const elapsed = (cycle * node.groupCount + slot) * 30 + inside - node.signalOffset;
+          const result = collector.collect(listener, elapsed);
+          assert.equal(result.motors[0].blocked, slot === edge.axisIndex && inside < 26,
+            `node ${nodeId}, group ${edge.axisIndex}, slot ${slot}, time ${inside}`);
+          assert.equal(result, snapshot); assert.equal(result.motors, items); assert.equal(items[0], record);
+          assert.equal(collector.motors.pool, pool); assert.equal(collector.motors.scores, scores);
+          assert.equal(scores.buffer, backing); assert.equal(pool.length, 10); assert.equal(scores.byteLength, 80);
+        }
+    }
+  }
+  car.edge = traffic.network.edges.find(e => e.id === 2562); // King St, node74/group2
+  assert.equal(collector.collect(listener, 35 - car.edge.to.signalOffset).motors[0].blocked, false,
+    'the old binary phase incorrectly allowed horns during another group’s green');
+  assert.equal(collector.collect(listener, 65 - car.edge.to.signalOffset).motors[0].blocked, true,
+    'own new green allows the original congestion/horn logic');
+  // A green alone still cannot admit horns for an actor moving, yielding, crossing or without a blocked leader.
+  for (const [key,value] of [['wait',2],['speed',0.5],['gap',8],['leaderSpeed',0.5],['yielding',true],['conn',{}]]) {
+    const saved = car[key]; car[key] = value;
+    assert.equal(collector.collect(listener, 65 - car.edge.to.signalOffset).motors[0].blocked, false, key);
+    car[key] = saved;
+  }
+});
+
+test('ordinary two-group and nonsignal horn eligibility preserve the legacy audio contract', () => {
+  const car = { ...traffic.cars.find(car => car.edge), speed:0,wait:5,gap:2,leaderSpeed:0,
+    conn:null,yielding:false,disabled:false,isNYPD:false };
+  const collector = new CityAudioSources({trafficSystem:{cars:[car]}});
+  const listener = {x:car.x,y:car.y+1,z:car.z};
+  for (const group of [0,1]) {
+    car.edge = traffic.network.edges.find(e => e.to.signal && e.to.groupCount === 2 && e.axisIndex === group);
+    assert.ok(car.edge);
+    for (const elapsed of [-120,-60,-30,-0.001,0,7,26,30,37,56,60,120]) {
+      const local = elapsed + car.edge.to.signalOffset;
+      assert.equal(collector.collect(listener, elapsed).motors[0].blocked, NYC.signalPhase(local,group===0)==='green');
+    }
+  }
+  car.edge = traffic.network.edges.find(e => !e.to.signal);
+  assert.ok(car.edge);
+  for (const elapsed of [-1,0,35,65,95,NaN]) assert.equal(collector.collect(listener,elapsed).motors[0].blocked,true);
+});
+
+test('optional legacy signal beeps retain boolean WALK windows and reuse their pooled records', () => {
+  // SF publishes no audioSignals sites. Preserve the optional legacy input schema;
+  // isAvenue describes walking ALONG a road, unlike signalGroupWalk’s crossed-road group.
+  const sites = [{x:0,y:1,z:0,isAvenue:true,signalOffset:13.25},
+    {x:1,y:1,z:0,isAvenue:false,signalOffset:13.25}];
+  const collector = new CityAudioSources({streetDetails:{audioSignals:sites}});
+  const listener = {x:0,y:1,z:0}, pool=collector.signals.pool, scores=collector.signals.scores;
+  for (const cycle of [-2,0,2]) for (const boundary of [0,7,26,30,37,56,60])
+    for (const epsilon of [-0.001,0,0.001]) {
+      const local=cycle*60+boundary+epsilon;
+      const result=collector.collect(listener,local-13.25);
+      assert.equal(result.signals.length,2);
+      for (let i=0;i<2;i++) {
+        const t=(((local-(i===0?0:30))%60)+60)%60;
+        assert.equal(result.signals[i].walk,t<7);
+        assert.equal(result.signals[i].id,sites[i]); assert.equal(result.signals[i],pool[i]);
+      }
+      assert.equal(collector.signals.pool,pool); assert.equal(collector.signals.scores,scores);
+      assert.equal(pool.length,2); assert.equal(scores.byteLength,16);
+    }
+  assert.equal(new CityAudioSources({streetDetails:{}}).collect(listener,35).signals.length,0);
+});
+
 function fakeAudio() {
   const nodes = [], writes = [];
   const number = (value, label) => assert.ok(Number.isFinite(value), `${label}: ${String(value)}`);

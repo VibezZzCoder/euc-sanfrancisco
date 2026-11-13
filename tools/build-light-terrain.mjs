@@ -33,7 +33,10 @@ const city = grid(manifest.city), originalHorizon = grid(manifest.horizon);
 // The distant horizon is visual only. Native 8 m city heights remain unchanged for all routes/destinations.
 const stride = 8, w = Math.ceil((originalHorizon.w - 1) / stride) + 1, h = Math.ceil((originalHorizon.h - 1) / stride) + 1;
 const horizon = { x0: originalHorizon.x0, z0: originalHorizon.z0, step: originalHorizon.step * stride, w, h,
+  x1: manifest.horizon.x1, z1: manifest.horizon.z1,
   heights: new Float32Array(w * h) };
+// Ceil counts retain the final source sample; its coordinate is NOT a full stride beyond the penultimate one.
+// Keep the original bounds so only the terminal cell shortens (32 m X / 160 m Z), without rescaling the grid.
 for (let j = 0; j < h; j++) for (let i = 0; i < w; i++)
   horizon.heights[j * w + i] = originalHorizon.heights[Math.min(originalHorizon.h - 1, j * stride) * originalHorizon.w + Math.min(originalHorizon.w - 1, i * stride)];
 // Store exact 4 m material classes as row runs, rather than a 17 MB expanded raster. No mask texture is needed.
@@ -74,8 +77,13 @@ const layout = Object.fromEntries(Object.entries(arrays).map(([name, array]) => 
   return [name, item];
 }));
 const field = ({ heights, ...metadata }) => metadata;
+// Light v1 fixes the row-run layout; its loader fetches the containing binary, not the original mask URL.
+// Keep source delivery metadata in the original manifest (hashed in provenance), outside retained runtime data.
+const mask = { ...manifest.mask };
+delete mask.url;
+delete mask.encoding;
 const header = { format: 'sf-light-terrain', version: 1, waterLevel: manifest.waterLevel,
-  city: field(city), horizon: field(horizon), mask: { ...manifest.mask, encoding: 'row-runs-u16' }, layout };
+  city: field(city), horizon: field(horizon), mask, layout };
 let json = Buffer.from(JSON.stringify(header));
 json = Buffer.concat([json, Buffer.alloc((4 - json.length % 4) % 4, 32)]);
 const output = Buffer.alloc(8 + json.length + byteLength);

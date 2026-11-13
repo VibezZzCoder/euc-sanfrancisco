@@ -1,0 +1,37 @@
+// Verbatim createTrafficSignalLensMaterial from SF 2a4cf854b75249ec9ba8a6a5ca1d2cec97ad57d9.
+function createTrafficSignalLensMaterial(isAvenueHead, clock, perInstance = false) {
+  const { cycle, avenueAmber, avenueRed, streetAmber } = SIGNAL_TIMING;
+  const mat = new THREE.MeshBasicNodeMaterial();
+  mat.colorNode = Fn(() => {
+    const base = perInstance ? attribute('signalBase', 'vec3') : null;
+    const t = mod(perInstance ? clock.add(base.y) : clock, cycle);
+    const wy = perInstance ? positionWorld.y.sub(base.x) : positionWorld.y;
+    const isTopRed = step(5.60, wy);
+    const isBottomGreen = float(1.0).sub(step(5.24, wy));
+    const isMidAmber = float(1.0).sub(isTopRed).mul(float(1.0).sub(isBottomGreen));
+
+    // Avenue phase: Green, then Amber from avenueAmber, Red from avenueRed
+    // Street phase: Red until avenueRed, then Green, Amber from streetAmber
+    const aveGreen = float(1.0).sub(step(avenueAmber, t));
+    const stGreen = step(avenueRed, t).mul(float(1.0).sub(step(streetAmber, t)));
+    const aveAmber = step(avenueAmber, t).mul(float(1.0).sub(step(avenueRed, t)));
+    const stAmber = step(streetAmber, t);
+    const aveRed = step(avenueRed, t);
+    const stRed = float(1.0).sub(step(avenueRed, t));
+    const greenActive = perInstance ? mix(stGreen, aveGreen, base.z) : isAvenueHead ? aveGreen : stGreen;
+    const amberActive = perInstance ? mix(stAmber, aveAmber, base.z) : isAvenueHead ? aveAmber : stAmber;
+    const redActive = perInstance ? mix(stRed, aveRed, base.z) : isAvenueHead ? aveRed : stRed;
+
+    const activeMask = isTopRed.mul(redActive)
+      .add(isMidAmber.mul(amberActive))
+      .add(isBottomGreen.mul(greenActive));
+
+    const lensHue = mix(
+      mix(color(0x18ff68), color(0xffaa10), isMidAmber),
+      color(0xff2424),
+      isTopRed
+    );
+    return mix(color(0x14181e), lensHue.mul(1.35), activeMask);
+  })();
+  return mat;
+}

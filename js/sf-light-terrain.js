@@ -2,11 +2,20 @@
 // This is not core-city/support streaming. One replaceable near-rider drawing patch; no visited-location cache.
 import * as THREE from 'three/webgpu';
 
-const bounds = p => ({ x0: p.x0, z0: p.z0, x1: p.x0 + ((p.nx ?? p.w) - 1) * p.step,
-  z1: p.z0 + ((p.nz ?? p.h) - 1) * p.step });
+const bounds = p => ({ x0: p.x0, z0: p.z0, x1: p.x1 ?? p.x0 + ((p.nx ?? p.w) - 1) * p.step,
+  z1: p.z1 ?? p.z0 + ((p.nz ?? p.h) - 1) * p.step });
 export function lightHeight(g, x, z) {
   const w = g.w ?? g.nx, h = g.nz ?? g.h, H = g.heights ?? g.h;
-  const fx = Math.max(0, Math.min(w - 1, (x - g.x0) / g.step)), fz = Math.max(0, Math.min(h - 1, (z - g.z0) / g.step));
+  let fx = Math.max(0, Math.min(w - 1, (x - g.x0) / g.step)), fz = Math.max(0, Math.min(h - 1, (z - g.z0) / g.step));
+  // Only a shortened horizon terminal cell changes. Keep native city/core/collar arithmetic exact.
+  if (fx > w - 2 && g.x1 < g.x0 + (w - 1) * g.step) {
+    const last = g.x0 + (w - 2) * g.step;
+    fx = w - 2 + Math.min(1, (x - last) / (g.x1 - last));
+  }
+  if (fz > h - 2 && g.z1 < g.z0 + (h - 1) * g.step) {
+    const last = g.z0 + (h - 2) * g.step;
+    fz = h - 2 + Math.min(1, (z - last) / (g.z1 - last));
+  }
   const i = Math.min(w - 2, Math.floor(fx)), j = Math.min(h - 2, Math.floor(fz)), a = fx - i, b = fz - j, k = j * w + i;
   return a + b <= 1 ? H[k] + (H[k + 1] - H[k]) * a + (H[k + w] - H[k]) * b
     : H[k + w + 1] - (H[k + w + 1] - H[k + w]) * (1 - a) - (H[k + w + 1] - H[k + 1]) * (1 - b);

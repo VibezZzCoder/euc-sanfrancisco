@@ -396,7 +396,8 @@ function neighborhoodAt(x,z) {
 function getLocationLabel(x, z) {
   const near = nearestRoads(x, z, 120);
   const pair = near.length > 1 && near[1].dist < 40 ? `${near[0].road.name} & ${near[1].road.name}` : near.length ? near[0].road.name : '';
-  for (const lm of NYC_LANDMARKS) {
+  // sf-destinations replaces the published pins; share the map's authoritative list.
+  for (const lm of window.NYC.NYC_LANDMARKS) {
     if (Math.hypot(x - lm.x, z - lm.z) < 80) return `${lm.name}${pair ? ` · ${pair}` : ''}`;
   }
   const neighborhood = neighborhoodAt(x,z);
@@ -429,6 +430,28 @@ function signalPhase(time, isAvenue) {
 function walkSignal(time, isAvenue) {
   const { cycle, avenueRed, walk } = SIGNAL_TIMING;
   const t = (((time - (isAvenue ? 0 : avenueRed)) % cycle) + cycle) % cycle;
+  return t < walk;
+}
+
+// Complex SF junctions keep one full avenue-length slot per existing right-of-way
+// group: 26 s green + 4 s amber, never a compressed share of the old 60 s cycle.
+// Keep the boolean helpers above and the ordinary two-group paths exactly intact.
+function signalGroupPhase(time, group, groupCount = 2) {
+  if (groupCount <= 2) return signalPhase(time, group === 0);
+  const { avenueRed: slot, avenueAmber } = SIGNAL_TIMING;
+  const cycle = slot * groupCount;
+  const t = (((time - group * slot) % cycle) + cycle) % cycle;
+  return t < avenueAmber ? 'green' : t < slot ? 'amber' : 'red';
+}
+
+// Across group g, step off early in the NEXT group's slot. The crossed road stays
+// red throughout WALK and for at least the original 23 s after WALK closes (53 s
+// for n=3). Turning traffic still yields through mayCross/mayEnter occupancy checks.
+function signalGroupWalk(time, group, groupCount = 2) {
+  if (groupCount <= 2) return walkSignal(time, group !== 0);
+  const { avenueRed: slot, walk } = SIGNAL_TIMING;
+  const cycle = slot * groupCount;
+  const t = (((time - ((group + 1) % groupCount) * slot) % cycle) + cycle) % cycle;
   return t < walk;
 }
 
@@ -489,6 +512,8 @@ Object.assign(window.NYC, {
   isTypingInField,
   prettyName,
   signalPhase,
-  walkSignal
+  walkSignal,
+  signalGroupPhase,
+  signalGroupWalk
 });
 })();

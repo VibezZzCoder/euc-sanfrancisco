@@ -8,6 +8,11 @@ export async function loadLightTerrain(fetchBin) {
       || !Number.isInteger(g.w) || !Number.isInteger(g.h) || g.w < 2 || g.h < 2 || g.w * g.h > 5000000)
       throw new Error('Invalid light terrain grid');
   }
+  const far = h.horizon;
+  if (![far.x1, far.z1].every(Number.isFinite)
+    || !(far.x1 > far.x0 + (far.w - 2) * far.step && far.x1 <= far.x0 + (far.w - 1) * far.step)
+    || !(far.z1 > far.z0 + (far.h - 2) * far.step && far.z1 <= far.z0 + (far.h - 1) * far.step))
+    throw new Error('Invalid light terrain horizon bounds');
   const array = (name, Type, expected) => {
     const d = h.layout?.[name], start = offset + (d?.offset ?? NaN);
     if (!d || !Number.isSafeInteger(d.length) || d.length < 0 || (expected !== undefined && d.length !== expected)
@@ -15,10 +20,10 @@ export async function loadLightTerrain(fetchBin) {
       || start + d.length * Type.BYTES_PER_ELEMENT > buf.byteLength) throw new Error('Invalid light terrain array: ' + name);
     return new Type(buf, start, d.length);
   };
-  const grid = (name, g) => ({ ...g, x1: g.x0 + (g.w - 1) * g.step, z1: g.z0 + (g.h - 1) * g.step,
+  const grid = (name, g, x1 = g.x0 + (g.w - 1) * g.step, z1 = g.z0 + (g.h - 1) * g.step) => ({ ...g, x1, z1,
     heights: array(name, Float32Array, g.w * g.h) });
   const city = grid('city', h.city);
-  const horizon = grid('horizon', h.horizon);
+  const horizon = grid('horizon', far, far.x1, far.z1);
   if (!h.mask || !Number.isInteger(h.mask.w) || h.mask.w > 65535 || h.mask.w < 1
     || !Number.isInteger(h.mask.h) || h.mask.h < 1 || h.mask.h > 10000) throw new Error('Invalid light terrain mask');
   const mask = { header: h.mask, rows: array('maskRows', Uint32Array, h.mask.h + 1),

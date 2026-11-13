@@ -2,10 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
+import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { createWorldTierPolicy } from '../js/world-tier.js';
 import { loadLightTerrain, lightMaskValue, installLightTerrain } from '../js/sf-light-data.js';
 import { createLightBoundaryReturn } from '../js/sf-light-boundary.js';
 import { runtimeBinaries } from '../tools/compress-data.mjs';
+import { gitHistory } from './helpers/optional-source.mjs';
 
 const root = new URL('../', import.meta.url);
 const read = name => fs.readFileSync(new URL(name, root));
@@ -14,6 +17,40 @@ function binary(name) {
   return { header: JSON.parse(b.toString('utf8', 8, 8 + n)), buf, offset: 8 + n };
 }
 const light = await loadLightTerrain(async name => binary(name));
+const baselineRef = '2a4cf854b75249ec9ba8a6a5ca1d2cec97ad57d9', history = gitHistory(root, baselineRef);
+
+test('light header omits only unused mask delivery fields and keeps the original manifest in provenance', () => {
+  const source = read('data/region/manifest.json'), manifest = JSON.parse(source), expected = { ...manifest.mask };
+  assert.equal(expected.url, 'data/region/groundmask.bin'); assert.equal(expected.encoding, 'rle-u32');
+  delete expected.url; delete expected.encoding;
+  const bin = binary('data/light-terrain.bin');
+  assert.deepEqual(bin.header.mask, expected); assert.deepEqual(light.mask.header, expected);
+  assert.equal(bin.offset % 4, 0);
+  assert.equal(bin.offset - 8, Math.ceil(Buffer.byteLength(JSON.stringify(bin.header)) / 4) * 4);
+  assert.equal(JSON.parse(read('provenance/light-terrain.json')).sources['data/region/manifest.json'],
+    createHash('sha256').update(source).digest('hex'));
+});
+
+test('light endpoint header fits below the original retained-buffer budget with exact unchanged payload/layout',
+  { skip: history.skip }, t => {
+    const before = execFileSync('git', ['show', `${baselineRef}:data/light-terrain.bin`], { cwd: root, maxBuffer: 32000000 });
+    const after = read('data/light-terrain.bin'), oldOffset = 8 + before.readUInt32LE(4), newOffset = 8 + after.readUInt32LE(4);
+    const expected = JSON.parse(before.toString('utf8', 8, oldOffset)), actual = JSON.parse(after.toString('utf8', 8, newOffset));
+    const source = JSON.parse(read('data/region/manifest.json'));
+    expected.horizon.x1 = source.horizon.x1; expected.horizon.z1 = source.horizon.z1;
+    delete expected.mask.url; delete expected.mask.encoding;
+    assert.deepEqual(actual, expected, 'only two bounds added and two unused mask fields removed');
+    assert.ok(after.subarray(newOffset).equals(before.subarray(oldOffset)), 'all typed bytes and payload padding unchanged');
+    assert.ok(after.length <= before.length, 'shared retained ArrayBuffer cannot grow');
+    const oldProvenance = JSON.parse(history.read('provenance/light-terrain.json'));
+    const provenance = JSON.parse(read('provenance/light-terrain.json'));
+    assert.deepEqual(provenance.sources, oldProvenance.sources);
+    assert.deepEqual(provenance.decodedBytes, oldProvenance.decodedBytes);
+    t.diagnostic(JSON.stringify({ baselineRef, headerBefore: oldOffset - 8, headerAfter: newOffset - 8,
+      binaryBefore: before.length, binaryAfter: after.length, retainedBufferDelta: after.length - before.length,
+      payloadBytes: after.length - newOffset, gzipBefore: oldProvenance.outputs['data/light-terrain.bin.gz'].bytes,
+      gzipAfter: read('data/light-terrain.bin.gz').length, removedMaskFields: ['url', 'encoding'] }));
+  });
 
 test('the tier binary participates in lossless delivery validation, rather than being an orphan gzip', async () => {
   const files = await runtimeBinaries();
@@ -26,6 +63,41 @@ test('light city exposes finite complete bounds for map Fit and coverage, using 
   assert.equal(light.city.z1, light.city.z0 + (light.city.h - 1) * light.city.step);
   const manifest = JSON.parse(read('data/region/manifest.json'));
   for (const key of ['x0', 'z0', 'x1', 'z1', 'step', 'w', 'h']) assert.equal(light.city[key], manifest.city[key]);
+});
+
+test('light horizon retains stride-eight samples at source coordinates, including shortened terminal cells', () => {
+  const source = JSON.parse(read('data/region/manifest.json')).horizon, g = light.horizon;
+  assert.equal(g.w, 205); assert.equal(g.h, 142); assert.equal(g.step, 256);
+  for (const key of ['x0', 'z0', 'x1', 'z1']) assert.equal(g[key], source[key]);
+  assert.equal(g.x1 - (g.x0 + (g.w - 2) * g.step), 32);
+  assert.equal(g.z1 - (g.z0 + (g.h - 2) * g.step), 160);
+  // Decode each original tile with its own width (the terminal source tiles are not assumed square).
+  const checked = new Set();
+  for (const file of source.files) {
+    const { header: h, buf, offset } = binary(file.url), q = new Uint16Array(buf, offset, h.w * h.h);
+    for (let j = 0; j < g.h; j++) for (let i = 0; i < g.w; i++) {
+      const x = Math.min(source.x1, source.x0 + i * 8 * source.step);
+      const z = Math.min(source.z1, source.z0 + j * 8 * source.step);
+      const u = (x - h.originX) / source.step, v = (z - h.originZ) / source.step;
+      if (u < 0 || v < 0 || u >= h.w || v >= h.h) continue;
+      assert.equal(g.heights[j * g.w + i], Math.fround(h.minH + q[v * h.w + u] * h.scale));
+      checked.add(j * g.w + i);
+    }
+  }
+  // Original horizon files omit all-water tiles; the committed loader/derivation fills those with waterLevel.
+  for (let k = 0; k < g.heights.length; k++) if (!checked.has(k)) assert.equal(g.heights[k], Math.fround(light.waterLevel));
+  assert.ok(checked.size > 0);
+});
+
+test('light loader rejects missing, nonfinite, expanded or collapsed horizon terminal bounds', async () => {
+  const bin = binary('data/light-terrain.bin'), g = bin.header.horizon;
+  for (const [axis, origin, count] of [['x1', 'x0', 'w'], ['z1', 'z0', 'h']]) {
+    for (const end of [undefined, null, NaN, Infinity, g[origin] + (g[count] - 2) * g.step,
+      g[origin] + (g[count] - 2) * g.step - 1, g[origin] + (g[count] - 1) * g.step + 1]) {
+      const header = { ...bin.header, horizon: { ...g, [axis]: end } };
+      await assert.rejects(loadLightTerrain(async () => ({ ...bin, header })), /Invalid light terrain horizon bounds/);
+    }
+  }
 });
 
 test('one boot policy covers full/light overrides and retains legacy region opt-in without a second device probe', () => {

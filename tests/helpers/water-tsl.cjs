@@ -6,7 +6,8 @@ const assert = require('node:assert/strict');
 
 module.exports = function waterTSL(THREE, config) {
   const env = { world: [0, -2.2, 0], normal: [0, 1, 0], camera: [180, 12, 0], glow: 0.48,
-    footprint: 0.02, spatialRead: false, spatialDepth: 0, derivatives: 0, unsafe: 0, hashes: 0, gates: [] };
+    footprint: 0.02, spatialRead: false, spatialDepth: 0, derivatives: 0, unsafe: 0, hashes: 0, gates: [],
+    derivativeInputs: [], variables: {}, waveSample: [0.04, -0.03, 0.015, 0.2] };
   let epoch = 0;
   const arr = v => v instanceof N ? v.eval() : Array.isArray(v) ? v : [v];
   const binary = (a, b, fn) => {
@@ -36,7 +37,7 @@ module.exports = function waterTSL(THREE, config) {
     clamp(a, b) { return this.max(a).min(b); }
     greaterThan(b) { return new N(() => binary(this, b, (a, b) => +(a > b))); }
     normalize() { return this.div(new N(() => [Math.hypot(...this.eval()) || 1])); }
-    toVar() {
+    toVar(name) {
       const previous = env.spatialRead;
       env.spatialRead = false;
       let slot = this.eval().slice(), spatial = env.spatialRead;
@@ -45,6 +46,7 @@ module.exports = function waterTSL(THREE, config) {
       variable.dynamic = true;
       variable.assign = rhs => { slot = arr(rhs).slice(); spatial ||= env.spatialRead; };
       variable.addAssign = rhs => { slot = binary(slot, rhs, (a, b) => a + b); spatial ||= env.spatialRead; };
+      if (name) env.variables[name] = variable;
       return variable;
     }
   }
@@ -97,16 +99,19 @@ module.exports = function waterTSL(THREE, config) {
     fwidth: a => new N(() => {
       env.derivatives++;
       if (env.spatialDepth) env.unsafe++;
-      return arr(a).map(() => env.footprint);
+      const values = arr(a);
+      assert.ok(values.every(Number.isFinite), 'derivatives must receive finite coordinates, including misses');
+      env.derivativeInputs.push(values);
+      return values.map(() => env.footprint);
     }),
-    texture: () => wrap([0.04, -0.03, 0.015, 0.2]), getWaterWaveTexture: () => ({})
+    texture: () => new N(() => env.waveSample), getWaterWaveTexture: () => ({})
   };
   context.window = { NYC: { ...config, TSL: context } };
   context.THREE = { MeshStandardNodeMaterial: class { constructor(opts) { Object.assign(this, opts); } } };
   const reset = () => {
     epoch++;
     env.hashes = env.derivatives = env.unsafe = env.spatialDepth = 0;
-    env.spatialRead = false; env.gates = [];
+    env.spatialRead = false; env.gates = []; env.derivativeInputs = []; env.variables = {};
   };
   return { env, context, arr, reset };
 };

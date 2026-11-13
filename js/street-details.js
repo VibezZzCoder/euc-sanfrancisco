@@ -14,6 +14,7 @@ const {
   float,
   color,
   attribute,
+  varying,
   positionWorld,
   uniform,
   mod,
@@ -55,15 +56,17 @@ function createStreetSignBladeTexture(label) {
  * TSL 3-Aspect Traffic Signal Lens Material (Red y=5.78, Amber y=5.42, Green y=5.06 above the ground the mast stands on)
  * Driven by the shared signal clock and SIGNAL_TIMING (city-config.js), which js/traffic.js obeys.
  * `perInstance` (San Francisco, js/sf-street-details.js): the per-instance `signalBase` attribute holds the mast's
- * ground y, the junction's offset in the cycle (road-network.js signalOffset) and 1 for a group-0 (first phase) head,
- * else 0; `isAvenueHead` is then ignored.
+ * ground y, phase offset and legacy 1/0 for first/second phase. Complex junctions
+ * store groupCount>=3 in z and offset-group*avenueRed in y, in the SAME vec3.
+ * `isAvenueHead` is then ignored. Flat metadata prevents interpolation corruption.
  */
 function createTrafficSignalLensMaterial(isAvenueHead, clock, perInstance = false) {
   const { cycle, avenueAmber, avenueRed, streetAmber } = SIGNAL_TIMING;
   const mat = new THREE.MeshBasicNodeMaterial();
   mat.colorNode = Fn(() => {
-    const base = perInstance ? attribute('signalBase', 'vec3') : null;
-    const t = mod(perInstance ? clock.add(base.y) : clock, cycle);
+    const base = perInstance ? varying(attribute('signalBase', 'vec3'), 'vSignalBase').setInterpolation('flat') : null;
+    const t = mod(perInstance ? clock.add(base.y) : clock,
+      perInstance ? base.z.max(2).mul(avenueRed) : cycle);
     const wy = perInstance ? positionWorld.y.sub(base.x) : positionWorld.y;
     const isTopRed = step(5.60, wy);
     const isBottomGreen = float(1.0).sub(step(5.24, wy));
@@ -77,9 +80,12 @@ function createTrafficSignalLensMaterial(isAvenueHead, clock, perInstance = fals
     const stAmber = step(streetAmber, t);
     const aveRed = step(avenueRed, t);
     const stRed = float(1.0).sub(step(avenueRed, t));
-    const greenActive = perInstance ? mix(stGreen, aveGreen, base.z) : isAvenueHead ? aveGreen : stGreen;
-    const amberActive = perInstance ? mix(stAmber, aveAmber, base.z) : isAvenueHead ? aveAmber : stAmber;
-    const redActive = perInstance ? mix(stRed, aveRed, base.z) : isAvenueHead ? aveRed : stRed;
+    // Complex heads use the first-phase shape at their shifted time; no ID tables,
+    // extra instance attributes or buffers. Legacy z=0/1 selects exactly as before.
+    const firstPhase = perInstance ? base.z.min(1) : null;
+    const greenActive = perInstance ? mix(stGreen, aveGreen, firstPhase) : isAvenueHead ? aveGreen : stGreen;
+    const amberActive = perInstance ? mix(stAmber, aveAmber, firstPhase) : isAvenueHead ? aveAmber : stAmber;
+    const redActive = perInstance ? mix(stRed, aveRed, firstPhase) : isAvenueHead ? aveRed : stRed;
 
     const activeMask = isTopRed.mul(redActive)
       .add(isMidAmber.mul(amberActive))

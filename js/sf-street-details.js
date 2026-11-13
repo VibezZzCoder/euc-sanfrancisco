@@ -21,7 +21,7 @@
 const { THREE } = window.NYC;
 const { mergeGeometries } = window.NYC.Addons;
 const { uniform, color, mix, smoothstep } = window.NYC.TSL;
-const { blockAt, cityUniforms, CURB_H, createTrafficSignalLensMaterial } = window.NYC;
+const { blockAt, cityUniforms, CURB_H, SIGNAL_TIMING, createTrafficSignalLensMaterial } = window.NYC;
 
 const LAMP_STEP = 30;
 const TROLLEY_H = 5.6; // contact wires over the road
@@ -130,6 +130,52 @@ function streetContactsWorkspace() {
   };
 }
 
+// Construction-only overlap repair, BEFORE physical registration/publication.
+// The same existing matrices own drawing and contacts: no extra instances,
+// lookup table, attribute buffer or retained scratch.
+function separateSignalHeads(heads, lenses, arms, poles) {
+  for (let i = 1; i < heads.length; i++) {
+    const h = heads[i].elements;
+    let overlap = false;
+    for (let j = 0; j < i; j++) {
+      const other = heads[j].elements;
+      if (Math.abs(h[13] - other[13]) < 1.12 && Math.hypot(h[12] - other[12], h[14] - other[14]) < 0.55) {
+        overlap = true;
+        break;
+      }
+    }
+    if (!overlap) continue;
+    const a = arms[i].elements, p = poles[i].elements;
+    const vx = h[12] - p[12], vz = h[14] - p[14], length = Math.hypot(vx, vz);
+    // Keep the original pole-to-head line. The inherited reach clamp can leave
+    // an arm short at both ends; reconnect ONLY this overlapping assembly.
+    if (length < 1.35 || Math.abs(a[9]) > 1e-9) continue;
+    for (let step = 1; step <= 4; step++) {
+      const shift = step * 0.6;
+      if (length - shift < 0.75) break;
+      const dx = -vx * shift / length, dz = -vz * shift / length;
+      const x = h[12] + dx, z = h[14] + dz;
+      let clear = true;
+      for (let j = 0; j < heads.length; j++) {
+        if (j === i) continue;
+        const other = heads[j].elements;
+        if (Math.abs(h[13] - other[13]) < 1.12 && Math.hypot(x - other[12], z - other[14]) < 0.55) {
+          clear = false;
+          break;
+        }
+      }
+      if (!clear) continue;
+      h[12] = x; h[14] = z;
+      const l = lenses[i].elements;
+      l[12] = x; l[14] = z;
+      // Preserve yaw/cross-section/height; join the unchanged pole to the new head.
+      a[12] = (p[12] + x) / 2; a[14] = (p[14] + z) / 2;
+      a[8] = x - p[12]; a[10] = z - p[14];
+      break;
+    }
+  }
+}
+
 function buildSFStreetDetails(scene, network, buildingColliders = []) {
   const group = new THREE.Group();
   group.name = 'SFStreetDetails';
@@ -211,7 +257,11 @@ function buildSFStreetDetails(scene, network, buildingColliders = []) {
       push(mats.arm, spot.x + ux * reach / 2, base + POLE_H - 0.3, spot.z + uz * reach / 2, Math.atan2(ux, uz), 0.11, 0.11, reach);
       push(mats.head, spot.x + ux * reach, base + HEAD_Y, spot.z + uz * reach, facing, 1, 1, 1);
       mats.lens.push(dummy.matrix.clone());
-      mats.lensBase.push(base, n.signalOffset || 0, e.axisIndex === 0 ? 1 : 0);
+      // Same vec3/12 bytes per head. Legacy z=0/1 is unchanged; z>=3 is the
+      // group count, with y shifted to make this group's slot start at zero.
+      mats.lensBase.push(base,
+        (n.signalOffset || 0) - (n.groupCount > 2 ? e.axisIndex * SIGNAL_TIMING.avenueRed : 0),
+        n.groupCount > 2 ? n.groupCount : e.axisIndex === 0 ? 1 : 0);
     } else {
       stops++;
       push(mats.stopPole, spot.x, base + 1.15, spot.z, 0, 0.06, 2.3, 0.06);
@@ -516,6 +566,7 @@ function buildSFStreetDetails(scene, network, buildingColliders = []) {
     return mesh;
   };
   add(unitCyl, metal, mats.pole, 'SignalPoles');
+  separateSignalHeads(mats.head, mats.lens, mats.arm, mats.pole);
   add(unitBox, metal, mats.arm, 'SignalArms');
   add(headGeo, housing, mats.head, 'SignalHeads');
   add(lensGeo, lensMat, mats.lens, 'SignalLenses', false, { name: 'signalBase', data: mats.lensBase, size: 3 });

@@ -179,9 +179,9 @@ test('a transiently occupied teleport spot tries nearby checked spots on the sam
 test('city audio uses SF logical heights, including below-zero roads and hills, with optional city systems', () => {
   const previous = globalThis.window;
   globalThis.window = { NYC: { Terrain: { groundAt: () => 125 }, CURB_H: 0.15,
-    signalPhase: () => 'green', walkSignal: () => true } };
+    signalGroupPhase: () => 'green', walkSignal: () => true } };
   try {
-    const car = { edge: { to: {} }, x: 0, y: 125, z: 0, speed: 4, acc: 0, driver: { a: 1.6 }, bodyType: 'sedan', yaw: 0, yawOffset: 0 };
+    const car = { edge: { to: { signal: true, groupCount: 2 }, axisIndex: 0 }, x: 0, y: 125, z: 0, speed: 4, acc: 0, driver: { a: 1.6 }, bodyType: 'sedan', yaw: 0, yawOffset: 0 };
     const highway = { x: 0, y: -3, z: 0, v: 4, acc: 0, kind: 'sedan', yaw: 0 };
     const ped = { placed: true, x: 1, z: 1, v: 0, rig: { seed: 0.5, phase: 0 } };
     const trafficSystem = { cars: [car], peds: [ped], pedestrianGroundY: () => 125.15 };

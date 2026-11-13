@@ -1,0 +1,61 @@
+  // Night: the lit city seen along the reflected ray. Manhattan is a stack of boxes roughly inscribed in its shoreline;
+  // across the rivers stand the NJ & Queens / Brooklyn waterfronts, and around the park lakes Central Park's rim.
+  // Each is a row of lots with varied heights, lit windows, storefronts & riverside lamps, box-filtered by the unresolved
+  // wave slopes (vertically) & the foreshortened lateral slopes (horizontally), so distant lights smear into streaks.
+  // The boxes & shorelines come from the real geography (city-config.js): [minX, minZ, maxX, maxZ] slabs inscribed in
+  // the island ~1.1 km apart, the NJ shore west of it & the Brooklyn / Queens shore east of it every 900 m of z
+  const N = window.NYC;
+  const IB = N.ISLAND_BOUNDS;
+  const MANHATTAN_BOXES = [];
+  for (let z0 = IB.minZ; z0 < IB.maxZ - 1; z0 += 1140) {
+    const z1 = Math.min(IB.maxZ, z0 + 1140);
+    let x0 = -Infinity, x1 = Infinity;
+    for (let z = z0; z <= z1 + 0.1; z += (z1 - z0) / 8) {
+      const s = N.getIslandBoundsAtZ(z);
+      x0 = Math.max(x0, s.westX + 40);
+      x1 = Math.min(x1, s.eastX - 40);
+    }
+    if (x1 - x0 > 100) MANHATTAN_BOXES.push([Math.round(x0), Math.round(z0), Math.round(x1), Math.round(z1)]);
+  }
+  const crossings = (polys, z) => {
+    const xs = [];
+    for (const poly of polys) {
+      for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+        const a = poly[i], b = poly[j];
+        if ((a.z > z) !== (b.z > z)) xs.push(a.x + ((z - a.z) * (b.x - a.x)) / (b.z - a.z));
+      }
+    }
+    return xs;
+  };
+  const westShore = [], eastShore = [];
+  for (let z = IB.minZ - 900; z <= IB.maxZ + 900; z += 900) {
+    const s = N.getIslandBoundsAtZ(Math.max(IB.minZ, Math.min(IB.maxZ, z)));
+    const w = crossings([N.NJ_SHORELINE_POLYGON], z).filter((x) => x < s.westX - 150);
+    const e = crossings(N.LONG_ISLAND_POLYGONS || [], z).filter((x) => x > s.eastX + 100);
+    westShore.push([z, w.length ? Math.max(...w) : s.westX - 1300]);
+    eastShore.push([z, e.length ? Math.min(...e) : s.eastX + 900]);
+  }
+  // A shoreline x(z) through its control points, linear from one to the next. Built as a balanced sum of independent
+  // per-segment terms: a 17-deep chain of nested mix() nodes takes TSL's node build exponentially long (getNodeType
+  // recurses unmemoized into every path) and stalls the page
+  const shoreAt = (pts, z) => {
+    let terms = [];
+    for (let i = 1; i < pts.length; i++) {
+      const [za, xa] = pts[i - 1];
+      const [zb, xb] = pts[i];
+      const t = clamp(z.sub(za).div(zb - za), 0.0, 1.0);
+      const before = float(1.0).sub(step(zb, z));
+      const inSeg = i === 1 ? before : i === pts.length - 1 ? step(za, z) : step(za, z).mul(before);
+      terms.push(inSeg.mul(mix(float(xa), float(xb), t)));
+    }
+    while (terms.length > 1) {
+      const next = [];
+      for (let i = 0; i < terms.length; i += 2) next.push(i + 1 < terms.length ? terms[i].add(terms[i + 1]) : terms[i]);
+      terms = next;
+    }
+    return terms[0];
+  };
+  const CPB = N.CENTRAL_PARK_BOUNDS;
+  const zSt = (n) => N.streetZ(n);
+  // smoothstep over a band of numbered streets; none in San Francisco (streetZ is flat 0), where WGSL rejects low == high
+  const band = (a, b, v) => (a === b ? float(0.0) : smoothstep(a, b, v));
