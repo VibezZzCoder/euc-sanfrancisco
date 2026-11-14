@@ -124,6 +124,13 @@ matched Chromium phone emulation measured about **27 MiB less retained JavaScrip
 and first map. This is not an iPhone memory measurement. Some synthetic support-query batches cost slightly more;
 startup memory peaks remain substantial and lower retained memory is not a universal speedup.
 
+The Light-world paint update stores repeated road-marking styles in an exact shared palette. Measured native paint
+buffer allocations are **24.67 MiB smaller on both WebGL2 and WebGPU**, with pixel-identical selected comparisons of
+road lines, crosswalks, bike lanes and rail markings. Full world keeps the original representation. This is a graphics-
+buffer allocation saving, not measured physical GPU residency or iPhone memory: retained JavaScript plus backing
+storage was about 22–32 KB higher in the matched title/map samples. A fresh phone check was deferred by the owner to
+the published build; the earlier successful phone sessions describe the preceding versions.
+
 The porting follow-up corrects destination location labels, removes invented opposite-shore night reflections and
 preserves the Light horizon's true outer endpoints. Complex intersections now give each approach group its own full
 signal phase, shared by vehicle behavior, pedestrian WALK timing, visible lights and horn eligibility. Ordinary
@@ -185,7 +192,7 @@ This is an early release. Known issues include:
 - **Golden Gate Park** has sparse trees.
 - **Long first load:** around 30 seconds on a desktop, longer on slower devices. Brief hosting errors while
   downloading city data are retried automatically. Other assets can still receive transient hosting errors;
-  a reload may be needed. One module returned HTTP503 during the latest live check; an unchanged retry passed.
+  a reload may be needed. A module returned HTTP503 during an earlier live check; an unchanged retry passed.
 - **Dorkins:** chase, booking and map-marker behavior are still being tested across routes and devices; the map
   cannot show whether the officer is on a different elevation.
 - **Historical iPhone reloads, before Light world:** live HTTPS build `2026-11-10 0528Z` on the iPhone Air
@@ -216,8 +223,8 @@ This is an early release. Known issues include:
 - **Other phones, tablets and foldables:** emulated layouts do not establish physical-device stability. Android,
   foldable transitions and sustained-play/thermal behavior still need review. Lower graphics settings are not a guaranteed remedy.
 - **Firefox:** prior Linux WebGL2 checks pass. Experimental Linux Firefox WebGPU can run out of memory and stall at the
-  first frame after falling back to WebGL2. Fresh Firefox testing was explicitly waived for the compact-support and
-  porting-follow-up releases;
+  first frame after falling back to WebGL2. Fresh Firefox testing was explicitly waived for the compact-support,
+  porting-follow-up and paint-style releases;
   current macOS behavior still needs confirmation. Report the actual backend and fallback URL rather than assuming
   WebGPU succeeded.
 

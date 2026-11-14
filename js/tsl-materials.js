@@ -2118,16 +2118,26 @@ function createTerrainMaterial(maskTexture, mask) {
  * Strips thinner than ~1.5 px are widened on screen and faded to match (phone-wire AA) and dashes are box-filtered,
  * so distant markings fade out smoothly instead of breaking up and flickering. Worn, and dark & glossy in puddles.
  */
-function createRoadPaintMaterial() {
+function createRoadPaintMaterial(palette = null) {
   const mat = new THREE.MeshStandardNodeMaterial({
-    vertexColors: true,
+    vertexColors: !palette,
     transparent: true,
     depthWrite: false,
     metalness: 0.0
   });
   mat.mrtNode = _transparentEffectMRT; // SSR keeps seeing the asphalt (and its puddles) underneath
 
-  const paint = attribute('paint', 'vec3');
+  let paint = attribute('paint', 'vec3'), paintColor = null;
+  if (palette) {
+    // Decode in the VERTEX stage, then interpolate the original values, never the style ID. Values have already
+    // undergone the original Float32 attribute rounding; Vector3 avoids a second sRGB-to-linear conversion.
+    const colors = window.NYC.TSL.uniformArray(palette.map(p => new THREE.Vector3(p[0], p[1], p[2])), 'vec3');
+    const patterns = window.NYC.TSL.uniformArray(palette.map(p => new THREE.Vector2(p[3], p[4])), 'vec2');
+    const encoded = attribute('paintStyle', 'vec2'), id = window.NYC.TSL.uint(encoded.y);
+    const pattern = patterns.element(id);
+    paint = varying(vec3(encoded.x, pattern.x, pattern.y), 'vPaintDecoded');
+    paintColor = varying(vec4(colors.element(id), 1.0), 'vPaintColorDecoded');
+  }
   const side = attribute('side', 'vec2');
   const sideOffset = vec3(side.x, 0.0, side.y);
 
@@ -2156,6 +2166,9 @@ function createRoadPaintMaterial() {
 
   const wet = roadWetMasks(roadPuddleField(positionWorld.x, positionWorld.z)); // same pools & film as the asphalt
   mat.colorNode = vec3(mix(float(1.0), float(0.72), wet.y).mul(mix(float(1.0), float(0.86), wet.z)));
+  // Match pinned NodeMaterial.setupDiffuseColor: vec4(base) * smooth vec4(vertexColor), THEN opacity multiplication.
+  // Keeping alpha in the varying matters: interpolating an implicit constant 1 in the fragment is not identical.
+  if (paintColor) mat.colorNode = vec4(mat.colorNode).mul(paintColor);
   mat.roughnessNode = mix(mix(float(0.62), float(0.42), wet.z), float(0.2), wet.y);
   mat.aoNode = canyonSkyAONode();
 

@@ -30,6 +30,28 @@ const PAINT_MARGIN = 24;
 // Above this share of all leaves, drawing the complete stream beats compacting it.
 const PAINT_FULL_SHARE = 0.8;
 
+// Light-only exact style encoding. Bound the uniform palette before allocating vertex output; unfamiliar data
+// keeps the original attributes. Keys are Float32 BITS (not rounded decimal strings or THREE.Color conversions).
+// No strip/city references escape into the material. The pinned uniformArray vec3 writer canonicalizes z=-0,
+// so that exceptional blue component deliberately falls back rather than losing its original bit pattern.
+function collectPaintPalette(calls) {
+  const styles = [], keys = new Map(), values = new Float32Array(5), bits = new Uint32Array(values.buffer);
+  for (const call of calls) {
+    const col = call[5];
+    values[0] = col.r; values[1] = col.g; values[2] = col.b; values[3] = call[6]; values[4] = call[7];
+    if (!values.every(Number.isFinite) || values[3] <= 0 || values[4] < 0 || values[4] > 1
+      || Object.is(values[2], -0)) return null;
+    const key = bits.join(',');
+    let id = keys.get(key);
+    if (id === undefined) {
+      if (styles.length === 16) return null;
+      id = styles.length; keys.set(key, id); styles.push(Array.from(values));
+    }
+    call[10] = id;
+  }
+  return styles.length ? styles : null;
+}
+
 // One transparent render item, original vertices and original primitive order. Only its index prefix changes.
 // Defined outside buildRoadPaint so the render hook cannot retain the large temporary construction arrays.
 function installOrderedPaintCulling(mesh) {
@@ -198,7 +220,7 @@ function buildRoadPaint(scene, network) {
     calls.push([ax, az, bx, bz, w, col, period, duty, onIslands, lift]);
     vertexCount += 2 * (steps + 1); indexCount += 6 * steps;
   }
-  function emit(ax, az, bx, bz, w, col, period, duty, onIslands, lift) {
+  function emit(ax, az, bx, bz, w, col, period, duty, onIslands, lift, styleId) {
     const len = Math.hypot(bx - ax, bz - az);
     const sx = ((az - bz) / len) * w * 0.5;
     const sz = ((bx - ax) / len) * w * 0.5;
@@ -215,8 +237,12 @@ function buildRoadPaint(scene, network) {
         if (loaded) T.normalAt(px, pz, n);
         normal[vp * 3] = n.x; normal[vp * 3 + 1] = n.y; normal[vp * 3 + 2] = n.z;
         side[vp * 2] = sx * s; side[vp * 2 + 1] = sz * s;
-        paint[vp * 3] = u; paint[vp * 3 + 1] = period; paint[vp * 3 + 2] = duty;
-        colors[vp * 3] = col.r; colors[vp * 3 + 1] = col.g; colors[vp * 3 + 2] = col.b;
+        if (palette) {
+          paint[vp * 2] = u; paint[vp * 2 + 1] = styleId;
+        } else {
+          paint[vp * 3] = u; paint[vp * 3 + 1] = period; paint[vp * 3 + 2] = duty;
+          colors[vp * 3] = col.r; colors[vp * 3 + 1] = col.g; colors[vp * 3 + 2] = col.b;
+        }
         vp++;
       }
       if (k > 0) {
@@ -367,15 +393,19 @@ function buildRoadPaint(scene, network) {
     for (let i = 2; i < t.pts.length; i += 2) strip(t.pts[i - 2], t.pts[i - 1], t.pts[i], t.pts[i + 1], 0.05, SLOT, 1, 1, true, 0.006);
   }
 
+  const palette = window.NYC.worldTier === 'light' ? collectPaintPalette(calls) : null;
   position = new Float32Array(vertexCount * 3); normal = new Float32Array(vertexCount * 3); side = new Float32Array(vertexCount * 2);
-  paint = new Float32Array(vertexCount * 3); colors = new Float32Array(vertexCount * 3);
+  paint = new Float32Array(vertexCount * (palette ? 2 : 3));
+  if (!palette) colors = new Float32Array(vertexCount * 3);
   // Same index type three's setIndex(array) picks: Uint32 once any index reaches 65535.
   index = vertexCount - 1 >= 65535 ? new Uint32Array(indexCount) : new Uint16Array(indexCount);
   for (const c of calls) emit(...c);
   calls.length = 0;
   if (vp !== vertexCount || ip !== indexCount) throw new Error('Road paint sizing mismatch');
-  const material = createRoadPaintMaterial();
-  const attributes = { position: [position, 3], normal: [normal, 3], color: [colors, 3], side: [side, 2], paint: [paint, 3] };
+  const material = createRoadPaintMaterial(palette);
+  const attributes = { position: [position, 3], normal: [normal, 3], side: [side, 2] };
+  if (palette) attributes.paintStyle = [paint, 2];
+  else { attributes.color = [colors, 3]; attributes.paint = [paint, 3]; }
   function makeMesh(data, indices, name) {
     const geometry = new THREE.BufferGeometry();
     for (const [key, [values, size]] of Object.entries(data)) geometry.setAttribute(key, new THREE.BufferAttribute(values, size));
