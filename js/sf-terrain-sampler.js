@@ -89,9 +89,8 @@ class SparseIndex {
     // Count occupied buckets, then store all references in CSR typed arrays.
     // A JS array per bucket retains substantially more heap at regional scale.
     const itemLevels = new Uint8Array(items.length);
-    // Construction-only: bucket of every reference in visit order (replayed by the fill pass)
-    // and a one-cell memo per level. Same keys, bucket IDs and insertion order as before.
-    let refBuckets = new Uint32Array(Math.max(16, items.length)), refs = 0;
+    // One-cell memo per level. The fill pass reuses the completed grid instead of
+    // retaining/growing a bucket-ID replay buffer for every reference.
     const memos = [];
     for (let id = 0; id < items.length; id++) {
       const b = this.itemBounds(id);
@@ -113,8 +112,6 @@ class SparseIndex {
           }
           data.counts[bucket]++;
           this.references++;
-          if (refs === refBuckets.length) { const grown = new Uint32Array(refs * 2); grown.set(refBuckets); refBuckets = grown; }
-          refBuckets[refs++] = bucket;
         }
       }
     }
@@ -126,15 +123,23 @@ class SparseIndex {
       data.cursor = data.starts.slice(0, -1);
       delete data.counts;
     }
-    for (let id = 0, ref = 0; id < items.length; id++) {
+    for (let id = 0; id < items.length; id++) {
       const b = this.itemBounds(id), level = itemLevels[id], size = cell * 2 ** level, data = this.levels[level];
+      const memo = memos[level];
       for (let x = Math.floor(b.minX / size); x <= Math.floor(b.maxX / size); x++) {
         for (let z = Math.floor(b.minZ / size); z <= Math.floor(b.maxZ / size); z++) {
-          data.items[data.cursor[refBuckets[ref++]]++] = id;
+          // The grid is complete and bounds/visit order are unchanged. Keep the
+          // original bucket IDs and source-order CSR writes, including text keys.
+          let bucket;
+          if (x === memo.x && z === memo.z) bucket = memo.bucket;
+          else {
+            bucket = data.grid.get(key(x, z));
+            memo.x = x; memo.z = z; memo.bucket = bucket;
+          }
+          data.items[data.cursor[bucket]++] = id;
         }
       }
     }
-    refBuckets = null;
     for (const data of this.levels) if (data) {
       delete data.cursor;
       data.lastX = data.lastZ = NaN; data.lastBucket = undefined;

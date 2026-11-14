@@ -128,8 +128,16 @@ The Light-world paint update stores repeated road-marking styles in an exact sha
 buffer allocations are **24.67 MiB smaller on both WebGL2 and WebGPU**, with pixel-identical selected comparisons of
 road lines, crosswalks, bike lanes and rail markings. Full world keeps the original representation. This is a graphics-
 buffer allocation saving, not measured physical GPU residency or iPhone memory: retained JavaScript plus backing
-storage was about 22–32 KB higher in the matched title/map samples. A fresh phone check was deferred by the owner to
-the published build; the earlier successful phone sessions describe the preceding versions.
+storage was about 22–32 KB higher in the matched title/map samples. The owner subsequently played that published
+paint-style build on their phone and accepted it; session duration, backend and detailed cases were not specified.
+
+Both world tiers now build the same support indexes without a growing temporary bucket-replay array. This removes
+the main index's **26.69 MiB scratch allocation**, including **40.03 MiB of old/new replay-buffer overlap** during its
+last growth. Those are construction-allocation quantities, not a guaranteed whole-browser peak reduction. Separate
+Chromium phone-emulation pairs sampled backing-storage peaks 14.4–14.7 MiB lower, but process/heap peaks were mixed
+and settled title/map memory was nearly unchanged. The replacement adds construction lookups; one diagnostic pair
+measured about 0.29 seconds more Light index-construction work. Riding/collision queries and index data stay the same.
+A fresh phone check for this construction change was deferred by the owner to the published build.
 
 The porting follow-up corrects destination location labels, removes invented opposite-shore night reflections and
 preserves the Light horizon's true outer endpoints. Complex intersections now give each approach group its own full
@@ -218,13 +226,15 @@ This is an early release. Known issues include:
   separate checks. No device-memory measurement or controlled before/after stability comparison was made.
   The owner subsequently retested the porting-follow-up preview with rotations, teleporting and rider switching and
   reported no reboots, then approved publication. That follow-up session's duration was not specified.
+  They later accepted the published paint-style build after phone play, with duration, backend and detailed cases
+  unspecified. That feedback predates this support-index construction update.
 - **iOS viewport recovery:** during that session, one corner-zoom/page-shift incident immediately corrected itself.
   This supports the existing recovery fix; it does not mean the initial jump can never occur. Report persistent offsets.
 - **Other phones, tablets and foldables:** emulated layouts do not establish physical-device stability. Android,
   foldable transitions and sustained-play/thermal behavior still need review. Lower graphics settings are not a guaranteed remedy.
 - **Firefox:** prior Linux WebGL2 checks pass. Experimental Linux Firefox WebGPU can run out of memory and stall at the
   first frame after falling back to WebGL2. Fresh Firefox testing was explicitly waived for the compact-support,
-  porting-follow-up and paint-style releases;
+  porting-follow-up, paint-style and support-index construction releases;
   current macOS behavior still needs confirmation. Report the actual backend and fallback URL rather than assuming
   WebGPU succeeded.
 
