@@ -33,7 +33,7 @@ function load(code, numeric = null, extra = {}) {
   const nodes = numeric?.tsl ?? TSL;
   const namespace = { THREE: numeric ? { ...THREE, MeshStandardNodeMaterial: class { constructor(options) { this.userData = {}; Object.assign(this, options); } } } : THREE,
     TSL: nodes, Addons, cityUniforms: { uInteriorGlow: nodes.float(.8) }, ...extra };
-  vm.runInNewContext(code, { window: { NYC: namespace }, console, Math });
+  vm.runInNewContext(code, { window: { NYC: namespace }, console, Math, URLSearchParams });
   return Object.assign(namespace, numeric);
 }
 const actors = load(source['actor-models']);

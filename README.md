@@ -137,7 +137,17 @@ last growth. Those are construction-allocation quantities, not a guaranteed whol
 Chromium phone-emulation pairs sampled backing-storage peaks 14.4–14.7 MiB lower, but process/heap peaks were mixed
 and settled title/map memory was nearly unchanged. The replacement adds construction lookups; one diagnostic pair
 measured about 0.29 seconds more Light index-construction work. Riding/collision queries and index data stay the same.
-A fresh phone check for this construction change was deferred by the owner to the published build.
+A fresh phone check for this construction change was deferred by the owner to the published build. The owner then
+reported no apparent issues after playing it; session duration, backend, settings and detailed cases were not specified.
+
+The CPU source-copy update releases the duplicate quantized core terrain source and uploaded ground/leaf texture
+pixels while keeping exact on-demand reconstruction. Matched Chromium Light-world tests measured **28.04–28.12 MiB
+less retained JavaScript plus backing storage** at title and first map on WebGL2 and WebGPU. Every terrain code and
+texture mip reconstructs byte-for-byte; selected frames stay identical after forced reuploads and native texture
+recreation. This is a retained CPU-memory result, not measured iPhone memory or native GPU residency. Sampled boot
+peaks remain mixed. Certification adds one startup pass (about 0.14 seconds in one desktop diagnostic); explicit source
+reads or reuploads can restore CPU copies and incur reconstruction work. The owner deferred fresh phone testing for
+this update until publication; the earlier successful sessions describe the preceding versions.
 
 The porting follow-up corrects destination location labels, removes invented opposite-shore night reflections and
 preserves the Light horizon's true outer endpoints. Complex intersections now give each approach group its own full
@@ -227,14 +237,16 @@ This is an early release. Known issues include:
   The owner subsequently retested the porting-follow-up preview with rotations, teleporting and rider switching and
   reported no reboots, then approved publication. That follow-up session's duration was not specified.
   They later accepted the published paint-style build after phone play, with duration, backend and detailed cases
-  unspecified. That feedback predates this support-index construction update.
+  unspecified. They subsequently reported no apparent issues after playing the published support-index construction
+  update; duration, backend and detailed cases were again unspecified.
+  That feedback predates the CPU source-copy update, whose fresh phone check is deferred to the published build.
 - **iOS viewport recovery:** during that session, one corner-zoom/page-shift incident immediately corrected itself.
   This supports the existing recovery fix; it does not mean the initial jump can never occur. Report persistent offsets.
 - **Other phones, tablets and foldables:** emulated layouts do not establish physical-device stability. Android,
   foldable transitions and sustained-play/thermal behavior still need review. Lower graphics settings are not a guaranteed remedy.
 - **Firefox:** prior Linux WebGL2 checks pass. Experimental Linux Firefox WebGPU can run out of memory and stall at the
   first frame after falling back to WebGL2. Fresh Firefox testing was explicitly waived for the compact-support,
-  porting-follow-up, paint-style and support-index construction releases;
+  porting-follow-up, paint-style, support-index construction and CPU source-copy releases;
   current macOS behavior still needs confirmation. Report the actual backend and fallback URL rather than assuming
   WebGPU succeeded.
 

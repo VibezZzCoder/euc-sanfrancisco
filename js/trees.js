@@ -187,7 +187,7 @@ function sprayBounds(prims) {
   return { minX, maxX, minY, maxY };
 }
 
-function createLeafAtlas() {
+function createLeafAtlasPixels() {
   const ctx2d = () => {
     const c = document.createElement('canvas');
     c.width = c.height = ATLAS_SIZE;
@@ -313,14 +313,24 @@ function createLeafAtlas() {
     level0[i + 2] = data[i + 2];
     level0[i + 3] = mask[i + 3];
   }
+  return { level0, mipmaps: coverageMips(level0, ATLAS_SIZE, 2), tileMeters };
+}
+
+function createLeafAtlas() {
+  const { level0, mipmaps, tileMeters } = createLeafAtlasPixels();
   const tex = new THREE.DataTexture(level0, ATLAS_SIZE, ATLAS_SIZE, THREE.RGBAFormat, THREE.UnsignedByteType);
-  tex.mipmaps = coverageMips(level0, ATLAS_SIZE, 2);
+  tex.mipmaps = mipmaps;
   tex.generateMipmaps = false;
   tex.minFilter = THREE.LinearMipmapLinearFilter;
   tex.magFilter = THREE.LinearFilter;
   tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
   tex.anisotropy = 4;
   tex.colorSpace = THREE.NoColorSpace;
+  if (new URLSearchParams(globalThis.location?.search || '').get('sourcecopies') !== 'keep')
+    window.NYC.retainRegenerableTexture?.(tex, () => {
+      const fresh = createLeafAtlasPixels();
+      return [fresh.level0, ...fresh.mipmaps.map(m => m.data)];
+    });
   tex.needsUpdate = true;
   tex.name = 'TreeLeafAtlas';
   return { texture: tex, tileMeters };

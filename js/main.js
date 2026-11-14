@@ -6,6 +6,7 @@ import { pass, mrt, output, normalView, positionView, metalness, roughness, vec2
 import { ssr } from 'three/addons/tsl/display/SSRNode.js';
 import { ClusteredLighting } from 'three/addons/lighting/ClusteredLighting.js';
 import { releaseStaticGeometryCopies, staticSfMeshes, installSfGeometryResidency } from './geometry-residency.js';
+import { releaseSfTerrainSource } from './source-residency.js';
 import { ThirdPersonControllerManager } from './controllers.js';
 import { CameraSystem, CAMERA_PRESETS } from './cameras.js';
 import { TouchControls } from './touch-controls.js';
@@ -288,6 +289,8 @@ export async function initApp(startup) {
   // Static construction is finished. The sampler owns exact packed support and
   // shared bodies; retire the build registry only after full manager creation.
   controllerManager.eucSampler.releaseConstructionRegistry(city.ride);
+  // Core construction is complete; preserve the quantized fallback via exact on-demand reconstruction.
+  if (params.get('sourcecopies') !== 'keep') releaseSfTerrainSource(city.DATA, city.Terrain);
   stopRuntime = async () => {
     controllerManager.setInputEnabled(false);
     try { await compileWork; } catch { /* Drain shader readers before the rig. */ }

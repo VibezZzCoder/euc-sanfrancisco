@@ -105,8 +105,21 @@ function expectedUnion(f, raw) {
 }
 
 test('geometry/atlas and native trunk construction remain exact against the pinned pre-union source', differential, () => {
-  const construction = code => code.slice(code.indexOf('const { THREE }'), code.indexOf('// 5. TREE FIELD'));
-  assert.equal(construction(source), construction(baseline));
+  const construction = code => {
+    let prefix = code.slice(code.indexOf('const { THREE }'), code.indexOf('// 5. TREE FIELD'));
+    if (code === source) for (const [from, to] of [
+      ['function createLeafAtlasPixels() {', 'function createLeafAtlas() {'],
+      ['  return { level0, mipmaps: coverageMips(level0, ATLAS_SIZE, 2), tileMeters };\n}\n\nfunction createLeafAtlas() {\n  const { level0, mipmaps, tileMeters } = createLeafAtlasPixels();\n', ''],
+      ['  tex.mipmaps = mipmaps;', '  tex.mipmaps = coverageMips(level0, ATLAS_SIZE, 2);'],
+      ["  if (new URLSearchParams(globalThis.location?.search || '').get('sourcecopies') !== 'keep')\n    window.NYC.retainRegenerableTexture?.(tex, () => {\n      const fresh = createLeafAtlasPixels();\n      return [fresh.level0, ...fresh.mipmaps.map(m => m.data)];\n    });\n", ''],
+    ]) {
+      // Reverse only the exact CPU-source ownership seam; geometry/pixel algorithms still match the old pin.
+      assert.equal(prefix.split(from).length, 2, 'unique source-residency adaptation');
+      prefix = prefix.replace(from, to);
+    }
+    return prefix;
+  };
+  assert.equal(hash(construction(source)), hash(construction(baseline)), 'unchanged pixel/geometry construction');
   const sites = fixture(), a = field(source, sites), b = field(baseline, sites);
   try {
     assert.deepEqual(a.stats, b.stats); assert.equal(hash(JSON.stringify(a.bodies)), hash(JSON.stringify(b.bodies)));

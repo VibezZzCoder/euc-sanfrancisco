@@ -10,6 +10,7 @@ import { SunLight } from 'three/addons/lights/SunLight.js';
 import { SunLightNode } from 'three/addons/lights/SunLightNode.js';
 import { ClusteredLighting } from 'three/addons/lighting/ClusteredLighting.js';
 import { installSunShadowRetentionFix } from './sun-shadow-retention.js';
+import { retainRegenerableTexture } from './source-residency.js';
 
 // Before any material builds: cascaded sun shadows must not keep each material's node builder alive.
 installSunShadowRetentionFix();
@@ -28,7 +29,7 @@ let initialization;
 export function initializeCity(startup) {
   if (initialization) return initialization;
   initialization = (async () => {
-    window.NYC = { THREE, TSL, PostFX: { bloom, ssr },
+    window.NYC = { THREE, TSL, retainRegenerableTexture, PostFX: { bloom, ssr },
       Addons: { mergeGeometries, mergeVertices, SkyMesh, SunLight, SunLightNode, ClusteredLighting } };
     startup.phase('city-scripts');
     // Fetch concurrently; evaluation below stays strictly ordered and every load has a rejection path.

@@ -158,12 +158,19 @@ function groundHeightNode(xz) {
   const T = window.NYC.Terrain;
   if (!T || !T.loaded) return float(0.0);
   if (!_groundTexture) {
-    const half = new Uint16Array(T.heights.length);
-    for (let k = 0; k < half.length; k++) half[k] = THREE.DataUtils.toHalfFloat(T.heights[k]);
+    const heights = T.heights;
+    const makeHalf = () => {
+      const half = new Uint16Array(heights.length);
+      for (let k = 0; k < half.length; k++) half[k] = THREE.DataUtils.toHalfFloat(heights[k]);
+      return half;
+    };
+    const half = makeHalf();
     _groundTexture = new THREE.DataTexture(half, T.w, T.h, THREE.RedFormat, THREE.HalfFloatType);
     _groundTexture.magFilter = THREE.LinearFilter;
     _groundTexture.minFilter = THREE.LinearFilter;
     _groundTexture.generateMipmaps = false;
+    if (new URLSearchParams(globalThis.location?.search || '').get('sourcecopies') !== 'keep')
+      window.NYC.retainRegenerableTexture?.(_groundTexture, () => [makeHalf()]);
     _groundTexture.needsUpdate = true;
   }
   // texel centres sit on the samples: sample (i, j) at uv ((i + 0.5) / w, (j + 0.5) / h)
